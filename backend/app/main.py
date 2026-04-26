@@ -3,6 +3,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 import os
 
+from app.db import supabase
+
 load_dotenv()
 
 app = FastAPI(title="Altheon API", version="0.1.0")
@@ -15,10 +17,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.get("/")
 def root():
     return {"status": "Altheon API is running"}
 
+
 @app.get("/health")
 def health():
-    return {"status": "healthy", "version": "0.1.0"}
+    supabase.table("clinics").select("id").limit(1).execute()
+    return {"status": "ok", "supabase": "connected"}
