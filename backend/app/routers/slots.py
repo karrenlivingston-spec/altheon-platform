@@ -2,6 +2,7 @@ from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+import pytz
 
 from app.db import supabase
 
@@ -40,15 +41,56 @@ def get_slots(
 
     day_start = datetime.combine(target_date, time(0, 0), tzinfo=timezone.utc)
     day_end = day_start + timedelta(days=1)
-    window_start = datetime.combine(target_date, time(9, 0), tzinfo=timezone.utc)
-    window_end = datetime.combine(target_date, time(17, 0), tzinfo=timezone.utc)
     slot_duration = timedelta(minutes=duration_minutes)
+    day_of_week = target_date.isoweekday() % 7
 
-    if window_start + slot_duration > window_end:
+    try:
+        location_response = (
+            supabase.table("locations")
+            .select("timezone")
+            .eq("clinic_id", clinic_id)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(location_response)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    locations = location_response.data or []
+    clinic_timezone_name = locations[0].get("timezone") if locations else None
+    if not clinic_timezone_name:
+        clinic_timezone_name = "UTC"
+
+    try:
+        clinic_timezone = pytz.timezone(clinic_timezone_name)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Invalid clinic timezone: {clinic_timezone_name}") from exc
+
+    try:
+        availability_response = (
+            supabase.table("availability_rules")
+            .select("start_time,end_time,buffer_minutes")
+            .eq("clinic_id", clinic_id)
+            .eq("clinician_id", clinician_id)
+            .eq("is_active", True)
+            .eq("day_of_week", day_of_week)
+            .execute()
+        )
+        _handle_supabase_error(availability_response)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    rules = availability_response.data or []
+    if not rules:
         return []
 
     try:
-        response = (
+        appointments_response = (
             supabase.table("appointments")
             .select("start_time,end_time")
             .eq("clinic_id", clinic_id)
@@ -58,14 +100,14 @@ def get_slots(
             .lt("start_time", day_end.isoformat())
             .execute()
         )
-        _handle_supabase_error(response)
+        _handle_supabase_error(appointments_response)
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     booked_ranges = []
-    for row in response.data or []:
+    for row in appointments_response.data or []:
         start_raw = row.get("start_time")
         end_raw = row.get("end_time")
         if not start_raw or not end_raw:
@@ -75,21 +117,46 @@ def get_slots(
         booked_ranges.append((start_dt, end_dt))
 
     available_slots = []
-    current_start = window_start
-    while current_start + slot_duration <= window_end:
-        current_end = current_start + slot_duration
-        overlaps = any(
-            current_start < booked_end and current_end > booked_start
-            for booked_start, booked_end in booked_ranges
-        )
-        if not overlaps:
-            available_slots.append(
-                {
-                    "start_time": current_start.isoformat(),
-                    "end_time": current_end.isoformat(),
-                    "label": _format_slot_label(current_start),
-                }
+    for rule in rules:
+        start_raw = rule.get("start_time")
+        end_raw = rule.get("end_time")
+        if not start_raw or not end_raw:
+            continue
+
+        try:
+            rule_start_time = time.fromisoformat(start_raw)
+            rule_end_time = time.fromisoformat(end_raw)
+        except ValueError:
+            continue
+
+        buffer_minutes = rule.get("buffer_minutes") or 0
+        slot_step = timedelta(minutes=duration_minutes + buffer_minutes)
+        if slot_step.total_seconds() <= 0:
+            continue
+
+        window_start_local = clinic_timezone.localize(datetime.combine(target_date, rule_start_time))
+        window_end_local = clinic_timezone.localize(datetime.combine(target_date, rule_end_time))
+        if window_start_local + slot_duration > window_end_local:
+            continue
+
+        current_start_local = window_start_local
+        while current_start_local + slot_duration <= window_end_local:
+            current_end_local = current_start_local + slot_duration
+            current_start_utc = current_start_local.astimezone(timezone.utc)
+            current_end_utc = current_end_local.astimezone(timezone.utc)
+
+            overlaps = any(
+                current_start_utc < booked_end and current_end_utc > booked_start
+                for booked_start, booked_end in booked_ranges
             )
-        current_start += slot_duration
+            if not overlaps:
+                available_slots.append(
+                    {
+                        "start_time": current_start_utc.isoformat(),
+                        "end_time": current_end_utc.isoformat(),
+                        "label": _format_slot_label(current_start_local),
+                    }
+                )
+            current_start_local += slot_step
 
     return available_slots
