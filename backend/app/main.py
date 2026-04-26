@@ -4,6 +4,7 @@ from dotenv import load_dotenv
 import os
 
 from app.db import supabase
+from app.routers import slots, appointments
 
 load_dotenv()
 
@@ -16,6 +17,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(slots.router, prefix="/slots", tags=["slots"])
+app.include_router(appointments.router, prefix="/appointments", tags=["appointments"])
 
 
 @app.get("/")
