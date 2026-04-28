@@ -42,17 +42,32 @@ def patient_lookup(phone: str, clinic_id: str):
 
         patient_resp = (
             supabase.table("patients")
-            .select("id, first_name, last_name")
-            .eq("phone", normalized_phone)
+            .select("id, first_name, last_name, phone")
+            .execute()
+        )
+        patients = patient_resp.data or []
+        patient = next(
+            (
+                row
+                for row in patients
+                if re.sub(r"\D", "", str(row.get("phone") or "")) == normalized_phone
+            ),
+            None,
+        )
+        if not patient:
+            return {"found": False}
+
+        access_resp = (
+            supabase.table("patient_clinic_access")
+            .select("patient_id")
+            .eq("patient_id", patient["id"])
             .eq("clinic_id", clinic_id)
             .limit(1)
             .execute()
         )
-        patients = patient_resp.data or []
-        if not patients:
+        access_rows = access_resp.data or []
+        if not access_rows:
             return {"found": False}
-
-        patient = patients[0]
         appt_resp = (
             supabase.table("appointments")
             .select("start_time")
