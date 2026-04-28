@@ -30,7 +30,7 @@ def get_slots_for_date(clinic_id: str, clinician_id: Optional[str], target_date:
     clinic_tz = pytz.timezone(tz_name)
 
     # Get availability rules for this day of week
-    day_of_week = target_date.strftime("%A").lower()  # e.g. "thursday"
+    day_of_week = target_date.weekday()  # 0=Monday .. 6=Sunday
     rules_query = (
         supabase.table("availability_rules")
         .select("*")
