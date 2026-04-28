@@ -109,19 +109,17 @@ def get_next_available(
     days_ahead: int = Query(default=14),
 ):
     """
-    Returns the next available appointment slots across upcoming open days.
-    Starts from today, scans up to `days_ahead` days, returns up to `limit` slots.
+    Returns slots for the next single available day.
+    Starts from today, scans up to `days_ahead` days, and returns up to `limit` slots
+    from the first day that has any availability.
     The agent never needs to ask the patient for a date — it just reads what this returns.
     """
     today = datetime.utcnow().date()
-    all_slots = []
 
     for offset in range(days_ahead):
         target_date = today + timedelta(days=offset)
         day_slots = get_slots_for_date(clinic_id, clinician_id, target_date, duration_minutes)
-        all_slots.extend(day_slots)
+        if day_slots:
+            return day_slots[:limit]
 
-        if len(all_slots) >= limit:
-            break
-
-    return all_slots[:limit]
+    return []
