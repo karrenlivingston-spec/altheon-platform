@@ -98,7 +98,7 @@ def get_slots_for_date(clinic_id: str, clinician_id: str | None, target_date: da
     return slots
 
 
-@router.get("/next-available")
+@router.get("")
 def get_next_available(
     clinic_id: str = Query(...),
     clinician_id: str | None = Query(default=None),
