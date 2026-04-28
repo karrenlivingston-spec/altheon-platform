@@ -88,7 +88,7 @@ def get_slots_for_date(clinic_id: str, clinician_id: Optional[str], target_date:
                     break
 
             if not overlap:
-                label = slot_start_local.strftime("%A, %b %-d at %-I:%M %p")
+                label = slot_start_local.strftime("%A, %B %-d at %-I:%M %p")
                 slots.append({
                     "start_time": slot_start_utc.isoformat(),
                     "end_time": slot_end_utc.isoformat(),

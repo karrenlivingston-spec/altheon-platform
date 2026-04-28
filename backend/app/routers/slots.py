@@ -24,7 +24,7 @@ def _format_slot_label(slot_start: datetime) -> str:
     if hour_12 == 0:
         hour_12 = 12
     am_pm = "AM" if hour_24 < 12 else "PM"
-    return f"{slot_start.strftime('%A, %b')} {day} at {hour_12}:{minute:02d} {am_pm}"
+    return f"{slot_start.strftime('%A, %B')} {day} at {hour_12}:{minute:02d} {am_pm}"
 
 
 @router.get("")
