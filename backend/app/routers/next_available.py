@@ -1,3 +1,5 @@
+from typing import Optional
+
 from fastapi import APIRouter, Query, HTTPException
 from datetime import date, datetime, timedelta
 import pytz
@@ -7,7 +9,7 @@ from app.db import supabase
 router = APIRouter()
 
 
-def get_slots_for_date(clinic_id: str, clinician_id: str | None, target_date: date, duration_minutes: int):
+def get_slots_for_date(clinic_id: str, clinician_id: Optional[str], target_date: date, duration_minutes: int):
     """
     Shared slot generation logic — same as /slots but callable internally.
     Returns a list of slot dicts: {start_time, end_time, label}
@@ -101,7 +103,7 @@ def get_slots_for_date(clinic_id: str, clinician_id: str | None, target_date: da
 @router.get("")
 def get_next_available(
     clinic_id: str = Query(...),
-    clinician_id: str | None = Query(default=None),
+    clinician_id: Optional[str] = Query(default=None),
     duration_minutes: int = Query(default=60),
     limit: int = Query(default=8),
     days_ahead: int = Query(default=14),
@@ -111,7 +113,7 @@ def get_next_available(
     Starts from today, scans up to `days_ahead` days, returns up to `limit` slots.
     The agent never needs to ask the patient for a date — it just reads what this returns.
     """
-    today = date.today()
+    today = datetime.utcnow().date()
     all_slots = []
 
     for offset in range(days_ahead):
