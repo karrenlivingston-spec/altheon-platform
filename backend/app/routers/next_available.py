@@ -107,6 +107,7 @@ def get_next_available(
     duration_minutes: int = Query(default=60),
     limit: int = Query(default=8),
     days_ahead: int = Query(default=14),
+    after_date: Optional[str] = Query(default=None),
 ):
     """
     Returns slots for the next single available day.
@@ -115,9 +116,17 @@ def get_next_available(
     The agent never needs to ask the patient for a date — it just reads what this returns.
     """
     today = datetime.utcnow().date()
+    scan_start = today
+
+    if after_date:
+        try:
+            parsed_after_date = datetime.strptime(after_date, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="after_date must be in YYYY-MM-DD format") from exc
+        scan_start = max(today, parsed_after_date + timedelta(days=1))
 
     for offset in range(days_ahead):
-        target_date = today + timedelta(days=offset)
+        target_date = scan_start + timedelta(days=offset)
         day_slots = get_slots_for_date(clinic_id, clinician_id, target_date, duration_minutes)
         if day_slots:
             return day_slots[:limit]
