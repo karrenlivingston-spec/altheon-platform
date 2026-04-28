@@ -73,7 +73,7 @@ def patient_lookup(phone: str, clinic_id: str):
             .select("start_time")
             .eq("patient_id", patient["id"])
             .eq("clinic_id", clinic_id)
-            .eq("status", "confirmed")
+            .in_("status", ["scheduled", "confirmed"])
             .order("start_time", desc=True)
             .limit(1)
             .execute()
