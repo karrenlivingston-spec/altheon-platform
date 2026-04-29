@@ -6,6 +6,7 @@ import re
 
 from app.db import supabase
 from app.routers import slots, appointments, next_available
+from app.routes.legal import router as legal_router
 
 load_dotenv()
 
@@ -22,6 +23,7 @@ app.add_middleware(
 app.include_router(slots.router, prefix="/slots", tags=["slots"])
 app.include_router(appointments.router, prefix="/appointments", tags=["appointments"])
 app.include_router(next_available.router, prefix="/next-available", tags=["next-available"])
+app.include_router(legal_router)
 
 
 @app.get("/")
