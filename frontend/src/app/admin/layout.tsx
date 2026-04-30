@@ -133,7 +133,7 @@ function AdminAuthenticatedShell({
               <img
                 src="/altheon-logo-full.png"
                 alt="Altheon"
-                style={{ width: "140px", height: "auto", display: "block" }}
+                style={{ width: "180px", height: "auto", display: "block" }}
               />
             </div>
           </div>
