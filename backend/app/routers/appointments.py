@@ -1,11 +1,35 @@
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.db import supabase
 
 router = APIRouter()
+
+
+@router.get("")
+def list_appointments(clinic_id: str = Query(...)):
+    """Return all appointments for a clinic with patient names and treatment type name."""
+    try:
+        resp = (
+            supabase.table("appointments")
+            .select(
+                "id, clinic_id, patient_id, clinician_id, location_id, treatment_type_id, "
+                "start_time, end_time, status, notes, created_at, "
+                "patients(first_name, last_name), treatment_types(name)"
+            )
+            .eq("clinic_id", clinic_id)
+            .order("start_time")
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return resp.data or []
 
 
 class CreateAppointmentRequest(BaseModel):
