@@ -32,6 +32,30 @@ def list_appointments(clinic_id: str = Query(...)):
     return resp.data or []
 
 
+@router.patch("/{appointment_id}/status")
+def update_appointment_status(
+    appointment_id: str,
+    body: dict,
+    clinic_id: str = Query(...),
+):
+    status = body.get("status")
+    if status not in ["scheduled", "checked_in", "completed", "cancelled"]:
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    result = (
+        supabase.table("appointments")
+        .update({"status": status})
+        .eq("id", appointment_id)
+        .eq("clinic_id", clinic_id)
+        .execute()
+    )
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    return result.data[0]
+
+
 class CreateAppointmentRequest(BaseModel):
     clinic_id: str
     clinician_id: str

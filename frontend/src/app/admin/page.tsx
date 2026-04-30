@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 import {
+  addDaysToYmd,
   formatTimeEastern,
   getEasternYMD,
   getThisWeekRangeEasternYmd,
@@ -40,10 +41,6 @@ function patientName(row: AppointmentRow): string {
   const ln = p.last_name ?? "";
   const s = `${fn} ${ln}`.trim();
   return s || "—";
-}
-
-function serviceName(row: AppointmentRow): string {
-  return row.treatment_types?.name ?? "—";
 }
 
 export default function AdminOverviewPage() {
@@ -134,79 +131,9 @@ export default function AdminOverviewPage() {
 
       <section>
         <h2 className="mb-4 text-lg font-semibold text-neutral-900">
-          {"Today's schedule"}
+          Next 3 Days
         </h2>
-        <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
-          {todayAppointments.length === 0 && !loading ? (
-            <p className="p-8 text-center text-sm text-neutral-600">
-              No appointments scheduled for today.
-            </p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-neutral-200 text-left text-sm">
-                <thead className="bg-neutral-50">
-                  <tr>
-                    <th className="px-4 py-3 font-medium text-neutral-700">
-                      Time
-                    </th>
-                    <th className="px-4 py-3 font-medium text-neutral-700">
-                      Patient Name
-                    </th>
-                    <th className="px-4 py-3 font-medium text-neutral-700">
-                      Clinician
-                    </th>
-                    <th className="px-4 py-3 font-medium text-neutral-700">
-                      Service
-                    </th>
-                    <th className="px-4 py-3 font-medium text-neutral-700">
-                      Status
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-neutral-100">
-                  {loading ? (
-                    <tr>
-                      <td
-                        colSpan={5}
-                        className="px-4 py-8 text-center text-neutral-500"
-                      >
-                        Loading…
-                      </td>
-                    </tr>
-                  ) : (
-                    [...todayAppointments]
-                      .sort(
-                        (a, b) =>
-                          new Date(a.start_time).getTime() -
-                          new Date(b.start_time).getTime(),
-                      )
-                      .map((row) => (
-                        <tr key={row.id} className="hover:bg-neutral-50/80">
-                          <td className="whitespace-nowrap px-4 py-3 text-neutral-900">
-                            {formatTimeEastern(row.start_time)}
-                          </td>
-                          <td className="px-4 py-3 text-neutral-900">
-                            {patientName(row)}
-                          </td>
-                          <td className="px-4 py-3 text-neutral-900">
-                            {clinicianLabel(row.clinician_id)}
-                          </td>
-                          <td className="px-4 py-3 text-neutral-900">
-                            {serviceName(row)}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className="inline-flex rounded-full border border-[#2D5E3F]/25 bg-[#2D5E3F]/10 px-2.5 py-0.5 text-xs font-medium text-[#2D5E3F]">
-                              {row.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+        <MiniCalendarStrip appointments={appointments} loading={loading} />
       </section>
     </div>
   );
@@ -219,6 +146,84 @@ function StatCard({ label, value }: { label: string; value: string }) {
         {value}
       </p>
       <p className="mt-2 text-sm font-medium text-neutral-600">{label}</p>
+    </div>
+  );
+}
+
+function MiniCalendarStrip({
+  appointments,
+  loading,
+}: {
+  appointments: AppointmentRow[];
+  loading: boolean;
+}) {
+  const todayYmd = getEasternYMD(new Date());
+  const dayKeys = [todayYmd, 1, 2].map((d) =>
+    typeof d === "string" ? d : addDaysToYmd(todayYmd, d),
+  );
+
+  return (
+    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+      {dayKeys.map((ymd) => {
+        const rows = appointments
+          .filter((a) => getEasternYMD(new Date(a.start_time)) === ymd)
+          .sort(
+            (a, b) =>
+              new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
+          );
+        const label = new Intl.DateTimeFormat("en-US", {
+          timeZone: "America/New_York",
+          weekday: "short",
+          month: "numeric",
+          day: "numeric",
+        }).format(
+          new Date(
+            Date.UTC(
+              Number(ymd.slice(0, 4)),
+              Number(ymd.slice(5, 7)) - 1,
+              Number(ymd.slice(8, 10)),
+              15,
+              0,
+              0,
+            ),
+          ),
+        );
+
+        return (
+          <div
+            key={ymd}
+            className="rounded-lg border border-neutral-200 bg-white p-4 shadow-sm"
+          >
+            <p className="mb-3 text-sm font-semibold text-neutral-800">{label}</p>
+            {loading ? (
+              <p className="text-xs text-neutral-500">Loading…</p>
+            ) : rows.length === 0 ? (
+              <p className="text-xs text-neutral-400">No appointments</p>
+            ) : (
+              <div className="space-y-2">
+                {rows.map((row) => (
+                  <div
+                    key={row.id}
+                    className="rounded border border-neutral-200 bg-neutral-50 px-2.5 py-2 text-xs"
+                    style={{
+                      borderLeftColor:
+                        clinicianLabel(row.clinician_id) === "Dr. West"
+                          ? "#2D5E3F"
+                          : "#1A6B8A",
+                      borderLeftWidth: "4px",
+                    }}
+                  >
+                    <p className="font-medium text-neutral-900">
+                      {formatTimeEastern(row.start_time)}
+                    </p>
+                    <p className="text-neutral-700">{patientName(row)}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
