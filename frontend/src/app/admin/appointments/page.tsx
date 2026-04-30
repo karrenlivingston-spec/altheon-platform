@@ -13,6 +13,11 @@ import {
 const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 const API_BASE = "https://altheon-platform.onrender.com";
 
+const CLINICIAN_WEST_ID = "fb6fa0fc-78f3-48c0-818b-511ad7a8ee93";
+const CLINICIAN_SHARPE_ID = "ee6eaa90-1f90-4af7-85a5-4ae78aea3df7";
+
+type ClinicianFilter = "all" | "west" | "sharpe";
+
 type AppointmentRow = {
   id: string;
   clinician_id: string;
@@ -23,8 +28,8 @@ type AppointmentRow = {
 };
 
 function clinicianLabel(id: string): string {
-  if (id === "fb6fa0fc-78f3-48c0-818b-511ad7a8ee93") return "Dr. West";
-  if (id === "ee6eaa90-1f90-4af7-85a5-4ae78aea3df7") return "Dr. Sharpe";
+  if (id === CLINICIAN_WEST_ID) return "Dr. West";
+  if (id === CLINICIAN_SHARPE_ID) return "Dr. Sharpe";
   return id;
 }
 
@@ -52,6 +57,7 @@ export default function AdminAppointmentsPage() {
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingIds, setUpdatingIds] = useState<Record<string, boolean>>({});
+  const [clinicianFilter, setClinicianFilter] = useState<ClinicianFilter>("all");
 
   async function refreshAppointments() {
     try {
@@ -92,6 +98,16 @@ export default function AdminAppointmentsPage() {
     };
   }, []);
 
+  const filteredAppointments = useMemo(() => {
+    if (clinicianFilter === "west") {
+      return appointments.filter((a) => a.clinician_id === CLINICIAN_WEST_ID);
+    }
+    if (clinicianFilter === "sharpe") {
+      return appointments.filter((a) => a.clinician_id === CLINICIAN_SHARPE_ID);
+    }
+    return appointments;
+  }, [appointments, clinicianFilter]);
+
   const todayYmd = useMemo(() => getEasternYMD(new Date()), []);
   const { mon: weekMon, sun: weekSun } = useMemo(
     () => getThisWeekRangeEasternYmd(new Date()),
@@ -100,13 +116,13 @@ export default function AdminAppointmentsPage() {
 
   const todayAppointments = useMemo(
     () =>
-      appointments
+      filteredAppointments
         .filter((a) => getEasternYMD(new Date(a.start_time)) === todayYmd)
         .sort(
           (a, b) =>
             new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
         ),
-    [appointments, todayYmd],
+    [filteredAppointments, todayYmd],
   );
 
   const scheduled = todayAppointments.filter((a) => a.status === "scheduled");
@@ -115,14 +131,14 @@ export default function AdminAppointmentsPage() {
 
   const weekAppointments = useMemo(
     () =>
-      appointments.filter((a) =>
+      filteredAppointments.filter((a) =>
         isYmdInInclusiveRange(
           getEasternYMD(new Date(a.start_time)),
           weekMon,
           weekSun,
         ),
       ),
-    [appointments, weekMon, weekSun],
+    [filteredAppointments, weekMon, weekSun],
   );
 
   const weekDays = useMemo(
@@ -200,9 +216,39 @@ export default function AdminAppointmentsPage() {
     );
   }
 
+  const pill =
+    "rounded-full px-3 py-1.5 text-xs font-semibold transition-colors border border-transparent";
+  const pillActive = "bg-[#2D5E3F] text-white border-[#2D5E3F]";
+  const pillIdle =
+    "bg-white text-neutral-700 border-neutral-200 hover:border-[#2D5E3F]/40";
+
   return (
     <div className="mx-auto max-w-7xl">
       <h1 className="mb-6 text-2xl font-semibold text-neutral-900">Appointments</h1>
+
+      <div className="mb-6 flex flex-wrap gap-2">
+        <button
+          type="button"
+          className={`${pill} ${clinicianFilter === "all" ? pillActive : pillIdle}`}
+          onClick={() => setClinicianFilter("all")}
+        >
+          All
+        </button>
+        <button
+          type="button"
+          className={`${pill} ${clinicianFilter === "west" ? pillActive : pillIdle}`}
+          onClick={() => setClinicianFilter("west")}
+        >
+          Dr. West
+        </button>
+        <button
+          type="button"
+          className={`${pill} ${clinicianFilter === "sharpe" ? pillActive : pillIdle}`}
+          onClick={() => setClinicianFilter("sharpe")}
+        >
+          Dr. Sharpe
+        </button>
+      </div>
 
       <section className="mb-10">
         <h2 className="mb-4 text-lg font-semibold text-neutral-900">Patient Flow Board</h2>
@@ -254,14 +300,39 @@ export default function AdminAppointmentsPage() {
                   ) : (
                     dayRows.map((row) => {
                       const west = clinicianLabel(row.clinician_id) === "Dr. West";
+                      const st = row.status.toLowerCase();
+                      const cancelled = st === "cancelled";
+                      const checkedInBlock = st === "checked_in";
+                      const completedBlock = st === "completed";
+
                       return (
                         <div
                           key={row.id}
                           className="rounded px-2 py-1.5 text-xs text-white"
-                          style={{ backgroundColor: west ? "#1A6B8A" : "#7C3AED" }}
+                          style={{
+                            backgroundColor: west ? "#1A6B8A" : "#7C3AED",
+                            opacity: cancelled ? 0.5 : 1,
+                          }}
                         >
-                          <p className="font-medium">{formatTimeEastern(row.start_time)}</p>
-                          <p className="truncate">{patientName(row)}</p>
+                          <div className="flex items-start justify-between gap-1">
+                            <div className="min-w-0 flex-1">
+                              <p className="font-medium">
+                                {formatTimeEastern(row.start_time)}
+                              </p>
+                              <p className={`truncate ${cancelled ? "line-through" : ""}`}>
+                                {patientName(row)}
+                              </p>
+                            </div>
+                            {checkedInBlock ? (
+                              <span className="shrink-0 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-neutral-800">
+                                Checked In
+                              </span>
+                            ) : completedBlock ? (
+                              <span className="shrink-0 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-neutral-800">
+                                ✓ Done
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                       );
                     })

@@ -153,6 +153,13 @@ function AdminAuthenticatedShell({
               Appointments
             </Link>
             <Link
+              href="/admin/legal-requests"
+              className={navClass}
+              onClick={() => setSidebarOpen(false)}
+            >
+              Legal Requests
+            </Link>
+            <Link
               href="/admin/patients"
               className={navClass}
               onClick={() => setSidebarOpen(false)}
