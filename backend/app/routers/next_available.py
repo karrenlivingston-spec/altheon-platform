@@ -9,7 +9,13 @@ from app.db import supabase
 router = APIRouter()
 
 
-def get_slots_for_date(clinic_id: str, clinician_id: Optional[str], target_date: date, duration_minutes: int):
+def get_slots_for_date(
+    clinic_id: str,
+    clinician_id: Optional[str],
+    target_date: date,
+    duration_minutes: int,
+    now_eastern: Optional[datetime] = None,
+):
     """
     Shared slot generation logic — same as /slots but callable internally.
     Returns a list of slot dicts: {start_time, end_time, label}
@@ -78,6 +84,10 @@ def get_slots_for_date(clinic_id: str, clinician_id: Optional[str], target_date:
             slot_start_utc = slot_start_local.astimezone(pytz.utc)
             slot_end_utc = slot_end_local.astimezone(pytz.utc)
 
+            if now_eastern and slot_start_local <= now_eastern:
+                current += timedelta(minutes=step)
+                continue
+
             # Check overlap with existing appointments
             overlap = False
             for appt in existing:
@@ -88,7 +98,9 @@ def get_slots_for_date(clinic_id: str, clinician_id: Optional[str], target_date:
                     break
 
             if not overlap:
-                label = slot_start_local.strftime("%A, %B %-d at %-I:%M %p")
+                minute = slot_start_local.strftime("%M")
+                time_str = slot_start_local.strftime("%-I:%M %p") if minute != "00" else slot_start_local.strftime("%-I %p")
+                label = f"{slot_start_local.strftime('%A, %B %-d')} at {time_str}"
                 slots.append({
                     "start_time": slot_start_utc.isoformat(),
                     "end_time": slot_end_utc.isoformat(),
@@ -115,7 +127,9 @@ def get_next_available(
     from the first day that has any availability.
     The agent never needs to ask the patient for a date — it just reads what this returns.
     """
-    today = datetime.utcnow().date()
+    eastern = pytz.timezone("America/New_York")
+    now_eastern = datetime.now(eastern)
+    today = now_eastern.date()
     scan_start = today
 
     if after_date:
@@ -127,7 +141,7 @@ def get_next_available(
 
     for offset in range(days_ahead):
         target_date = scan_start + timedelta(days=offset)
-        day_slots = get_slots_for_date(clinic_id, clinician_id, target_date, duration_minutes)
+        day_slots = get_slots_for_date(clinic_id, clinician_id, target_date, duration_minutes, now_eastern)
         if day_slots:
             return day_slots[:limit]
 
