@@ -258,7 +258,7 @@ export default function AdminAppointmentsPage() {
                         <div
                           key={row.id}
                           className="rounded px-2 py-1.5 text-xs text-white"
-                          style={{ backgroundColor: west ? "#2D5E3F" : "#1A6B8A" }}
+                          style={{ backgroundColor: west ? "#1A6B8A" : "#7C3AED" }}
                         >
                           <p className="font-medium">{formatTimeEastern(row.start_time)}</p>
                           <p className="truncate">{patientName(row)}</p>

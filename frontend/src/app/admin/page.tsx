@@ -208,8 +208,8 @@ function MiniCalendarStrip({
                     style={{
                       borderLeftColor:
                         clinicianLabel(row.clinician_id) === "Dr. West"
-                          ? "#2D5E3F"
-                          : "#1A6B8A",
+                          ? "#1A6B8A"
+                          : "#7C3AED",
                       borderLeftWidth: "4px",
                     }}
                   >
