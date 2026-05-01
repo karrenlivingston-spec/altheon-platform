@@ -209,19 +209,19 @@ def update_membership_tier(tier_id: str, body: TierUpdate):
 @router.get("/patient-memberships")
 def list_patient_memberships(
     clinic_id: str = Query(...),
-    patient_id: str = Query(...),
+    patient_id: Optional[str] = Query(None),
 ):
     try:
-        resp = (
+        q = (
             supabase.table("patient_memberships")
             .select(
                 "*, membership_tiers(name, price_cents, billing_cycle, visits_included)"
             )
             .eq("clinic_id", clinic_id)
-            .eq("patient_id", patient_id)
-            .order("created_at", desc=True)
-            .execute()
         )
+        if patient_id:
+            q = q.eq("patient_id", patient_id)
+        resp = q.order("created_at", desc=True).execute()
         _handle_supabase_error(resp)
     except HTTPException:
         raise

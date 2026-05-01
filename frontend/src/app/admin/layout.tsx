@@ -166,6 +166,13 @@ function AdminAuthenticatedShell({
             >
               Patients
             </Link>
+            <Link
+              href="/admin/memberships"
+              className={navClass}
+              onClick={() => setSidebarOpen(false)}
+            >
+              Memberships
+            </Link>
           </nav>
           <div className="border-t border-white/10 px-3 py-4">
             <button
