@@ -125,7 +125,10 @@ export default function AdminAppointmentsPage() {
     [filteredAppointments, todayYmd],
   );
 
-  const scheduled = todayAppointments.filter((a) => a.status === "scheduled");
+  const scheduled = todayAppointments.filter((a) => {
+    const s = a.status.toLowerCase();
+    return s === "scheduled" || s === "cancelled";
+  });
   const checkedIn = todayAppointments.filter((a) => a.status === "checked_in");
   const completed = todayAppointments.filter((a) => a.status === "completed");
 
@@ -149,13 +152,19 @@ export default function AdminAppointmentsPage() {
   async function patchStatus(appointmentId: string, status: string) {
     setUpdatingIds((prev) => ({ ...prev, [appointmentId]: true }));
     try {
-      await fetch(
+      const res = await fetch(
         `${API_BASE}/appointments/${encodeURIComponent(appointmentId)}/status?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ status }),
         },
+      );
+      if (!res.ok) {
+        return;
+      }
+      setAppointments((prev) =>
+        prev.map((a) => (a.id === appointmentId ? { ...a, status } : a)),
       );
       await refreshAppointments();
     } finally {
@@ -170,6 +179,24 @@ export default function AdminAppointmentsPage() {
   function renderCard(row: AppointmentRow, column: "scheduled" | "checked_in" | "completed") {
     const busy = !!updatingIds[row.id];
     const canCancel = column !== "completed";
+    const isCancelledScheduled =
+      column === "scheduled" && row.status.toLowerCase() === "cancelled";
+
+    if (isCancelledScheduled) {
+      return (
+        <div key={row.id} className="rounded-md border border-neutral-200 bg-white p-3 shadow-sm">
+          <p className="text-sm font-semibold text-neutral-500 line-through">
+            {patientName(row)}
+          </p>
+          <p className="mt-1 text-xs text-neutral-600">
+            {formatTimeEastern(row.start_time)} • {clinicianLabel(row.clinician_id)}
+          </p>
+          <p className="mt-1 text-xs text-neutral-600">{serviceName(row)}</p>
+          <p className="mt-2 text-xs font-medium text-neutral-500">Cancelled</p>
+        </div>
+      );
+    }
+
     return (
       <div key={row.id} className="rounded-md border border-neutral-200 bg-white p-3 shadow-sm">
         <p className="text-sm font-semibold text-neutral-900">{patientName(row)}</p>
