@@ -35,7 +35,7 @@ export default function AdminLoginPage() {
           <img
             src="/altheon-logo-full.png"
             alt="Altheon"
-            className="h-auto w-[220px] border-0 bg-transparent shadow-none"
+            className="h-auto w-[300px] border-0 bg-transparent shadow-none"
           />
         </div>
         <form
