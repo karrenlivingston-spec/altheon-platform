@@ -5,6 +5,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 const API_BASE = "https://altheon-platform.onrender.com";
 const BRAND = "#1F7A47";
+const TREATMENT_TYPE_NAMES: Record<string, string> = {
+  "92e261f3-1f97-491c-96e1-8fddce8c4aa6": "Dry Needling",
+  "3a1ef48b-966b-4240-881c-b7d2f4de7a7a": "Chiropractic",
+  "813074b1-6d97-442e-b506-4b1e4e4739d1": "Physical Therapy",
+  "3ed811c3-019b-4f0c-9a1e-e38f705f083b": "Shockwave Therapy",
+  "14c4a2de-7fe6-4fc1-8998-7fc77c3b0b11": "Cupping",
+};
 
 type TierServiceRow = { treatment_type_id?: string };
 type MembershipTier = {
@@ -40,11 +47,6 @@ type PatientMembership = {
   membership_tiers?: MembershipTierNested | MembershipTierNested[] | null;
 };
 
-type AppointmentRow = {
-  treatment_type_id?: string;
-  treatment_types?: { name?: string } | null;
-};
-
 type TreatmentOption = { id: string; name: string };
 
 function tierServiceIds(tier: MembershipTier): string[] {
@@ -77,17 +79,14 @@ function formatBillingCycle(c: string): string {
   return m[c] ?? c;
 }
 
-function treatmentOptionsFromAppointments(rows: AppointmentRow[]): TreatmentOption[] {
-  const map = new Map<string, string>();
-  for (const r of rows) {
-    const id = r.treatment_type_id;
-    if (!id) continue;
-    const name = r.treatment_types?.name?.trim() || id;
-    if (!map.has(id)) map.set(id, name);
-  }
-  return Array.from(map.entries())
+function treatmentOptionsFromMap(): TreatmentOption[] {
+  return Object.entries(TREATMENT_TYPE_NAMES)
     .map(([id, name]) => ({ id, name }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function treatmentTypeLabel(id: string): string {
+  return TREATMENT_TYPE_NAMES[id] ?? id;
 }
 
 function statusBadgeClass(status: string): string {
@@ -107,7 +106,9 @@ export default function AdminMembershipsPage() {
   const [tab, setTab] = useState<TabId>("tiers");
   const [tiers, setTiers] = useState<MembershipTier[]>([]);
   const [enrollments, setEnrollments] = useState<PatientMembership[]>([]);
-  const [treatmentOptions, setTreatmentOptions] = useState<TreatmentOption[]>([]);
+  const [treatmentOptions] = useState<TreatmentOption[]>(() =>
+    treatmentOptionsFromMap(),
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [savingTierId, setSavingTierId] = useState<string | null>(null);
@@ -134,27 +135,18 @@ export default function AdminMembershipsPage() {
 
   const loadData = useCallback(async () => {
     try {
-      const [tiersRes, enrollRes, apptRes] = await Promise.all([
+      const [tiersRes, enrollRes] = await Promise.all([
         fetch(
           `${API_BASE}/membership-tiers?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
         ),
         fetch(
           `${API_BASE}/patient-memberships?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
         ),
-        fetch(
-          `${API_BASE}/appointments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
-        ),
       ]);
       const tiersJson = tiersRes.ok ? await tiersRes.json() : [];
       const enrollJson = enrollRes.ok ? await enrollRes.json() : [];
-      const apptJson = apptRes.ok ? await apptRes.json() : [];
       setTiers(Array.isArray(tiersJson) ? tiersJson : []);
       setEnrollments(Array.isArray(enrollJson) ? enrollJson : []);
-      setTreatmentOptions(
-        treatmentOptionsFromAppointments(
-          Array.isArray(apptJson) ? apptJson : [],
-        ),
-      );
       if (!tiersRes.ok) {
         setError(`Tiers: ${tiersRes.status} ${tiersRes.statusText}`);
       } else if (!enrollRes.ok) {
@@ -468,15 +460,19 @@ export default function AdminMembershipsPage() {
                     </p>
                     <div className="mt-3 border-t border-neutral-100 pt-3">
                       <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
-                        Treatment type IDs
+                        Treatment types
                       </p>
                       {ids.length === 0 ? (
                         <p className="mt-1 text-xs text-neutral-500">None</p>
                       ) : (
-                        <ul className="mt-1 max-h-24 overflow-y-auto font-mono text-xs text-neutral-700">
+                        <ul className="mt-2 flex max-h-24 flex-wrap gap-1 overflow-y-auto">
                           {ids.map((id) => (
-                            <li key={id} className="break-all">
-                              {id}
+                            <li
+                              key={id}
+                              className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-700"
+                              title={id}
+                            >
+                              {treatmentTypeLabel(id)}
                             </li>
                           ))}
                         </ul>
@@ -763,7 +759,7 @@ export default function AdminMembershipsPage() {
                           />
                           <span>
                             <span className="font-medium text-neutral-900">
-                              {opt.name}
+                              {treatmentTypeLabel(opt.id)}
                             </span>
                             <span className="mt-0.5 block font-mono text-xs text-neutral-500">
                               {opt.id}
