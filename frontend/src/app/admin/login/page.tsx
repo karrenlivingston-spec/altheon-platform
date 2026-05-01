@@ -30,70 +30,66 @@ export default function AdminLoginPage() {
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[#F5F5F5] px-4">
-      <div className="flex w-full flex-col items-center">
-        <div className="mb-3 flex justify-center">
-          <img
-            src="/altheon-logo-full.png"
-            alt="Altheon"
-            width={500}
-            height={167}
-            className="h-auto max-w-full border-0 bg-transparent shadow-none"
-          />
-        </div>
-        <form
-          onSubmit={handleSubmit}
-          className="w-full max-w-sm rounded-lg border border-neutral-200 bg-white p-6 shadow-sm"
-        >
-          <div className="space-y-4">
-            <div>
-              <label
-                htmlFor="admin-email"
-                className="mb-1 block text-sm font-medium text-neutral-700"
-              >
-                Email
-              </label>
-              <input
-                id="admin-email"
-                type="email"
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-                className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none ring-[#2D5E3F] focus:ring-2"
-              />
-            </div>
-            <div>
-              <label
-                htmlFor="admin-password"
-                className="mb-1 block text-sm font-medium text-neutral-700"
-              >
-                Password
-              </label>
-              <input
-                id="admin-password"
-                type="password"
-                autoComplete="current-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none ring-[#2D5E3F] focus:ring-2"
-              />
-            </div>
+      <img
+        src="/altheon-logo-full.png"
+        alt="Altheon"
+        width={160}
+        height={53}
+        className="mb-[28px] h-auto w-[160px] border-0 bg-transparent shadow-none"
+      />
+      <form
+        onSubmit={handleSubmit}
+        className="w-full max-w-sm rounded-lg border border-neutral-200 bg-white p-6 shadow-sm"
+      >
+        <div className="space-y-4">
+          <div>
+            <label
+              htmlFor="admin-email"
+              className="mb-1 block text-sm font-medium text-neutral-700"
+            >
+              Email
+            </label>
+            <input
+              id="admin-email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none ring-[#2D5E3F] focus:ring-2"
+            />
           </div>
-          <button
-            type="submit"
-            disabled={submitting}
-            className="mt-6 w-full rounded-md bg-[#2D5E3F] px-4 py-2.5 text-sm font-semibold text-white shadow hover:opacity-95 disabled:opacity-60"
-          >
-            {submitting ? "Signing in…" : "Sign in"}
-          </button>
-          {error ? (
-            <p className="mt-4 text-center text-sm text-red-600">
-              Invalid email or password.
-            </p>
-          ) : null}
-        </form>
-      </div>
+          <div>
+            <label
+              htmlFor="admin-password"
+              className="mb-1 block text-sm font-medium text-neutral-700"
+            >
+              Password
+            </label>
+            <input
+              id="admin-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none ring-[#2D5E3F] focus:ring-2"
+            />
+          </div>
+        </div>
+        <button
+          type="submit"
+          disabled={submitting}
+          className="mt-6 w-full rounded-md bg-[#2D5E3F] px-4 py-2.5 text-sm font-semibold text-white shadow hover:opacity-95 disabled:opacity-60"
+        >
+          {submitting ? "Signing in…" : "Sign in"}
+        </button>
+        {error ? (
+          <p className="mt-4 text-center text-sm text-red-600">
+            Invalid email or password.
+          </p>
+        ) : null}
+      </form>
     </div>
   );
 }
