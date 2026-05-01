@@ -31,7 +31,7 @@ export default function AdminLoginPage() {
   return (
     <div className="bg-gray-50 min-h-screen flex flex-col items-center justify-center">
       <img
-        src="/altheon-logo-full.png"
+        src="/altheon-logo-full.svg"
         alt="Altheon"
         width={160}
         height={53}

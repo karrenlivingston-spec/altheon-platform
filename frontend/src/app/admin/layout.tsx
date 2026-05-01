@@ -131,7 +131,7 @@ function AdminAuthenticatedShell({
               }}
             >
               <img
-                src="/altheon-logo-full.png"
+                src="/altheon-logo-full.svg"
                 alt="Altheon"
                 style={{ width: "180px", height: "auto", display: "block" }}
               />
