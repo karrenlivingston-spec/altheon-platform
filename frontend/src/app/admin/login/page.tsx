@@ -29,67 +29,66 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-[#F5F5F5] px-4">
+    <div className="bg-gray-50 min-h-screen flex flex-col items-center justify-center">
       <img
         src="/altheon-logo-full.png"
         alt="Altheon"
         width={160}
         height={53}
-        className="mb-[28px] h-auto w-[160px] border-0 bg-transparent shadow-none"
+        className="mb-6 h-auto w-[160px]"
       />
-      <form
-        onSubmit={handleSubmit}
-        className="w-full max-w-sm rounded-lg border border-neutral-200 bg-white p-6 shadow-sm"
-      >
-        <div className="space-y-4">
-          <div>
-            <label
-              htmlFor="admin-email"
-              className="mb-1 block text-sm font-medium text-neutral-700"
-            >
-              Email
-            </label>
-            <input
-              id="admin-email"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none ring-[#2D5E3F] focus:ring-2"
-            />
-          </div>
-          <div>
-            <label
-              htmlFor="admin-password"
-              className="mb-1 block text-sm font-medium text-neutral-700"
-            >
-              Password
-            </label>
-            <input
-              id="admin-password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="w-full rounded-md border border-neutral-300 px-3 py-2 text-sm text-neutral-900 outline-none ring-[#2D5E3F] focus:ring-2"
-            />
-          </div>
-        </div>
-        <button
-          type="submit"
-          disabled={submitting}
-          className="mt-6 w-full rounded-md bg-[#2D5E3F] px-4 py-2.5 text-sm font-semibold text-white shadow hover:opacity-95 disabled:opacity-60"
-        >
-          {submitting ? "Signing in…" : "Sign in"}
-        </button>
-        {error ? (
-          <p className="mt-4 text-center text-sm text-red-600">
-            Invalid email or password.
+      <div className="w-[400px] rounded-xl bg-white p-8 shadow-md">
+        <h1 className="mb-6 text-center text-xl font-semibold">Sign in</h1>
+        <form onSubmit={handleSubmit}>
+          <label
+            htmlFor="admin-email"
+            className="mb-1 block text-sm font-medium text-gray-700"
+          >
+            Email
+          </label>
+          <input
+            id="admin-email"
+            type="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
+            className="mb-4 w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 outline-none focus-visible:ring-2 focus-visible:ring-[#1F7A47]"
+          />
+          <label
+            htmlFor="admin-password"
+            className="mb-1 block text-sm font-medium text-gray-700"
+          >
+            Password
+          </label>
+          <input
+            id="admin-password"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+            className="mb-6 w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 outline-none focus-visible:ring-2 focus-visible:ring-[#1F7A47]"
+          />
+          <button
+            type="submit"
+            disabled={submitting}
+            className="w-full rounded-md bg-[#1F7A47] py-2.5 font-semibold text-white hover:bg-[#2D5E3F] disabled:opacity-60"
+          >
+            {submitting ? "Signing in…" : "Sign In"}
+          </button>
+          {error ? (
+            <p className="mt-3 text-center text-sm text-red-600">
+              Invalid email or password.
+            </p>
+          ) : null}
+          <p
+            className={`text-center text-sm text-gray-500 ${error ? "mt-3" : "mt-4"}`}
+          >
+            Secure access for clinic staff
           </p>
-        ) : null}
-      </form>
+        </form>
+      </div>
     </div>
   );
 }
