@@ -207,10 +207,7 @@ def update_membership_tier(tier_id: str, body: TierUpdate):
 
 
 @router.get("/patient-memberships")
-def list_patient_memberships(
-    clinic_id: str = Query(...),
-    patient_id: Optional[str] = Query(None),
-):
+def list_memberships(clinic_id: str, patient_id: Optional[str] = None):
     try:
         q = (
             supabase.table("patient_memberships")
@@ -227,7 +224,7 @@ def list_patient_memberships(
         raise
     except Exception as exc:
         logger.exception(
-            "list_patient_memberships failed clinic_id=%s patient_id=%s",
+            "list_memberships failed clinic_id=%s patient_id=%s",
             clinic_id,
             patient_id,
         )
