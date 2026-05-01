@@ -31,9 +31,13 @@ export default function AdminLoginPage() {
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[#F5F5F5] px-4">
       <div className="w-full max-w-sm">
-        <p className="mb-8 text-center text-2xl font-semibold tracking-tight text-neutral-900">
-          Altheon
-        </p>
+        <div className="mb-8 flex justify-center">
+          <img
+            src="/altheon-logo-full.png"
+            alt="Altheon"
+            className="h-auto w-[180px]"
+          />
+        </div>
         <form
           onSubmit={handleSubmit}
           className="rounded-lg border border-neutral-200 bg-white p-6 shadow-sm"
