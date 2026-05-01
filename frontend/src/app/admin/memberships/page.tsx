@@ -133,7 +133,6 @@ export default function AdminMembershipsPage() {
   const [changeTierBusy, setChangeTierBusy] = useState(false);
 
   const loadData = useCallback(async () => {
-    setError(null);
     try {
       const [tiersRes, enrollRes, apptRes] = await Promise.all([
         fetch(
@@ -160,6 +159,8 @@ export default function AdminMembershipsPage() {
         setError(`Tiers: ${tiersRes.status} ${tiersRes.statusText}`);
       } else if (!enrollRes.ok) {
         setError(`Enrollments: ${enrollRes.status} ${enrollRes.statusText}`);
+      } else {
+        setError(null);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load data");
@@ -171,6 +172,7 @@ export default function AdminMembershipsPage() {
   }, []);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadData();
   }, [loadData]);
 
