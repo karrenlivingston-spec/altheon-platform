@@ -184,7 +184,7 @@ export default function AdminAppointmentsPage() {
 
     if (isCancelledScheduled) {
       return (
-        <div key={row.id} className="rounded-md border border-neutral-200 bg-white p-3 shadow-sm">
+        <div key={row.id} className="rounded-md border border-gray-200 bg-white p-3 shadow-sm">
           <p className="text-sm font-semibold text-neutral-500 line-through">
             {patientName(row)}
           </p>
@@ -198,7 +198,7 @@ export default function AdminAppointmentsPage() {
     }
 
     return (
-      <div key={row.id} className="rounded-md border border-neutral-200 bg-white p-3 shadow-sm">
+      <div key={row.id} className="rounded-md border border-gray-200 bg-white p-3 shadow-sm">
         <p className="text-sm font-semibold text-neutral-900">{patientName(row)}</p>
         <p className="mt-1 text-xs text-neutral-600">
           {formatTimeEastern(row.start_time)} • {clinicianLabel(row.clinician_id)}
@@ -251,7 +251,7 @@ export default function AdminAppointmentsPage() {
 
   return (
     <div className="mx-auto max-w-7xl">
-      <h1 className="mb-6 text-2xl font-semibold text-neutral-900">Appointments</h1>
+      <h1 className="mb-6 text-3xl font-bold text-neutral-900">Appointments</h1>
 
       <div className="mb-6 flex flex-wrap gap-2">
         <button
@@ -278,7 +278,7 @@ export default function AdminAppointmentsPage() {
       </div>
 
       <section className="mb-10">
-        <h2 className="mb-4 text-lg font-semibold text-neutral-900">Patient Flow Board</h2>
+        <h2 className="mb-4 text-lg font-semibold text-gray-700">Patient Flow Board</h2>
         {loading ? (
           <p className="text-sm text-neutral-600">Loading…</p>
         ) : (
@@ -286,16 +286,19 @@ export default function AdminAppointmentsPage() {
             <FlowColumn
               title={`Scheduled (${scheduled.length})`}
               bg="#F0F4F8"
+              emptyMessage="No appointments scheduled"
               items={scheduled.map((row) => renderCard(row, "scheduled"))}
             />
             <FlowColumn
               title={`Checked In (${checkedIn.length})`}
               bg="#FFF8E7"
+              emptyMessage="No patients checked in yet"
               items={checkedIn.map((row) => renderCard(row, "checked_in"))}
             />
             <FlowColumn
               title={`Completed (${completed.length})`}
               bg="#F0FFF4"
+              emptyMessage="No completed appointments yet"
               items={completed.map((row) => renderCard(row, "completed"))}
             />
           </div>
@@ -303,7 +306,7 @@ export default function AdminAppointmentsPage() {
       </section>
 
       <section>
-        <h2 className="mb-4 text-lg font-semibold text-neutral-900">Week Calendar</h2>
+        <h2 className="mb-4 text-lg font-semibold text-gray-700">Week Calendar</h2>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-7">
           {weekDays.map((ymd) => {
             const dayRows = weekAppointments
@@ -323,7 +326,9 @@ export default function AdminAppointmentsPage() {
                 <p className="mb-3 text-sm font-semibold text-neutral-800">{dayLabel(ymd)}</p>
                 <div className="space-y-2">
                   {dayRows.length === 0 ? (
-                    <p className="text-xs text-neutral-400">No appointments</p>
+                    <p className="text-xs text-neutral-400">
+                      No appointments scheduled
+                    </p>
                   ) : (
                     dayRows.map((row) => {
                       const west = clinicianLabel(row.clinician_id) === "Dr. West";
@@ -378,16 +383,24 @@ function FlowColumn({
   title,
   bg,
   items,
+  emptyMessage,
 }: {
   title: string;
   bg: string;
   items: React.ReactNode[];
+  emptyMessage: string;
 }) {
   return (
     <div className="rounded-lg border border-neutral-200 p-4" style={{ backgroundColor: bg }}>
-      <p className="mb-3 text-sm font-semibold text-neutral-800">{title}</p>
+      <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-700">
+        {title}
+      </p>
       <div className="space-y-3">
-        {items.length === 0 ? <p className="text-xs text-neutral-500">No appointments</p> : items}
+        {items.length === 0 ? (
+          <p className="text-xs text-neutral-500">{emptyMessage}</p>
+        ) : (
+          items
+        )}
       </div>
     </div>
   );

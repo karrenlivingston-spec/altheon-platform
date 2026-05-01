@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   addDaysToYmd,
@@ -84,10 +84,27 @@ function formatBookedAt(iso: string): string {
   return `Booked ${datePart} at ${timePart}`;
 }
 
+function focusBorderColor(clinicianId: string): string {
+  return clinicianLabel(clinicianId) === "Dr. West" ? "#1A6B8A" : "#7C3AED";
+}
+
 export default function AdminOverviewPage() {
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [focusCheckInBusy, setFocusCheckInBusy] = useState(false);
+
+  const refetchAppointments = useCallback(async () => {
+    try {
+      const apRes = await fetch(
+        `${API_BASE}/appointments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+      );
+      const apJson = apRes.ok ? await apRes.json() : [];
+      setAppointments(Array.isArray(apJson) ? apJson : []);
+    } catch {
+      setAppointments([]);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -122,6 +139,41 @@ export default function AdminOverviewPage() {
   }, []);
 
   const todayEasternYmd = useMemo(() => getEasternYMD(new Date()), []);
+
+  const nextFocusAppointment = useMemo(() => {
+    /* eslint-disable react-hooks/purity -- "next upcoming" requires wall-clock comparison */
+    const nowMs = Date.now();
+    /* eslint-enable react-hooks/purity */
+    const candidates = appointments.filter((a) => {
+      if (String(a.status).toLowerCase() !== "scheduled") return false;
+      if (getEasternYMD(new Date(a.start_time)) !== todayEasternYmd) return false;
+      return new Date(a.start_time).getTime() > nowMs;
+    });
+    if (candidates.length === 0) return null;
+    return [...candidates].sort(
+      (a, b) =>
+        new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
+    )[0];
+  }, [appointments, todayEasternYmd]);
+
+  async function handleFocusCheckIn(appointmentId: string) {
+    setFocusCheckInBusy(true);
+    try {
+      const res = await fetch(
+        `${API_BASE}/appointments/${encodeURIComponent(appointmentId)}/status?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "checked_in" }),
+        },
+      );
+      if (res.ok) {
+        await refetchAppointments();
+      }
+    } finally {
+      setFocusCheckInBusy(false);
+    }
+  }
 
   const todayAppointments = useMemo(() => {
     return appointments.filter((a) => {
@@ -158,10 +210,60 @@ export default function AdminOverviewPage() {
 
   return (
     <div className="mx-auto max-w-7xl">
-      <h1 className="mb-2 text-2xl font-semibold text-neutral-900">Overview</h1>
+      <h1 className="mb-2 text-3xl font-bold text-neutral-900">Overview</h1>
       <p className="mb-8 text-sm text-neutral-600">
         Snapshot for clinic operations. Data loads from the live API.
       </p>
+
+      <section className="mb-8">
+        {loading ? (
+          <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <p className="text-sm text-gray-500">Loading…</p>
+          </div>
+        ) : nextFocusAppointment ? (
+          <div
+            className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
+            style={{
+              borderLeftWidth: "4px",
+              borderLeftStyle: "solid",
+              borderLeftColor: focusBorderColor(nextFocusAppointment.clinician_id),
+            }}
+          >
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              {"Today's Focus"}
+            </p>
+            <div className="my-3 border-t border-gray-200" />
+            <p className="text-sm font-medium text-gray-700">Next Appointment</p>
+            <p className="mt-2 text-xl font-bold text-neutral-900">
+              {formatTimeEastern(nextFocusAppointment.start_time)} ·{" "}
+              {patientName(nextFocusAppointment)} · {serviceName(nextFocusAppointment)}
+            </p>
+            <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
+              <p className="text-sm text-gray-500">
+                {clinicianLabel(nextFocusAppointment.clinician_id)}
+              </p>
+              <button
+                type="button"
+                disabled={focusCheckInBusy}
+                onClick={() => void handleFocusCheckIn(nextFocusAppointment.id)}
+                className="rounded-md border border-[#2D5E3F]/30 bg-[#2D5E3F] px-4 py-2 text-sm font-semibold text-white hover:opacity-95 disabled:opacity-60"
+              >
+                {focusCheckInBusy ? "Checking in…" : "Check In"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+              {"Today's Focus"}
+            </p>
+            <div className="my-3 border-t border-gray-200" />
+            <p className="text-sm text-gray-500">
+              All caught up — no more appointments today.
+            </p>
+          </div>
+        )}
+      </section>
 
       <div className="mb-10 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
@@ -183,14 +285,14 @@ export default function AdminOverviewPage() {
       </div>
 
       <section className="mb-10">
-        <h2 className="mb-4 text-lg font-semibold text-neutral-900">
+        <h2 className="mb-4 text-lg font-semibold text-gray-700">
           Next 3 Days
         </h2>
         <MiniCalendarStrip appointments={appointments} loading={loading} />
       </section>
 
       <section>
-        <h2 className="mb-4 text-lg font-semibold text-neutral-900">
+        <h2 className="mb-4 text-lg font-semibold text-gray-700">
           Recent Activity
         </h2>
         <RecentActivityFeed appointments={appointments} loading={loading} />
@@ -201,11 +303,11 @@ export default function AdminOverviewPage() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-5 shadow-sm">
+    <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
       <p className="text-3xl font-semibold tabular-nums text-neutral-900">
         {value}
       </p>
-      <p className="mt-2 text-sm font-medium text-neutral-600">{label}</p>
+      <p className="mt-2 text-sm text-gray-500">{label}</p>
     </div>
   );
 }
@@ -252,13 +354,15 @@ function MiniCalendarStrip({
         return (
           <div
             key={ymd}
-            className="rounded-lg border border-neutral-200 bg-white p-4 shadow-sm"
+            className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
           >
             <p className="mb-3 text-sm font-semibold text-neutral-800">{label}</p>
             {loading ? (
               <p className="text-xs text-neutral-500">Loading…</p>
             ) : rows.length === 0 ? (
-              <p className="text-xs text-neutral-400">No appointments</p>
+              <p className="text-xs text-neutral-400">
+                No appointments scheduled
+              </p>
             ) : (
               <div className="space-y-2">
                 {rows.map((row) => (
