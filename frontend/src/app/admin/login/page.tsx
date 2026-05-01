@@ -29,7 +29,13 @@ export default function AdminLoginPage() {
   }
 
   return (
-    <div className="bg-gray-50 min-h-screen flex flex-col items-center justify-center">
+    <div
+      className="min-h-screen flex flex-col items-center"
+      style={{
+        background: "linear-gradient(180deg, #f9fafb 0%, #f3f4f6 100%)",
+        paddingTop: "8vh",
+      }}
+    >
       <div
         style={{ display: "flex", flexDirection: "column", alignItems: "center" }}
       >
@@ -37,13 +43,13 @@ export default function AdminLoginPage() {
           src="/altheon-logo-full.svg"
           alt="Altheon"
           style={{
-            width: "320px",
+            width: "200px",
             height: "auto",
-            marginBottom: "32px",
+            marginBottom: "16px",
             display: "block",
           }}
         />
-        <div className="w-[400px] rounded-xl bg-white p-8 shadow-md">
+        <div className="w-[400px] rounded-xl border-t-[3px] border-t-[#1F7A47] bg-white p-8 shadow-md">
           <h1 className="mb-6 text-center text-xl font-semibold">Sign in</h1>
           <form onSubmit={handleSubmit}>
           <label
