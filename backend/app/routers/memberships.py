@@ -212,7 +212,7 @@ def list_memberships(clinic_id: str, patient_id: Optional[str] = None):
         q = (
             supabase.table("patient_memberships")
             .select(
-                "*, membership_tiers(name, price_cents, billing_cycle, visits_included)"
+                "*, membership_tiers!patient_memberships_tier_id_fkey(name, price_cents, billing_cycle, visits_included)"
             )
             .eq("clinic_id", clinic_id)
         )
