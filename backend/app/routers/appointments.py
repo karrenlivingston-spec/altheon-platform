@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -6,6 +7,7 @@ from pydantic import BaseModel
 from app.db import supabase
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 @router.get("")
@@ -38,22 +40,54 @@ def update_appointment_status(
     body: dict,
     clinic_id: str = Query(...),
 ):
+    logger.debug(
+        "PATCH /appointments/%s/status clinic_id=%s body=%s",
+        appointment_id,
+        clinic_id,
+        body,
+    )
     status = body.get("status")
     if status not in ["scheduled", "checked_in", "completed", "cancelled"]:
+        logger.debug(
+            "PATCH appointment status rejected invalid status=%r appointment_id=%s",
+            status,
+            appointment_id,
+        )
         raise HTTPException(status_code=400, detail="Invalid status")
 
-    result = (
-        supabase.table("appointments")
-        .update({"status": status})
-        .eq("id", appointment_id)
-        .eq("clinic_id", clinic_id)
-        .execute()
-    )
-
-    if not result.data:
-        raise HTTPException(status_code=404, detail="Appointment not found")
-
-    return result.data[0]
+    try:
+        result = (
+            supabase.table("appointments")
+            .update({"status": status})
+            .eq("id", appointment_id)
+            .eq("clinic_id", clinic_id)
+            .execute()
+        )
+        err = getattr(result, "error", None)
+        logger.debug(
+            "PATCH appointment status Supabase response appointment_id=%s data=%s error=%s",
+            appointment_id,
+            result.data,
+            err,
+        )
+        if not result.data:
+            logger.warning(
+                "PATCH appointment status no row updated appointment_id=%s clinic_id=%s status=%s",
+                appointment_id,
+                clinic_id,
+                status,
+            )
+            raise HTTPException(status_code=404, detail="Appointment not found")
+        return result.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(
+            "PATCH appointment status Supabase update failed appointment_id=%s clinic_id=%s",
+            appointment_id,
+            clinic_id,
+        )
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 class CreateAppointmentRequest(BaseModel):
