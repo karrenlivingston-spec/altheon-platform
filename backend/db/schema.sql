@@ -257,31 +257,52 @@ COMMENT ON TABLE public.clinical_intakes IS 'Structured intake data collected be
 
 -- =============================================================================
 -- 10. membership_tiers
--- Subscription products per clinic (pricing, included visits, activation).
+-- Subscription products per clinic (pricing in cents, billing cadence, visit rules).
 -- =============================================================================
 CREATE TABLE public.membership_tiers (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   clinic_id uuid NOT NULL REFERENCES public.clinics (id) ON DELETE CASCADE,
   name text NOT NULL,
-  price_monthly numeric(12, 2) NOT NULL CHECK (price_monthly >= 0),
-  visits_included integer NOT NULL CHECK (visits_included >= 0),
   description text,
+  price_cents integer NOT NULL CHECK (price_cents >= 0),
+  billing_cycle text NOT NULL,
+  visits_included integer NOT NULL CHECK (visits_included >= 0),
+  visits_roll_over boolean NOT NULL DEFAULT false,
   is_active boolean NOT NULL DEFAULT true,
   created_at timestamptz NOT NULL DEFAULT now(),
-  updated_at timestamptz NOT NULL DEFAULT now()
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT membership_tiers_billing_cycle_ck CHECK (
+    billing_cycle IN ('monthly', 'quarterly', 'annual')
+  )
 );
 
 CREATE INDEX membership_tiers_clinic_id_idx ON public.membership_tiers (clinic_id);
 CREATE INDEX membership_tiers_is_active_idx ON public.membership_tiers (clinic_id, is_active);
 
-COMMENT ON TABLE public.membership_tiers IS 'Recurring membership plans offered by a clinic with visit allotments.';
+COMMENT ON TABLE public.membership_tiers IS 'Recurring membership plans per clinic: price, billing cadence, included visits, and rollover policy.';
 
 CREATE TRIGGER membership_tiers_set_updated_at
 BEFORE UPDATE ON public.membership_tiers
 FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
 
 -- =============================================================================
--- 11. patient_memberships
+-- 11. membership_tier_services
+-- Which treatment types are covered by a membership tier (junction).
+-- =============================================================================
+CREATE TABLE public.membership_tier_services (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  tier_id uuid NOT NULL REFERENCES public.membership_tiers (id) ON DELETE CASCADE,
+  treatment_type_id uuid NOT NULL REFERENCES public.treatment_types (id) ON DELETE CASCADE,
+  CONSTRAINT membership_tier_services_tier_treatment_key UNIQUE (tier_id, treatment_type_id)
+);
+
+CREATE INDEX membership_tier_services_tier_id_idx ON public.membership_tier_services (tier_id);
+CREATE INDEX membership_tier_services_treatment_type_id_idx ON public.membership_tier_services (treatment_type_id);
+
+COMMENT ON TABLE public.membership_tier_services IS 'Maps membership tiers to billable/scheduled treatment types.';
+
+-- =============================================================================
+-- 12. patient_memberships
 -- Enrollment of a patient in a tier at a clinic with usage and billing fields.
 -- =============================================================================
 CREATE TABLE public.patient_memberships (
@@ -291,6 +312,7 @@ CREATE TABLE public.patient_memberships (
   tier_id uuid NOT NULL REFERENCES public.membership_tiers (id) ON DELETE RESTRICT,
   status text NOT NULL DEFAULT 'active',
   billing_cycle_count integer NOT NULL DEFAULT 0 CHECK (billing_cycle_count >= 0),
+  visits_included integer NOT NULL DEFAULT 0 CHECK (visits_included >= 0),
   visits_used integer NOT NULL DEFAULT 0 CHECK (visits_used >= 0),
   visits_remaining integer NOT NULL DEFAULT 0 CHECK (visits_remaining >= 0),
   started_at timestamptz NOT NULL DEFAULT now(),
@@ -299,10 +321,11 @@ CREATE TABLE public.patient_memberships (
   auto_renew boolean NOT NULL DEFAULT true,
   upgrade_eligible boolean NOT NULL DEFAULT false,
   downgrade_eligible boolean NOT NULL DEFAULT false,
+  pending_tier_change_id uuid REFERENCES public.membership_tiers (id) ON DELETE SET NULL,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT patient_memberships_status_ck CHECK (
-    status IN ('active', 'paused', 'cancelled')
+    status IN ('active', 'paused', 'cancelled', 'expired')
   )
 );
 
@@ -312,15 +335,37 @@ CREATE INDEX patient_memberships_tier_id_idx ON public.patient_memberships (tier
 CREATE INDEX patient_memberships_status_idx ON public.patient_memberships (status);
 CREATE INDEX patient_memberships_next_billing_idx ON public.patient_memberships (next_billing_date)
   WHERE next_billing_date IS NOT NULL;
+CREATE INDEX patient_memberships_pending_tier_change_idx ON public.patient_memberships (pending_tier_change_id)
+  WHERE pending_tier_change_id IS NOT NULL;
 
-COMMENT ON TABLE public.patient_memberships IS 'Patient subscription state per clinic and tier, including visit counters and billing dates.';
+COMMENT ON TABLE public.patient_memberships IS 'Patient subscription state per clinic and tier, visit counters, billing, and deferred tier changes.';
 
 CREATE TRIGGER patient_memberships_set_updated_at
 BEFORE UPDATE ON public.patient_memberships
 FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
 
 -- =============================================================================
--- 12. legal_requests
+-- 13. membership_visit_log
+-- Audit of visits consumed against a patient membership.
+-- =============================================================================
+CREATE TABLE public.membership_visit_log (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  membership_id uuid NOT NULL REFERENCES public.patient_memberships (id) ON DELETE CASCADE,
+  appointment_id uuid REFERENCES public.appointments (id) ON DELETE SET NULL,
+  treatment_type_id uuid REFERENCES public.treatment_types (id) ON DELETE SET NULL,
+  logged_at timestamptz NOT NULL DEFAULT now(),
+  notes text
+);
+
+CREATE INDEX membership_visit_log_membership_id_idx ON public.membership_visit_log (membership_id);
+CREATE INDEX membership_visit_log_appointment_id_idx ON public.membership_visit_log (appointment_id)
+  WHERE appointment_id IS NOT NULL;
+CREATE INDEX membership_visit_log_logged_at_idx ON public.membership_visit_log (logged_at);
+
+COMMENT ON TABLE public.membership_visit_log IS 'Each row records one membership visit debit, optionally tied to an appointment or treatment type.';
+
+-- =============================================================================
+-- 14. legal_requests
 -- Tracking of external records requests (attorney, insurance, court, etc.).
 -- =============================================================================
 CREATE TABLE public.legal_requests (
@@ -362,7 +407,7 @@ BEFORE UPDATE ON public.legal_requests
 FOR EACH ROW EXECUTE PROCEDURE public.set_updated_at();
 
 -- =============================================================================
--- 13. voice_interaction_logs
+-- 15. voice_interaction_logs
 -- Audit of voice channel interactions (calls, transcripts, intents, outcomes).
 -- =============================================================================
 CREATE TABLE public.voice_interaction_logs (
