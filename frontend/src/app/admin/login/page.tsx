@@ -40,10 +40,10 @@ export default function AdminLoginPage() {
         style={{ display: "flex", flexDirection: "column", alignItems: "center" }}
       >
         <img
-          src="/altheon-logo-full.svg"
+          src="/altheon-logo-full.png"
           alt="Altheon"
           style={{
-            width: "200px",
+            width: "280px",
             height: "auto",
             marginBottom: "16px",
             display: "block",
