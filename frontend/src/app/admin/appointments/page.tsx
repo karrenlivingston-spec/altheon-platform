@@ -73,7 +73,7 @@ export default function AdminAppointmentsPage() {
 
   useEffect(() => {
     let cancelled = false;
-    (async () => {
+    async function fetchData() {
       try {
         const res = await fetch(
           `${API_BASE}/appointments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
@@ -91,10 +91,17 @@ export default function AdminAppointmentsPage() {
           setLoading(false);
         }
       }
-    })();
+    }
+
+    void fetchData();
+
+    const interval = setInterval(() => {
+      void fetchData();
+    }, 60000);
 
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, []);
 

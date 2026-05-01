@@ -108,8 +108,10 @@ export default function AdminOverviewPage() {
 
   useEffect(() => {
     let cancelled = false;
-    async function load() {
-      setLoading(true);
+    async function fetchData(silent = false) {
+      if (!silent) {
+        setLoading(true);
+      }
       try {
         const [apRes, ptRes] = await Promise.all([
           fetch(
@@ -129,12 +131,21 @@ export default function AdminOverviewPage() {
           setPatients([]);
         }
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && !silent) {
+          setLoading(false);
+        }
       }
     }
-    load();
+
+    void fetchData(false);
+
+    const interval = setInterval(() => {
+      void fetchData(true);
+    }, 60000);
+
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, []);
 
