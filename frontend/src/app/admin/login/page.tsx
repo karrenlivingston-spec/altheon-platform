@@ -34,19 +34,19 @@ export default function AdminLoginPage() {
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       {/* Left — brand */}
-      <aside className="relative flex w-full shrink-0 flex-col bg-gradient-to-br from-[#14532d] to-[#166534] md:w-[35%] md:min-h-screen">
+      <aside className="relative flex w-full shrink-0 flex-col bg-gradient-to-br from-[#14532d] to-[#166534] md:w-[34%] md:min-h-screen">
         <div
           className="pointer-events-none absolute inset-0 bg-white/5 blur-3xl"
           aria-hidden
         />
         <div className="relative z-10 flex h-full min-h-0 flex-col items-center justify-center px-12 py-12 md:min-h-screen md:py-0">
-          <div className="flex flex-col items-center justify-center gap-10 h-full -translate-y-8">
+          <div className="flex flex-col items-center justify-center gap-8 h-full -translate-y-16">
             <img
               src="/altheon-logo-white.svg"
               alt="Altheon"
-              className="w-[420px] max-w-none"
+              className="w-[460px] max-w-none"
             />
-            <p className="text-white text-lg font-medium opacity-90 text-center tracking-wide">
+            <p className="text-white text-lg font-semibold opacity-90 text-center tracking-wide">
               AI-powered clinic operations platform
             </p>
           </div>
