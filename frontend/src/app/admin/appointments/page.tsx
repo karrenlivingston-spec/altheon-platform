@@ -53,22 +53,13 @@ function flowCardClinicianBorderClass(clinicianId: string): string {
   return "border-l-4 border-l-gray-300";
 }
 
-function filterPillClass(
-  pill: ClinicianFilter,
-  isActive: boolean,
-): string {
+function filterPillClass(isActive: boolean): string {
   const base =
-    "cursor-pointer rounded-full border px-4 py-1.5 text-sm font-medium transition-all duration-150";
-  if (!isActive) {
-    return `${base} border-gray-200 bg-white text-gray-600 hover:border-gray-400`;
+    "cursor-pointer rounded-full px-3 py-1.5 text-sm font-medium transition-colors duration-150";
+  if (isActive) {
+    return `${base} bg-green-600 text-white`;
   }
-  if (pill === "all") {
-    return `${base} border-[#1a6b3c] bg-[#1a6b3c] text-white`;
-  }
-  if (pill === "west") {
-    return `${base} border-[#1A6B8A] bg-[#1A6B8A] text-white`;
-  }
-  return `${base} border-[#7C3AED] bg-[#7C3AED] text-white`;
+  return `${base} bg-gray-100 text-gray-600 hover:bg-gray-200`;
 }
 
 function dayLabel(ymd: string): string {
@@ -219,35 +210,46 @@ export default function AdminAppointmentsPage() {
 
     const accent = flowCardClinicianBorderClass(row.clinician_id);
     const cardShell = [
-      "rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-shadow duration-150 hover:shadow-md",
+      "rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-all duration-150 hover:shadow-md",
       accent,
     ].join(" ");
 
     if (isCancelledScheduled) {
       return (
         <div key={row.id} className={cardShell}>
-          <p className="text-sm font-semibold text-gray-500 line-through">
-            {patientName(row)}
-          </p>
-          <p className="mt-1 text-xs text-gray-500">
-            {formatTimeEastern(row.start_time)} ·{" "}
-            {clinicianLabel(row.clinician_id)}
-          </p>
-          <p className="mt-1 text-xs text-gray-400">{serviceName(row)}</p>
-          <p className="mt-2 text-xs font-medium text-gray-500">Cancelled</p>
+          <div className="space-y-1">
+            <p className="text-base font-semibold text-gray-500 line-through">
+              {patientName(row)}
+            </p>
+            <p className="text-sm font-medium text-gray-700">
+              {formatTimeEastern(row.start_time)}
+            </p>
+            <p className="text-xs text-gray-500">
+              {clinicianLabel(row.clinician_id)}
+            </p>
+            <p className="text-xs text-gray-500">{serviceName(row)}</p>
+          </div>
+          <p className="mt-3 text-xs font-medium text-gray-500">Cancelled</p>
         </div>
       );
     }
 
     return (
       <div key={row.id} className={cardShell}>
-        <p className="text-sm font-semibold text-gray-900">{patientName(row)}</p>
-        <p className="mt-1 text-xs text-gray-500">
-          {formatTimeEastern(row.start_time)} · {clinicianLabel(row.clinician_id)}
-        </p>
-        <p className="mt-1 text-xs text-gray-400">{serviceName(row)}</p>
+        <div className="space-y-1">
+          <p className="text-base font-semibold text-gray-900">
+            {patientName(row)}
+          </p>
+          <p className="text-sm font-medium text-gray-700">
+            {formatTimeEastern(row.start_time)}
+          </p>
+          <p className="text-xs text-gray-500">
+            {clinicianLabel(row.clinician_id)}
+          </p>
+          <p className="text-xs text-gray-500">{serviceName(row)}</p>
+        </div>
         {column === "completed" ? (
-          <p className="mt-2 text-xs font-medium text-emerald-700">✓ Completed</p>
+          <p className="mt-3 text-xs font-medium text-emerald-700">✓ Completed</p>
         ) : (
           <div className="mt-3 flex items-center gap-2">
             {column === "scheduled" ? (
@@ -274,7 +276,7 @@ export default function AdminAppointmentsPage() {
                 type="button"
                 disabled={busy}
                 onClick={() => void patchStatus(row.id, "cancelled")}
-                className="rounded-lg px-3 py-1.5 text-xs font-medium text-red-500 transition-colors hover:text-red-700 disabled:opacity-60"
+                className="text-sm text-gray-400 transition hover:text-red-500 disabled:opacity-50"
               >
                 Cancel
               </button>
@@ -286,7 +288,7 @@ export default function AdminAppointmentsPage() {
   }
 
   return (
-    <div className="w-full">
+    <div className="mx-auto w-full max-w-7xl px-6 py-6">
       <h1 className="mb-1 text-2xl font-semibold text-gray-900">Appointments</h1>
       <p className="mb-8 text-sm tracking-wide text-gray-500">
         Today&apos;s flow and week view
@@ -295,21 +297,21 @@ export default function AdminAppointmentsPage() {
       <div className="mb-6 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          className={filterPillClass("all", clinicianFilter === "all")}
+          className={filterPillClass(clinicianFilter === "all")}
           onClick={() => setClinicianFilter("all")}
         >
           All
         </button>
         <button
           type="button"
-          className={filterPillClass("west", clinicianFilter === "west")}
+          className={filterPillClass(clinicianFilter === "west")}
           onClick={() => setClinicianFilter("west")}
         >
           Dr. West
         </button>
         <button
           type="button"
-          className={filterPillClass("sharpe", clinicianFilter === "sharpe")}
+          className={filterPillClass(clinicianFilter === "sharpe")}
           onClick={() => setClinicianFilter("sharpe")}
         >
           Dr. Sharpe
@@ -320,33 +322,35 @@ export default function AdminAppointmentsPage() {
         <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-gray-500">
           Patient Flow Board
         </h2>
-        {loading ? (
-          <p className="text-sm text-gray-500">Loading…</p>
-        ) : (
-          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-            <FlowColumn
-              label="Scheduled"
-              count={scheduled.length}
-              emptyMessage="No appointments scheduled"
-              items={scheduled.map((row) => renderCard(row, "scheduled"))}
-            />
-            <FlowColumn
-              label="Checked In"
-              count={checkedIn.length}
-              emptyMessage="No patients checked in yet"
-              items={checkedIn.map((row) => renderCard(row, "checked_in"))}
-            />
-            <FlowColumn
-              label="Completed"
-              count={completed.length}
-              emptyMessage="No completed appointments yet"
-              items={completed.map((row) => renderCard(row, "completed"))}
-            />
-          </div>
-        )}
+        <div className="mt-4 rounded-2xl bg-white p-6 shadow-sm">
+          {loading ? (
+            <p className="text-sm text-gray-500">Loading…</p>
+          ) : (
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+              <FlowColumn
+                label="Scheduled"
+                count={scheduled.length}
+                emptyMessage="No appointments scheduled"
+                items={scheduled.map((row) => renderCard(row, "scheduled"))}
+              />
+              <FlowColumn
+                label="Checked In"
+                count={checkedIn.length}
+                emptyMessage="No patients checked in yet"
+                items={checkedIn.map((row) => renderCard(row, "checked_in"))}
+              />
+              <FlowColumn
+                label="Completed"
+                count={completed.length}
+                emptyMessage="No completed appointments yet"
+                items={completed.map((row) => renderCard(row, "completed"))}
+              />
+            </div>
+          )}
+        </div>
       </section>
 
-      <section>
+      <section className="mb-8">
         <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-gray-500">
           Week Calendar
         </h2>
@@ -364,7 +368,7 @@ export default function AdminAppointmentsPage() {
               <div
                 key={ymd}
                 className={[
-                  "rounded-2xl border border-gray-100 p-4 shadow-sm",
+                  "rounded-2xl border border-gray-100 p-5 shadow-sm",
                   isToday ? "bg-emerald-50/40" : "bg-white",
                 ].join(" ")}
               >
@@ -447,23 +451,23 @@ function FlowColumn({
   items: React.ReactNode[];
   emptyMessage: string;
 }) {
+  const countLine =
+    count === 1 ? "1 patient" : `${count} patients`;
+
   return (
-    <div className="flex min-h-[400px] flex-col rounded-2xl bg-gray-50 p-4">
-      <div className="mb-4 flex items-center">
-        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
-          {label}
-        </span>
-        <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">
-          {count}
-        </span>
+    <div className="flex min-h-[400px] flex-col rounded-xl bg-gray-50 p-5">
+      <div className="mb-3">
+        <p className="text-xs uppercase tracking-wide text-gray-500">{label}</p>
+        <p className="text-sm text-gray-600">{countLine}</p>
       </div>
-      <div className="flex flex-col gap-3">
-        {items.length === 0 ? (
-          <p className="text-xs text-gray-500">{emptyMessage}</p>
-        ) : (
-          items
-        )}
-      </div>
+      {items.length === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+          <div className="mb-3 h-8 w-8 rounded-full bg-gray-200" />
+          <p className="text-sm text-gray-500">{emptyMessage}</p>
+        </div>
+      ) : (
+        <div className="space-y-4">{items}</div>
+      )}
     </div>
   );
 }
