@@ -45,11 +45,13 @@ export default function AdminLoginPage() {
           aria-hidden
         />
         <div className="relative z-10 flex flex-col items-center text-center">
-          <img
-            src="/altheon-logo-white.svg"
-            alt="Altheon"
-            className="mx-auto w-[240px]"
-          />
+          <div className="flex flex-col items-center justify-center gap-8 h-full">
+            <img
+              src="/altheon-logo-white.svg"
+              alt="Altheon"
+              className="w-[320px] max-w-none"
+            />
+          </div>
           <p className="mt-4 text-center text-sm text-white opacity-80">
             AI-powered clinic operations platform
           </p>
