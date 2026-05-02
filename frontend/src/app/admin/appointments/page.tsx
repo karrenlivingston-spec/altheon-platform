@@ -398,23 +398,21 @@ export default function AdminAppointmentsPage() {
                           key={row.id}
                           title={fullName}
                           className={[
-                            "rounded-lg p-2 text-xs",
+                            "overflow-visible rounded-lg py-1.5 px-2 text-xs",
                             cellAccent,
                             cancelled ? "opacity-50" : "",
                           ].join(" ")}
                         >
-                          <div className="flex items-start justify-between gap-1">
+                          <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
-                              <div className="flex min-w-0 items-baseline gap-1.5">
-                                <span
-                                  className={`min-w-0 flex-1 truncate font-medium text-gray-800 ${cancelled ? "line-through" : ""}`}
-                                >
-                                  {fullName}
-                                </span>
-                                <span className="shrink-0 text-gray-500">
-                                  {formatTimeEastern(row.start_time)}
-                                </span>
-                              </div>
+                              <p className="text-xs font-medium text-gray-500">
+                                {formatTimeEastern(row.start_time)}
+                              </p>
+                              <p
+                                className={`mt-0.5 break-words text-xs font-semibold text-gray-800 ${cancelled ? "line-through" : ""}`}
+                              >
+                                {fullName}
+                              </p>
                             </div>
                             {checkedInBlock ? (
                               <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium leading-tight text-amber-800">
