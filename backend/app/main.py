@@ -151,6 +151,24 @@ ALLOWED_BILLING_STATUSES = frozenset(
     {"draft", "submitted", "paid", "denied", "partial"}
 )
 
+CLINIC_SETTINGS_PATCHABLE = frozenset(
+    {
+        "clinic_name",
+        "phone",
+        "email",
+        "address_line1",
+        "address_line2",
+        "city",
+        "state",
+        "zip",
+        "timezone",
+        "billing_model",
+        "business_hours",
+        "providers",
+        "logo_url",
+    }
+)
+
 
 @app.post("/billing-records")
 def create_billing_record(body: dict = Body(...)):
@@ -507,4 +525,52 @@ def patch_pi_case(case_id: str, body: dict = Body(...)):
     rows = upd.data or []
     if not rows:
         raise HTTPException(status_code=404, detail="PI case not found")
+    return rows[0]
+
+
+@app.get("/clinic-settings/{clinic_id}")
+def get_clinic_settings(clinic_id: str):
+    try:
+        resp = (
+            supabase.table("clinic_settings")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    rows = resp.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Clinic settings not found")
+    return rows[0]
+
+
+@app.patch("/clinic-settings/{clinic_id}")
+def patch_clinic_settings(clinic_id: str, body: dict = Body(...)):
+    data = {k: body[k] for k in CLINIC_SETTINGS_PATCHABLE if k in body}
+    if not data:
+        raise HTTPException(
+            status_code=400,
+            detail="No valid fields to update",
+        )
+    data["updated_at"] = _now_iso()
+    try:
+        upd = (
+            supabase.table("clinic_settings")
+            .update(data)
+            .eq("clinic_id", clinic_id)
+            .execute()
+        )
+        _handle_supabase_error(upd)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    rows = upd.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Clinic settings not found")
     return rows[0]
