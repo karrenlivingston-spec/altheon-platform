@@ -136,11 +136,11 @@ function AdminAuthenticatedShell({
             sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           ].join(" ")}
         >
-          <div className="border-b border-white/10 px-5 py-10">
+          <div className="flex items-center border-b border-white/10 px-4 py-4">
             <img
               src="/altheon-logo-white.svg"
               alt="Altheon"
-              style={{ width: "180px", height: "auto", display: "block" }}
+              className="h-9 w-auto max-w-full object-contain"
             />
           </div>
           <nav className="flex flex-1 flex-col gap-2 px-3 py-6">
