@@ -1,9 +1,11 @@
+import calendar
 import json
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -130,6 +132,247 @@ def _handle_supabase_error(response: Any) -> None:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+_NY_TZ = ZoneInfo("America/New_York")
+
+_ASK_ALTHEON_FALLBACK = (
+    "I couldn't retrieve that data right now. Please try again."
+)
+
+
+def _parse_iso_datetime(value: Any) -> Optional[datetime]:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        s = str(value).strip().replace("Z", "+00:00")
+        try:
+            dt = datetime.fromisoformat(s)
+        except ValueError:
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _eastern_ymd_from_utc_dt(dt: datetime) -> str:
+    return dt.astimezone(_NY_TZ).strftime("%Y-%m-%d")
+
+
+def _eastern_now_parts() -> tuple[str, str, str]:
+    """Return (today_ymd, month_start_ymd, month_end_ymd) in America/New_York."""
+    ny = datetime.now(timezone.utc).astimezone(_NY_TZ)
+    y, m = ny.year, ny.month
+    _, last = calendar.monthrange(y, m)
+    today = ny.strftime("%Y-%m-%d")
+    start = f"{y:04d}-{m:02d}-01"
+    end = f"{y:04d}-{m:02d}-{last:02d}"
+    return today, start, end
+
+
+def _eastern_week_mon_sun_ymd() -> tuple[str, str]:
+    ny = datetime.now(timezone.utc).astimezone(_NY_TZ)
+    d = ny.date()
+    monday = d - timedelta(days=d.weekday())
+    sunday = monday + timedelta(days=6)
+    return monday.isoformat(), sunday.isoformat()
+
+
+def _fmt_usd_from_cents(cents: int) -> str:
+    return f"${cents / 100:.2f}"
+
+
+def _ask_altheon_build_clinic_context(clinic_id: str) -> str:
+    """Aggregate clinic rows from Supabase for the Ask Altheon assistant."""
+    today_ymd, month_start, month_end = _eastern_now_parts()
+    week_mon, week_sun = _eastern_week_mon_sun_ymd()
+
+    ap_resp = (
+        supabase.table("appointments")
+        .select("start_time")
+        .eq("clinic_id", clinic_id)
+        .execute()
+    )
+    _handle_supabase_error(ap_resp)
+    ap_rows = ap_resp.data or []
+    ap_today = ap_week = ap_month = 0
+    for row in ap_rows:
+        st = row.get("start_time")
+        dt = _parse_iso_datetime(st)
+        if dt is None:
+            continue
+        ymd = _eastern_ymd_from_utc_dt(dt)
+        if ymd == today_ymd:
+            ap_today += 1
+        if week_mon <= ymd <= week_sun:
+            ap_week += 1
+        if month_start <= ymd <= month_end:
+            ap_month += 1
+
+    br_resp = (
+        supabase.table("billing_records")
+        .select("date_of_service,total_billed_cents,total_paid_cents,status")
+        .eq("clinic_id", clinic_id)
+        .execute()
+    )
+    _handle_supabase_error(br_resp)
+    br_rows = br_resp.data or []
+    bill_month_billed = bill_month_paid = 0
+    bill_draft = bill_submitted = bill_paid = bill_denied = bill_partial = 0
+    bill_other = 0
+    for row in br_rows:
+        dos = row.get("date_of_service")
+        dos_s = (str(dos).strip()[:10] if dos is not None else "") or ""
+        if dos_s and month_start <= dos_s <= month_end:
+            bill_month_billed += int(row.get("total_billed_cents") or 0)
+            bill_month_paid += int(row.get("total_paid_cents") or 0)
+        st = (str(row.get("status") or "")).lower() or "draft"
+        if st == "draft":
+            bill_draft += 1
+        elif st == "submitted":
+            bill_submitted += 1
+        elif st == "paid":
+            bill_paid += 1
+        elif st == "denied":
+            bill_denied += 1
+        elif st == "partial":
+            bill_partial += 1
+        else:
+            bill_other += 1
+
+    pca_resp = (
+        supabase.table("patient_clinic_access")
+        .select("patient_id", count="exact")
+        .eq("clinic_id", clinic_id)
+        .execute()
+    )
+    _handle_supabase_error(pca_resp)
+    patient_total = int(getattr(pca_resp, "count", None) or len(pca_resp.data or []))
+
+    pi_resp = (
+        supabase.table("pi_cases")
+        .select("status")
+        .eq("clinic_id", clinic_id)
+        .execute()
+    )
+    _handle_supabase_error(pi_resp)
+    pi_rows = pi_resp.data or []
+    pi_counts: dict[str, int] = {}
+    for row in pi_rows:
+        st = (str(row.get("status") or "open")).lower()
+        pi_counts[st] = pi_counts.get(st, 0) + 1
+
+    mt_resp = (
+        supabase.table("membership_tiers")
+        .select("id", count="exact")
+        .eq("clinic_id", clinic_id)
+        .eq("is_active", True)
+        .execute()
+    )
+    _handle_supabase_error(mt_resp)
+    active_tier_count = int(
+        getattr(mt_resp, "count", None) or len(mt_resp.data or [])
+    )
+
+    pm_resp = (
+        supabase.table("patient_memberships")
+        .select("id", count="exact")
+        .eq("clinic_id", clinic_id)
+        .eq("status", "active")
+        .execute()
+    )
+    _handle_supabase_error(pm_resp)
+    active_memberships = int(
+        getattr(pm_resp, "count", None) or len(pm_resp.data or [])
+    )
+
+    as_of = datetime.now(timezone.utc).astimezone(_NY_TZ).strftime("%Y-%m-%d %H:%M %Z")
+    pi_open = pi_counts.get("open", 0)
+    pi_in_treatment = pi_counts.get("in_treatment", 0)
+    pi_settled = pi_counts.get("settled", 0)
+    pi_pending_settlement = pi_counts.get("pending_settlement", 0)
+    pi_closed = pi_counts.get("closed", 0)
+    other_pi = sum(
+        v for k, v in pi_counts.items() if k not in frozenset(
+            {"open", "in_treatment", "settled", "pending_settlement", "closed"}
+        )
+    )
+
+    lines = [
+        f"Clinic data as of {as_of}:",
+        f"Appointments: {ap_today} today, {ap_week} this week, {ap_month} this month",
+        f"Patients: {patient_total} total",
+        (
+            f"Billing: {_fmt_usd_from_cents(bill_month_billed)} billed this month, "
+            f"{_fmt_usd_from_cents(bill_month_paid)} paid (amounts); "
+            f"{bill_draft} draft, {bill_submitted} submitted, "
+            f"{bill_paid} invoices marked paid, {bill_denied} denied"
+            + (f", {bill_partial} partial" if bill_partial else "")
+            + (f", {bill_other} other status" if bill_other else "")
+        ),
+        (
+            f"PI cases: {pi_open} open, {pi_in_treatment} in treatment, "
+            f"{pi_settled} settled, {pi_pending_settlement} pending settlement, "
+            f"{pi_closed} closed"
+            + (f", {other_pi} other status" if other_pi else "")
+        ),
+        (
+            f"Membership: {active_tier_count} active tier(s), "
+            f"{active_memberships} active patient enrollment(s)"
+        ),
+    ]
+    return "\n".join(lines)
+
+
+def _ask_altheon_call_anthropic(question: str, context: str) -> str:
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        raise ValueError("ANTHROPIC_API_KEY is not set")
+    system = (
+        "You are Altheon, an AI assistant for a physical therapy "
+        "and chiropractic clinic. You have access to live clinic data "
+        "provided in the user message. Answer questions about the clinic's "
+        "appointments, billing, patients, and cases concisely and clearly. "
+        "Never mention Supabase, Anthropic, Claude, or any technical "
+        "infrastructure. Keep answers under 3 sentences unless a list "
+        "is specifically needed. Be warm and professional."
+    )
+    payload: dict[str, Any] = {
+        "model": "claude-haiku-4-5-20251001",
+        "max_tokens": 300,
+        "system": system,
+        "messages": [
+            {
+                "role": "user",
+                "content": f"{context}\n\nQuestion: {question}",
+            }
+        ],
+    }
+    body = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.anthropic.com/v1/messages",
+        data=body,
+        method="POST",
+        headers={
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        raw = resp.read().decode("utf-8")
+    data = json.loads(raw)
+    parts: list[str] = []
+    for block in data.get("content") or []:
+        if isinstance(block, dict) and block.get("type") == "text":
+            t = block.get("text")
+            if isinstance(t, str) and t.strip():
+                parts.append(t.strip())
+    if not parts:
+        raise ValueError("empty Anthropic response")
+    return " ".join(parts)
 
 
 def _recalculate_billing_record_total(billing_record_id: str) -> None:
@@ -605,6 +848,32 @@ def _voice_upstream_get_json(url: str, timeout: int = 30) -> Any | None:
         ValueError,
     ):
         return None
+
+
+@app.post("/ask-altheon")
+def ask_altheon(body: dict = Body(...)):
+    # Set ANTHROPIC_API_KEY in Render dashboard → Environment (same as other secrets).
+    question = (body.get("question") or "").strip()
+    clinic_id = (body.get("clinic_id") or "").strip()
+    if not question or not clinic_id:
+        return {"answer": _ASK_ALTHEON_FALLBACK}
+    try:
+        context = _ask_altheon_build_clinic_context(clinic_id)
+        answer = _ask_altheon_call_anthropic(question, context)
+        return {"answer": answer}
+    except (
+        urllib.error.HTTPError,
+        urllib.error.URLError,
+        TimeoutError,
+        json.JSONDecodeError,
+        ValueError,
+        KeyError,
+        TypeError,
+        HTTPException,
+    ):
+        return {"answer": _ASK_ALTHEON_FALLBACK}
+    except Exception:
+        return {"answer": _ASK_ALTHEON_FALLBACK}
 
 
 @app.get("/voice-agent/status")

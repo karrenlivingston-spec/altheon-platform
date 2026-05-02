@@ -18,6 +18,8 @@ import {
 
 import { supabase } from "@/lib/supabase";
 
+import AskAltheon from "./components/AskAltheon";
+
 export default function AdminLayout({
   children,
 }: {
@@ -293,6 +295,7 @@ function AdminAuthenticatedShell({
           </div>
         </main>
       </div>
+      <AskAltheon />
     </div>
   );
 }
