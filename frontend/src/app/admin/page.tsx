@@ -222,63 +222,63 @@ export default function AdminOverviewPage() {
   return (
     <div className="w-full">
       <h1 className="mb-1 text-2xl font-semibold text-gray-900">Overview</h1>
-      <p className="mb-8 text-sm tracking-wide text-gray-500">
+      <p className="mb-10 text-sm tracking-wide text-gray-500">
         Snapshot for clinic operations. Data loads from the live API.
       </p>
 
-      <section className="mb-8">
+      <section className="mb-10">
         {loading ? (
-          <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
             <p className="text-sm text-gray-500">Loading…</p>
           </div>
         ) : nextFocusAppointment ? (
           <div
-            className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
+            className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm"
             style={{
               borderLeftWidth: "4px",
               borderLeftStyle: "solid",
               borderLeftColor: focusBorderColor(nextFocusAppointment.clinician_id),
             }}
           >
-            <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">
               {"Today's Focus"}
             </p>
-            <div className="my-4 border-t border-gray-100" />
-            <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
-              Next Appointment
-            </p>
-            <p className="mt-2 text-lg font-semibold text-gray-900">
-              {formatTimeEastern(nextFocusAppointment.start_time)} ·{" "}
-              {patientName(nextFocusAppointment)} · {serviceName(nextFocusAppointment)}
-            </p>
-            <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
-              <p className="text-sm text-gray-500">
-                {clinicianLabel(nextFocusAppointment.clinician_id)}
-              </p>
+            <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-lg font-medium text-gray-900">
+                  {formatTimeEastern(nextFocusAppointment.start_time)} ·{" "}
+                  {patientName(nextFocusAppointment)}
+                </p>
+                <p className="mt-0.5 text-xs text-gray-400">
+                  {serviceName(nextFocusAppointment)}
+                </p>
+                <p className="mt-1 text-sm text-gray-500">
+                  {clinicianLabel(nextFocusAppointment.clinician_id)}
+                </p>
+              </div>
               <button
                 type="button"
                 disabled={focusCheckInBusy}
                 onClick={() => void handleFocusCheckIn(nextFocusAppointment.id)}
-                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                className="shrink-0 rounded-lg bg-[#1F7A47] px-4 py-1.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
               >
                 {focusCheckInBusy ? "Checking in…" : "Check In"}
               </button>
             </div>
           </div>
         ) : (
-          <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-            <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
+          <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+            <p className="text-xs text-gray-500 uppercase tracking-wide">
               {"Today's Focus"}
             </p>
-            <div className="my-4 border-t border-gray-100" />
-            <p className="text-sm text-gray-500">
+            <p className="mt-2 text-sm text-gray-500">
               All caught up — no more appointments today.
             </p>
           </div>
         )}
       </section>
 
-      <div className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-10 grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label={"Today's Appointments"}
           value={loading ? "…" : String(todayCount)}
@@ -297,15 +297,15 @@ export default function AdminOverviewPage() {
         />
       </div>
 
-      <section className="mb-8">
-        <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+      <section className="mb-10">
+        <h2 className="mb-4 text-xs text-gray-500 uppercase tracking-wide">
           Next 3 Days
         </h2>
         <MiniCalendarStrip appointments={appointments} loading={loading} />
       </section>
 
-      <section>
-        <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+      <section className="mb-10">
+        <h2 className="mb-4 text-xs text-gray-500 uppercase tracking-wide">
           Recent Activity
         </h2>
         <RecentActivityFeed appointments={appointments} loading={loading} />
@@ -320,7 +320,7 @@ function StatCard({ label, value }: { label: string; value: string }) {
       <p className="text-3xl font-semibold tabular-nums text-gray-900">
         {value}
       </p>
-      <p className="mt-2 text-xs font-medium uppercase tracking-wider text-gray-500">
+      <p className="mt-2 text-xs text-gray-500 uppercase tracking-wide">
         {label}
       </p>
     </div>
@@ -340,7 +340,7 @@ function MiniCalendarStrip({
   );
 
   return (
-    <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
+    <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
       {dayKeys.map((ymd) => {
         const rows = appointments
           .filter((a) => getEasternYMD(new Date(a.start_time)) === ymd)
@@ -369,33 +369,26 @@ function MiniCalendarStrip({
         return (
           <div
             key={ymd}
-            className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
+            className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
           >
             <p className="mb-4 text-sm font-semibold text-gray-900">{label}</p>
             {loading ? (
-              <p className="text-xs text-neutral-500">Loading…</p>
+              <p className="text-xs text-gray-500">Loading…</p>
             ) : rows.length === 0 ? (
-              <p className="text-xs text-neutral-400">
+              <p className="text-xs text-gray-400">
                 No appointments scheduled
               </p>
             ) : (
-              <div className="space-y-2">
+              <div className="space-y-4">
                 {rows.map((row) => (
                   <div
                     key={row.id}
-                    className="rounded-lg border border-gray-100 bg-gray-50/80 px-3 py-2.5 text-xs transition-colors hover:bg-gray-50"
-                    style={{
-                      borderLeftColor:
-                        clinicianLabel(row.clinician_id) === "Dr. West"
-                          ? "#1A6B8A"
-                          : "#7C3AED",
-                      borderLeftWidth: "4px",
-                    }}
+                    className="rounded-xl bg-gray-50 px-3 py-2 text-xs transition-colors hover:bg-gray-100"
                   >
-                    <p className="font-medium text-neutral-900">
+                    <p className="font-medium text-gray-900">
                       {formatTimeEastern(row.start_time)}
                     </p>
-                    <p className="text-neutral-700">{patientName(row)}</p>
+                    <p className="text-gray-700">{patientName(row)}</p>
                   </div>
                 ))}
               </div>
@@ -438,7 +431,7 @@ function RecentActivityFeed({
             return (
               <li
                 key={row.id}
-                className="flex gap-3 px-6 py-4 transition-colors hover:bg-gray-50"
+                className="flex gap-3 px-6 py-4 transition-colors hover:bg-gray-100"
               >
                 <div
                   className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-xs font-semibold text-emerald-800"

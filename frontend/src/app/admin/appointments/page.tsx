@@ -255,7 +255,7 @@ export default function AdminAppointmentsPage() {
   const pillActive =
     "border-transparent bg-[#1F7A47] text-white hover:opacity-90 transition-opacity";
   const pillIdle =
-    "border-gray-200 bg-white text-gray-600 hover:border-gray-400 hover:text-gray-900 transition-colors";
+    "border-gray-100 bg-white text-gray-600 hover:border-gray-400 hover:text-gray-900 transition-colors";
 
   return (
     <div className="w-full">

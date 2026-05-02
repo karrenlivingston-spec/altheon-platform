@@ -59,7 +59,7 @@ export default function AdminLoginPage() {
 
       {/* Right — auth */}
       <div className="flex w-full flex-1 flex-col items-center justify-center bg-[#f8fafc] px-6 md:w-[62%] md:min-h-screen">
-        <div className="w-[440px] max-w-full rounded-2xl bg-white p-10 shadow-xl">
+        <div className="w-[440px] max-w-full rounded-2xl bg-white p-10 shadow-sm">
           <div className="space-y-6">
             <img
               src="/altheon-logo-full.svg"

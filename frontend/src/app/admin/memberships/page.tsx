@@ -94,8 +94,8 @@ function statusBadgeClass(status: string): string {
   if (s === "active") return "bg-emerald-50 text-emerald-700";
   if (s === "paused") return "bg-amber-50 text-amber-800";
   if (s === "cancelled") return "bg-red-50 text-red-700";
-  if (s === "expired") return "bg-gray-100 text-gray-600";
-  return "bg-gray-100 text-gray-700";
+  if (s === "expired") return "bg-gray-50 text-gray-600";
+  return "bg-gray-50 text-gray-700";
 }
 
 type TabId = "tiers" | "enrollments";
@@ -430,7 +430,7 @@ export default function AdminMembershipsPage() {
                         className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
                           tier.is_active
                             ? "bg-emerald-50 text-emerald-700"
-                            : "bg-gray-100 text-gray-600"
+                            : "bg-gray-50 text-gray-600"
                         }`}
                       >
                         {tier.is_active ? "Active" : "Inactive"}
@@ -461,7 +461,7 @@ export default function AdminMembershipsPage() {
                           {ids.map((id) => (
                             <li
                               key={id}
-                              className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700"
+                              className="inline-flex rounded-full bg-gray-50 px-2.5 py-0.5 text-xs font-medium text-gray-700"
                               title={id}
                             >
                               {treatmentTypeLabel(id)}
@@ -475,7 +475,7 @@ export default function AdminMembershipsPage() {
                         type="button"
                         disabled={busy}
                         onClick={() => openEditTierModal(tier)}
-                        className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:opacity-50"
+                        className="rounded-xl border border-gray-100 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:opacity-50"
                       >
                         Edit
                       </button>
@@ -483,7 +483,7 @@ export default function AdminMembershipsPage() {
                         type="button"
                         disabled={busy}
                         onClick={() => void toggleTierActive(tier)}
-                        className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:opacity-50"
+                        className="rounded-xl border border-gray-100 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:opacity-50"
                       >
                         {tier.is_active ? "Deactivate" : "Activate"}
                       </button>
@@ -499,7 +499,7 @@ export default function AdminMembershipsPage() {
           <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
-                <thead className="bg-gray-50">
+                <thead className="border-b border-gray-100 bg-white">
                   <tr>
                     <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                       Patient ID
@@ -561,7 +561,7 @@ export default function AdminMembershipsPage() {
                       return (
                         <tr
                           key={row.id}
-                          className="transition-colors hover:bg-gray-50"
+                          className="transition-colors hover:bg-gray-100"
                         >
                           <td className="max-w-[200px] break-all px-6 py-4 font-mono text-xs text-gray-800">
                             {row.patient_id}
@@ -591,7 +591,7 @@ export default function AdminMembershipsPage() {
                           <td className="px-6 py-4">
                             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                               <select
-                                className="h-9 min-w-[8rem] rounded-lg border border-gray-200 bg-white px-2 text-sm outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 disabled:opacity-50"
+                                className="h-9 min-w-[8rem] rounded-lg border border-gray-100 bg-white px-2 text-sm outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 disabled:opacity-50"
                                 style={{ boxShadow: `0 0 0 1px transparent` }}
                                 onFocus={(e) => {
                                   e.target.style.boxShadow = `0 0 0 2px ${BRAND}40`;
@@ -644,7 +644,7 @@ export default function AdminMembershipsPage() {
       {tierModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-xl"
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
             role="dialog"
             aria-modal
             aria-labelledby="tier-modal-title"
@@ -662,7 +662,7 @@ export default function AdminMembershipsPage() {
                   type="text"
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -671,7 +671,7 @@ export default function AdminMembershipsPage() {
                   value={formDescription}
                   onChange={(e) => setFormDescription(e.target.value)}
                   rows={2}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -682,7 +682,7 @@ export default function AdminMembershipsPage() {
                   step="0.01"
                   value={formPriceDollars}
                   onChange={(e) => setFormPriceDollars(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -694,7 +694,7 @@ export default function AdminMembershipsPage() {
                       e.target.value as "monthly" | "quarterly" | "annual",
                     )
                   }
-                  className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 bg-white px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 >
                   <option value="monthly">Monthly</option>
                   <option value="quarterly">Quarterly</option>
@@ -709,7 +709,7 @@ export default function AdminMembershipsPage() {
                   step={1}
                   value={formVisitsIncluded}
                   onChange={(e) => setFormVisitsIncluded(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-700">
@@ -762,7 +762,7 @@ export default function AdminMembershipsPage() {
               <button
                 type="button"
                 onClick={() => setTierModalOpen(false)}
-                className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
               >
                 Cancel
               </button>
@@ -781,7 +781,7 @@ export default function AdminMembershipsPage() {
 
       {changeTierModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-gray-100 bg-white p-6 shadow-xl">
+          <div className="w-full max-w-md rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
             <h2 className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900">
               Change tier
             </h2>
@@ -798,7 +798,7 @@ export default function AdminMembershipsPage() {
                 <label className="mt-4 block text-sm font-medium text-gray-700">
                   New tier
                   <select
-                    className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                    className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                     value={changeTierModal.newTierId}
                     onChange={(e) =>
                       setChangeTierModal((m) =>
@@ -821,7 +821,7 @@ export default function AdminMembershipsPage() {
               <button
                 type="button"
                 onClick={() => setChangeTierModal(null)}
-                className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
               >
                 Cancel
               </button>

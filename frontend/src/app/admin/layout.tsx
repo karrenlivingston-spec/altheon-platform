@@ -76,7 +76,7 @@ function AdminAuthenticatedShell({
     return [
       "block rounded-lg px-4 py-3 text-sm font-medium transition-colors",
       active
-        ? "bg-white/15 text-white"
+        ? "bg-green-600 text-white/90"
         : "text-white/90 hover:bg-white/10",
     ].join(" ");
   }
@@ -87,11 +87,11 @@ function AdminAuthenticatedShell({
   }
 
   return (
-    <div className="min-h-screen bg-[#F5F5F5]">
+    <div className="min-h-screen bg-white">
       <button
         type="button"
         aria-label="Toggle menu"
-        className="fixed left-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-md border border-white/20 bg-[#2D5E3F] text-white shadow md:hidden"
+        className="fixed left-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-md border border-white/20 bg-green-700 text-white shadow-sm md:hidden"
         onClick={() => setSidebarOpen((o) => !o)}
       >
         <span className="sr-only">Menu</span>
@@ -132,7 +132,7 @@ function AdminAuthenticatedShell({
       <div className="flex min-h-screen">
         <aside
           className={[
-            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-white/10 bg-[#2D5E3F] text-white transition-transform duration-200 md:static md:translate-x-0",
+            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-white/10 bg-green-700 text-white transition-transform duration-200 md:static md:translate-x-0",
             sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           ].join(" ")}
         >
@@ -208,8 +208,8 @@ function AdminAuthenticatedShell({
           </div>
         </aside>
 
-        <main className="flex min-h-screen flex-1 flex-col bg-gray-50 md:min-h-0">
-          <div className="mx-auto w-full max-w-7xl flex-1 px-6 pb-8 pt-16 md:py-8">
+        <main className="flex min-h-screen flex-1 flex-col bg-white md:min-h-0">
+          <div className="mx-auto w-full max-w-6xl flex-1 px-6 py-6 pt-16 md:pt-6">
             {children}
           </div>
         </main>

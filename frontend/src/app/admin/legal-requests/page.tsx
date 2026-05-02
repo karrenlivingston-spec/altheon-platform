@@ -34,7 +34,7 @@ function statusPillClass(status: string): string {
   if (s === "pending") return "bg-amber-50 text-amber-800";
   if (s === "in_progress") return "bg-blue-50 text-blue-700";
   if (s === "completed") return "bg-emerald-50 text-emerald-700";
-  return "bg-gray-100 text-gray-700";
+  return "bg-gray-50 text-gray-700";
 }
 
 export default function AdminLegalRequestsPage() {
@@ -173,7 +173,7 @@ export default function AdminLegalRequestsPage() {
       <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-gray-50">
+            <thead className="border-b border-gray-100 bg-white">
               <tr>
                 <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Date Received
@@ -227,7 +227,7 @@ export default function AdminLegalRequestsPage() {
                   return (
                     <tr
                       key={row.id}
-                      className="transition-colors hover:bg-gray-50"
+                      className="transition-colors hover:bg-gray-100"
                     >
                       <td className="whitespace-nowrap px-6 py-4 text-gray-800">
                         {formatReceived(row.created_at)}

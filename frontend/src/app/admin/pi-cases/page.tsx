@@ -80,8 +80,8 @@ function piStatusBadgeClass(status: string): string {
   if (s === "in_treatment") return "bg-amber-50 text-amber-800";
   if (s === "pending_settlement") return "bg-orange-50 text-orange-800";
   if (s === "settled") return "bg-emerald-50 text-emerald-700";
-  if (s === "closed") return "bg-gray-100 text-gray-600";
-  return "bg-gray-100 text-gray-700";
+  if (s === "closed") return "bg-gray-50 text-gray-600";
+  return "bg-gray-50 text-gray-700";
 }
 
 function billingTypeBadgeClass(t: string): string {
@@ -89,17 +89,17 @@ function billingTypeBadgeClass(t: string): string {
   if (s === "cash") return "bg-emerald-50 text-emerald-700";
   if (s === "insurance") return "bg-blue-50 text-blue-700";
   if (s === "mixed") return "bg-violet-50 text-violet-700";
-  return "bg-gray-100 text-gray-700";
+  return "bg-gray-50 text-gray-700";
 }
 
 function billingRecordStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
-  if (s === "draft") return "bg-gray-100 text-gray-700";
+  if (s === "draft") return "bg-gray-50 text-gray-700";
   if (s === "submitted") return "bg-amber-50 text-amber-800";
   if (s === "paid") return "bg-emerald-50 text-emerald-700";
   if (s === "denied") return "bg-red-50 text-red-700";
   if (s === "partial") return "bg-orange-50 text-orange-800";
-  return "bg-gray-100 text-gray-700";
+  return "bg-gray-50 text-gray-700";
 }
 
 function compareCreatedDesc(a: PiCaseRow, b: PiCaseRow): number {
@@ -411,7 +411,7 @@ export default function AdminPiCasesPage() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="mt-1 block h-9 w-52 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+            className="mt-1 block h-9 w-52 rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
           >
             {STATUS_FILTER_OPTIONS.map((o) => (
               <option key={o.label} value={o.value}>
@@ -427,13 +427,13 @@ export default function AdminPiCasesPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Patient name or insurance carrier…"
-            className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+            className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
           />
         </label>
         <button
           type="button"
           onClick={clearFilters}
-          className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+          className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
         >
           Clear filters
         </button>
@@ -442,7 +442,7 @@ export default function AdminPiCasesPage() {
       <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-gray-50">
+            <thead className="border-b border-gray-100 bg-white">
               <tr>
                 <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Patient Name
@@ -488,7 +488,7 @@ export default function AdminPiCasesPage() {
                   return (
                     <tr
                       key={c.id}
-                      className="transition-colors hover:bg-gray-50"
+                      className="transition-colors hover:bg-gray-100"
                     >
                       <td className="px-6 py-4 text-gray-800">{name}</td>
                       <td className="px-6 py-4 text-gray-800">
@@ -514,7 +514,7 @@ export default function AdminPiCasesPage() {
                         <button
                           type="button"
                           onClick={() => openDetail(c)}
-                          className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                          className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
                         >
                           View
                         </button>
@@ -531,7 +531,7 @@ export default function AdminPiCasesPage() {
       {createOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-xl"
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
             role="dialog"
             aria-modal
             aria-labelledby="pi-create-title"
@@ -548,7 +548,7 @@ export default function AdminPiCasesPage() {
                 <select
                   value={cPatientId}
                   onChange={(e) => setCPatientId(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 >
                   <option value="">Select patient…</option>
                   {patients.map((p) => (
@@ -564,7 +564,7 @@ export default function AdminPiCasesPage() {
                   type="date"
                   value={cDateAccident}
                   onChange={(e) => setCDateAccident(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -573,7 +573,7 @@ export default function AdminPiCasesPage() {
                   type="text"
                   value={cInsurance}
                   onChange={(e) => setCInsurance(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -582,7 +582,7 @@ export default function AdminPiCasesPage() {
                   type="text"
                   value={cClaim}
                   onChange={(e) => setCClaim(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -591,7 +591,7 @@ export default function AdminPiCasesPage() {
                   type="text"
                   value={cAttorneyName}
                   onChange={(e) => setCAttorneyName(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -600,7 +600,7 @@ export default function AdminPiCasesPage() {
                   type="email"
                   value={cAttorneyEmail}
                   onChange={(e) => setCAttorneyEmail(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -609,7 +609,7 @@ export default function AdminPiCasesPage() {
                   type="text"
                   value={cAttorneyPhone}
                   onChange={(e) => setCAttorneyPhone(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -618,7 +618,7 @@ export default function AdminPiCasesPage() {
                   value={cNotes}
                   onChange={(e) => setCNotes(e.target.value)}
                   rows={3}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
             </div>
@@ -626,7 +626,7 @@ export default function AdminPiCasesPage() {
               <button
                 type="button"
                 onClick={() => setCreateOpen(false)}
-                className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
               >
                 Cancel
               </button>
@@ -652,7 +652,7 @@ export default function AdminPiCasesPage() {
           role="presentation"
         >
           <div
-            className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-xl"
+            className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
             role="dialog"
             aria-modal
             aria-labelledby="pi-detail-title"
@@ -668,7 +668,7 @@ export default function AdminPiCasesPage() {
               <button
                 type="button"
                 onClick={closeDetail}
-                className="rounded-lg px-2 py-1 text-sm text-gray-500 transition-colors hover:bg-gray-50"
+                className="rounded-lg px-2 py-1 text-sm text-gray-500 transition-colors hover:bg-gray-100"
                 aria-label="Close"
               >
                 ✕
@@ -757,7 +757,7 @@ export default function AdminPiCasesPage() {
                           date_of_accident: e.target.value,
                         }))
                       }
-                      className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                      className="mt-1 h-9 w-full rounded-lg border border-gray-100 px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                     />
                   </label>
                   <div className="grid gap-4 sm:grid-cols-3">
@@ -772,7 +772,7 @@ export default function AdminPiCasesPage() {
                             insurance_carrier: e.target.value,
                           }))
                         }
-                        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                        className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                       />
                     </label>
                     <label className="block text-sm font-medium text-gray-700 sm:col-span-2">
@@ -783,7 +783,7 @@ export default function AdminPiCasesPage() {
                         onChange={(e) =>
                           setEditDraft((d) => ({ ...d, claim_number: e.target.value }))
                         }
-                        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                        className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                       />
                     </label>
                   </div>
@@ -799,7 +799,7 @@ export default function AdminPiCasesPage() {
                             attorney_name: e.target.value,
                           }))
                         }
-                        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                        className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                       />
                     </label>
                     <label className="block text-sm font-medium text-gray-700">
@@ -813,7 +813,7 @@ export default function AdminPiCasesPage() {
                             attorney_email: e.target.value,
                           }))
                         }
-                        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                        className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                       />
                     </label>
                     <label className="block text-sm font-medium text-gray-700">
@@ -827,7 +827,7 @@ export default function AdminPiCasesPage() {
                             attorney_phone: e.target.value,
                           }))
                         }
-                        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                        className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                       />
                     </label>
                   </div>
@@ -839,7 +839,7 @@ export default function AdminPiCasesPage() {
                         setEditDraft((d) => ({ ...d, notes: e.target.value }))
                       }
                       rows={3}
-                      className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                      className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                     />
                   </label>
                 </div>
@@ -851,7 +851,7 @@ export default function AdminPiCasesPage() {
                   <select
                     value={statusDraft}
                     onChange={(e) => setStatusDraft(e.target.value)}
-                    className="ml-2 h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                    className="ml-2 h-9 rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                   >
                     {PI_STATUS_OPTIONS.map((s) => (
                       <option key={s} value={s}>
@@ -874,7 +874,7 @@ export default function AdminPiCasesPage() {
                 <button
                   type="button"
                   onClick={() => setEditMode(true)}
-                  className="mt-6 rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                  className="mt-6 rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
                 >
                   Edit Case
                 </button>
@@ -883,7 +883,7 @@ export default function AdminPiCasesPage() {
                   <button
                     type="button"
                     onClick={cancelEdit}
-                    className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                    className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
                   >
                     Cancel
                   </button>
@@ -905,7 +905,7 @@ export default function AdminPiCasesPage() {
             <div className="mt-3 overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
               <div className="overflow-x-auto">
                 <table className="min-w-full text-left text-sm">
-                  <thead className="bg-gray-50">
+                  <thead className="border-b border-gray-100 bg-white">
                     <tr>
                       <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                         Date of Service
@@ -938,7 +938,7 @@ export default function AdminPiCasesPage() {
                         return (
                           <tr
                             key={r.id}
-                            className="transition-colors hover:bg-gray-50"
+                            className="transition-colors hover:bg-gray-100"
                           >
                             <td className="px-6 py-4 text-gray-800">
                               {r.date_of_service ?? "—"}

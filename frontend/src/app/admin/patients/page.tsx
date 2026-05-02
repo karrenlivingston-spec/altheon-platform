@@ -183,7 +183,7 @@ export default function AdminPatientsPage() {
           placeholder="Search by name or phone…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-9 w-full max-w-md rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+          className="h-9 w-full max-w-md rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
           aria-label="Search patients"
         />
       </div>
@@ -191,7 +191,7 @@ export default function AdminPatientsPage() {
       <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-gray-50">
+            <thead className="border-b border-gray-100 bg-white">
               <tr>
                 <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Name
@@ -239,7 +239,7 @@ export default function AdminPatientsPage() {
                 rows.map((row) => (
                   <tr
                     key={row.patient.id}
-                    className="transition-colors hover:bg-gray-50"
+                    className="transition-colors hover:bg-gray-100"
                   >
                     <td className="px-6 py-4 font-semibold text-gray-900">
                       {patientDisplayName(row.patient)}
@@ -265,7 +265,7 @@ export default function AdminPatientsPage() {
                           Active
                         </span>
                       ) : (
-                        <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
+                        <span className="inline-flex rounded-full bg-gray-50 px-2.5 py-0.5 text-xs font-medium text-gray-600">
                           Inactive
                         </span>
                       )}

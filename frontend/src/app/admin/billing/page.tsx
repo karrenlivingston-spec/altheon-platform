@@ -74,17 +74,17 @@ function billingTypeBadgeClass(t: string): string {
   if (s === "cash") return "bg-emerald-50 text-emerald-700";
   if (s === "insurance") return "bg-blue-50 text-blue-700";
   if (s === "mixed") return "bg-violet-50 text-violet-700";
-  return "bg-gray-100 text-gray-700";
+  return "bg-gray-50 text-gray-700";
 }
 
 function recordStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
-  if (s === "draft") return "bg-gray-100 text-gray-700";
+  if (s === "draft") return "bg-gray-50 text-gray-700";
   if (s === "submitted") return "bg-amber-50 text-amber-800";
   if (s === "paid") return "bg-emerald-50 text-emerald-700";
   if (s === "denied") return "bg-red-50 text-red-700";
   if (s === "partial") return "bg-orange-50 text-orange-800";
-  return "bg-gray-100 text-gray-700";
+  return "bg-gray-50 text-gray-700";
 }
 
 function compareDateOfServiceDesc(a: BillingRecordRow, b: BillingRecordRow): number {
@@ -449,7 +449,7 @@ export default function AdminBillingPage() {
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="mt-1 block h-9 w-40 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+            className="mt-1 block h-9 w-40 rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
           >
             {STATUS_FILTER_OPTIONS.map((o) => (
               <option key={o.label} value={o.value}>
@@ -464,7 +464,7 @@ export default function AdminBillingPage() {
             type="date"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
-            className="mt-1 block h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+            className="mt-1 block h-9 rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
           />
         </label>
         <label className="block text-sm font-medium text-gray-700">
@@ -473,7 +473,7 @@ export default function AdminBillingPage() {
             type="date"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
-            className="mt-1 block h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+            className="mt-1 block h-9 rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
           />
         </label>
         <label className="block min-w-[12rem] flex-1 text-sm font-medium text-gray-700">
@@ -483,13 +483,13 @@ export default function AdminBillingPage() {
             value={searchName}
             onChange={(e) => setSearchName(e.target.value)}
             placeholder="Filter by name…"
-            className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+            className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
           />
         </label>
         <button
           type="button"
           onClick={clearFilters}
-          className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+          className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
         >
           Clear filters
         </button>
@@ -498,7 +498,7 @@ export default function AdminBillingPage() {
       <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="bg-gray-50">
+            <thead className="border-b border-gray-100 bg-white">
               <tr>
                 <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Date of Service
@@ -545,7 +545,7 @@ export default function AdminBillingPage() {
                   return (
                     <tr
                       key={r.id}
-                      className="transition-colors hover:bg-gray-50"
+                      className="transition-colors hover:bg-gray-100"
                     >
                       <td className="px-6 py-4 text-gray-800">
                         {r.date_of_service ?? "—"}
@@ -575,7 +575,7 @@ export default function AdminBillingPage() {
                         <button
                           type="button"
                           onClick={() => void openDetail(r.id)}
-                          className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                          className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
                         >
                           View
                         </button>
@@ -592,7 +592,7 @@ export default function AdminBillingPage() {
       {createOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-xl"
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
             role="dialog"
             aria-modal
             aria-labelledby="billing-create-title"
@@ -609,7 +609,7 @@ export default function AdminBillingPage() {
                 <select
                   value={createPatientId}
                   onChange={(e) => setCreatePatientId(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 >
                   <option value="">Select patient…</option>
                   {patients.map((p) => (
@@ -625,7 +625,7 @@ export default function AdminBillingPage() {
                   type="date"
                   value={createDateOfService}
                   onChange={(e) => setCreateDateOfService(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -633,7 +633,7 @@ export default function AdminBillingPage() {
                 <select
                   value={createBillingType}
                   onChange={(e) => setCreateBillingType(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 >
                   <option value="cash">Cash</option>
                   <option value="insurance">Insurance</option>
@@ -646,7 +646,7 @@ export default function AdminBillingPage() {
                   type="text"
                   value={createAppointmentId}
                   onChange={(e) => setCreateAppointmentId(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -655,7 +655,7 @@ export default function AdminBillingPage() {
                   type="text"
                   value={createPiCaseId}
                   onChange={(e) => setCreatePiCaseId(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -664,7 +664,7 @@ export default function AdminBillingPage() {
                   type="text"
                   value={createProviderId}
                   onChange={(e) => setCreateProviderId(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -673,7 +673,7 @@ export default function AdminBillingPage() {
                   type="text"
                   value={createInsurance}
                   onChange={(e) => setCreateInsurance(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -682,7 +682,7 @@ export default function AdminBillingPage() {
                   type="text"
                   value={createClaimNumber}
                   onChange={(e) => setCreateClaimNumber(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -691,7 +691,7 @@ export default function AdminBillingPage() {
                   value={createNotes}
                   onChange={(e) => setCreateNotes(e.target.value)}
                   rows={2}
-                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
             </div>
@@ -699,7 +699,7 @@ export default function AdminBillingPage() {
               <button
                 type="button"
                 onClick={() => setCreateOpen(false)}
-                className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
               >
                 Cancel
               </button>
@@ -725,7 +725,7 @@ export default function AdminBillingPage() {
           role="presentation"
         >
           <div
-            className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-xl"
+            className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
             role="dialog"
             aria-modal
             aria-labelledby="billing-detail-title"
@@ -741,7 +741,7 @@ export default function AdminBillingPage() {
               <button
                 type="button"
                 onClick={closeDetail}
-                className="rounded-lg px-2 py-1 text-sm text-gray-500 transition-colors hover:bg-gray-50"
+                className="rounded-lg px-2 py-1 text-sm text-gray-500 transition-colors hover:bg-gray-100"
                 aria-label="Close"
               >
                 ✕
@@ -827,7 +827,7 @@ export default function AdminBillingPage() {
                       <select
                         value={statusDraft}
                         onChange={(e) => setStatusDraft(e.target.value)}
-                        className="ml-2 h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                        className="ml-2 h-9 rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                       >
                         {RECORD_STATUS_OPTIONS.map((s) => (
                           <option key={s} value={s}>
@@ -854,7 +854,7 @@ export default function AdminBillingPage() {
                   <div className="mt-3 overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
                     <div className="overflow-x-auto">
                       <table className="min-w-full text-left text-sm">
-                        <thead className="bg-gray-50">
+                        <thead className="border-b border-gray-100 bg-white">
                           <tr>
                             <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                               CPT
@@ -902,7 +902,7 @@ export default function AdminBillingPage() {
                               return (
                                 <tr
                                   key={li.id}
-                                  className="transition-colors hover:bg-gray-50"
+                                  className="transition-colors hover:bg-gray-100"
                                 >
                                   <td className="px-6 py-4 font-mono text-xs">
                                     {li.cpt_code ?? "—"}
@@ -947,7 +947,7 @@ export default function AdminBillingPage() {
                   <button
                     type="button"
                     onClick={() => setLineFormOpen(true)}
-                    className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                    className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
                   >
                     Add Line Item
                   </button>
@@ -963,7 +963,7 @@ export default function AdminBillingPage() {
                           type="text"
                           value={lineCpt}
                           onChange={(e) => setLineCpt(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                          className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                         />
                       </label>
                       <label className="block text-sm font-medium text-gray-700">
@@ -972,7 +972,7 @@ export default function AdminBillingPage() {
                           type="text"
                           value={lineDescription}
                           onChange={(e) => setLineDescription(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                          className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                         />
                       </label>
                       <label className="block text-sm font-medium text-gray-700">
@@ -983,7 +983,7 @@ export default function AdminBillingPage() {
                           step={1}
                           value={lineUnits}
                           onChange={(e) => setLineUnits(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                          className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                         />
                       </label>
                       <label className="block text-sm font-medium text-gray-700">
@@ -994,7 +994,7 @@ export default function AdminBillingPage() {
                           step="0.01"
                           value={lineRateDollars}
                           onChange={(e) => setLineRateDollars(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                          className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                         />
                       </label>
                       <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
@@ -1016,7 +1016,7 @@ export default function AdminBillingPage() {
                               e.target.value as "cash" | "insurance",
                             )
                           }
-                          className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                          className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                         >
                           <option value="cash">Cash</option>
                           <option value="insurance">Insurance</option>
@@ -1029,7 +1029,7 @@ export default function AdminBillingPage() {
                           value={lineModifiers}
                           onChange={(e) => setLineModifiers(e.target.value)}
                           placeholder="e.g. 59, LT"
-                          className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                          className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                         />
                       </label>
                     </div>
@@ -1037,7 +1037,7 @@ export default function AdminBillingPage() {
                       <button
                         type="button"
                         onClick={() => setLineFormOpen(false)}
-                        className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                        className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
                       >
                         Cancel
                       </button>
