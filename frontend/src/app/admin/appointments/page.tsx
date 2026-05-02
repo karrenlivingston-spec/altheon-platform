@@ -43,6 +43,34 @@ function serviceName(row: AppointmentRow): string {
   return row.treatment_types?.name ?? "—";
 }
 
+function flowCardClinicianBorderClass(clinicianId: string): string {
+  if (clinicianId === CLINICIAN_WEST_ID) {
+    return "border-l-4 border-l-[#1A6B8A]";
+  }
+  if (clinicianId === CLINICIAN_SHARPE_ID) {
+    return "border-l-4 border-l-[#7C3AED]";
+  }
+  return "border-l-4 border-l-gray-300";
+}
+
+function filterPillClass(
+  pill: ClinicianFilter,
+  isActive: boolean,
+): string {
+  const base =
+    "cursor-pointer rounded-full border px-4 py-1.5 text-sm font-medium transition-all duration-150";
+  if (!isActive) {
+    return `${base} border-gray-200 bg-white text-gray-600 hover:border-gray-400`;
+  }
+  if (pill === "all") {
+    return `${base} border-[#1a6b3c] bg-[#1a6b3c] text-white`;
+  }
+  if (pill === "west") {
+    return `${base} border-[#1A6B8A] bg-[#1A6B8A] text-white`;
+  }
+  return `${base} border-[#7C3AED] bg-[#7C3AED] text-white`;
+}
+
 function dayLabel(ymd: string): string {
   const [y, m, d] = ymd.split("-").map(Number);
   return new Intl.DateTimeFormat("en-US", {
@@ -189,38 +217,45 @@ export default function AdminAppointmentsPage() {
     const isCancelledScheduled =
       column === "scheduled" && row.status.toLowerCase() === "cancelled";
 
+    const accent = flowCardClinicianBorderClass(row.clinician_id);
+    const cardShell = [
+      "rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-shadow duration-150 hover:shadow-md",
+      accent,
+    ].join(" ");
+
     if (isCancelledScheduled) {
       return (
-        <div key={row.id} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+        <div key={row.id} className={cardShell}>
           <p className="text-sm font-semibold text-gray-500 line-through">
             {patientName(row)}
           </p>
-          <p className="mt-1 text-xs text-gray-600">
-            {formatTimeEastern(row.start_time)} • {clinicianLabel(row.clinician_id)}
+          <p className="mt-1 text-xs text-gray-500">
+            {formatTimeEastern(row.start_time)} ·{" "}
+            {clinicianLabel(row.clinician_id)}
           </p>
-          <p className="mt-1 text-xs text-gray-600">{serviceName(row)}</p>
+          <p className="mt-1 text-xs text-gray-400">{serviceName(row)}</p>
           <p className="mt-2 text-xs font-medium text-gray-500">Cancelled</p>
         </div>
       );
     }
 
     return (
-      <div key={row.id} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+      <div key={row.id} className={cardShell}>
         <p className="text-sm font-semibold text-gray-900">{patientName(row)}</p>
-        <p className="mt-1 text-xs text-gray-600">
-          {formatTimeEastern(row.start_time)} • {clinicianLabel(row.clinician_id)}
+        <p className="mt-1 text-xs text-gray-500">
+          {formatTimeEastern(row.start_time)} · {clinicianLabel(row.clinician_id)}
         </p>
-        <p className="mt-1 text-xs text-gray-600">{serviceName(row)}</p>
+        <p className="mt-1 text-xs text-gray-400">{serviceName(row)}</p>
         {column === "completed" ? (
           <p className="mt-2 text-xs font-medium text-emerald-700">✓ Completed</p>
         ) : (
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-3 flex items-center gap-2">
             {column === "scheduled" ? (
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => void patchStatus(row.id, "checked_in")}
-                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                className="rounded-lg bg-[#1a6b3c] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
               >
                 Check In
               </button>
@@ -229,7 +264,7 @@ export default function AdminAppointmentsPage() {
                 type="button"
                 disabled={busy}
                 onClick={() => void patchStatus(row.id, "completed")}
-                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                className="rounded-lg bg-[#1a6b3c] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
               >
                 Complete
               </button>
@@ -239,7 +274,7 @@ export default function AdminAppointmentsPage() {
                 type="button"
                 disabled={busy}
                 onClick={() => void patchStatus(row.id, "cancelled")}
-                className="text-sm font-medium text-red-500 transition-colors hover:text-red-700 disabled:opacity-60"
+                className="rounded-lg px-3 py-1.5 text-xs font-medium text-red-500 transition-colors hover:text-red-700 disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -250,13 +285,6 @@ export default function AdminAppointmentsPage() {
     );
   }
 
-  const pill =
-    "rounded-full px-3 py-2 text-xs font-medium transition-colors border";
-  const pillActive =
-    "border-transparent bg-[#1F7A47] text-white hover:opacity-90 transition-opacity";
-  const pillIdle =
-    "border-gray-100 bg-white text-gray-600 hover:border-gray-400 hover:text-gray-900 transition-colors";
-
   return (
     <div className="w-full">
       <h1 className="mb-1 text-2xl font-semibold text-gray-900">Appointments</h1>
@@ -264,24 +292,24 @@ export default function AdminAppointmentsPage() {
         Today&apos;s flow and week view
       </p>
 
-      <div className="mb-6 flex flex-wrap gap-2 rounded-2xl border border-gray-100 bg-white px-6 py-4 shadow-sm">
+      <div className="mb-6 flex flex-wrap items-center gap-2">
         <button
           type="button"
-          className={`${pill} ${clinicianFilter === "all" ? pillActive : pillIdle}`}
+          className={filterPillClass("all", clinicianFilter === "all")}
           onClick={() => setClinicianFilter("all")}
         >
           All
         </button>
         <button
           type="button"
-          className={`${pill} ${clinicianFilter === "west" ? pillActive : pillIdle}`}
+          className={filterPillClass("west", clinicianFilter === "west")}
           onClick={() => setClinicianFilter("west")}
         >
           Dr. West
         </button>
         <button
           type="button"
-          className={`${pill} ${clinicianFilter === "sharpe" ? pillActive : pillIdle}`}
+          className={filterPillClass("sharpe", clinicianFilter === "sharpe")}
           onClick={() => setClinicianFilter("sharpe")}
         >
           Dr. Sharpe
@@ -297,17 +325,20 @@ export default function AdminAppointmentsPage() {
         ) : (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <FlowColumn
-              title={`Scheduled (${scheduled.length})`}
+              label="Scheduled"
+              count={scheduled.length}
               emptyMessage="No appointments scheduled"
               items={scheduled.map((row) => renderCard(row, "scheduled"))}
             />
             <FlowColumn
-              title={`Checked In (${checkedIn.length})`}
+              label="Checked In"
+              count={checkedIn.length}
               emptyMessage="No patients checked in yet"
               items={checkedIn.map((row) => renderCard(row, "checked_in"))}
             />
             <FlowColumn
-              title={`Completed (${completed.length})`}
+              label="Completed"
+              count={completed.length}
               emptyMessage="No completed appointments yet"
               items={completed.map((row) => renderCard(row, "completed"))}
             />
@@ -316,7 +347,7 @@ export default function AdminAppointmentsPage() {
       </section>
 
       <section>
-        <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+        <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-gray-500">
           Week Calendar
         </h2>
         <div className="grid grid-cols-1 gap-4 md:grid-cols-7">
@@ -345,31 +376,41 @@ export default function AdminAppointmentsPage() {
                     </p>
                   ) : (
                     dayRows.map((row) => {
-                      const west = clinicianLabel(row.clinician_id) === "Dr. West";
+                      const west = row.clinician_id === CLINICIAN_WEST_ID;
+                      const sharpe = row.clinician_id === CLINICIAN_SHARPE_ID;
                       const st = row.status.toLowerCase();
                       const cancelled = st === "cancelled";
                       const checkedInBlock = st === "checked_in";
                       const completedBlock = st === "completed";
+                      const fullName = patientName(row);
+                      const cellAccent = west
+                        ? "border-l-2 border-l-[#1A6B8A] bg-blue-50"
+                        : sharpe
+                          ? "border-l-2 border-l-[#7C3AED] bg-purple-50"
+                          : "border-l-2 border-l-gray-300 bg-gray-50";
 
                       return (
                         <div
                           key={row.id}
+                          title={fullName}
                           className={[
-                            "rounded-lg border px-2.5 py-2 text-xs transition-colors",
-                            west
-                              ? "border-sky-100 bg-sky-50 text-sky-900"
-                              : "border-violet-100 bg-violet-50 text-violet-900",
+                            "rounded-lg p-2 text-xs",
+                            cellAccent,
                             cancelled ? "opacity-50" : "",
                           ].join(" ")}
                         >
                           <div className="flex items-start justify-between gap-1">
                             <div className="min-w-0 flex-1">
-                              <p className="font-medium">
-                                {formatTimeEastern(row.start_time)}
-                              </p>
-                              <p className={`truncate ${cancelled ? "line-through" : ""}`}>
-                                {patientName(row)}
-                              </p>
+                              <div className="flex min-w-0 items-baseline gap-1.5">
+                                <span
+                                  className={`min-w-0 flex-1 truncate font-medium text-gray-800 ${cancelled ? "line-through" : ""}`}
+                                >
+                                  {fullName}
+                                </span>
+                                <span className="shrink-0 text-gray-500">
+                                  {formatTimeEastern(row.start_time)}
+                                </span>
+                              </div>
                             </div>
                             {checkedInBlock ? (
                               <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium leading-tight text-amber-800">
@@ -396,20 +437,27 @@ export default function AdminAppointmentsPage() {
 }
 
 function FlowColumn({
-  title,
+  label,
+  count,
   items,
   emptyMessage,
 }: {
-  title: string;
+  label: string;
+  count: number;
   items: React.ReactNode[];
   emptyMessage: string;
 }) {
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-      <p className="mb-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-        {title}
-      </p>
-      <div className="space-y-4">
+    <div className="flex min-h-[400px] flex-col rounded-2xl bg-gray-50 p-4">
+      <div className="mb-4 flex items-center">
+        <span className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+          {label}
+        </span>
+        <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-semibold text-gray-600">
+          {count}
+        </span>
+      </div>
+      <div className="flex flex-col gap-3">
         {items.length === 0 ? (
           <p className="text-xs text-gray-500">{emptyMessage}</p>
         ) : (
