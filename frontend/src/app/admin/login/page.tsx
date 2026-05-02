@@ -37,8 +37,9 @@ export default function AdminLoginPage() {
     >
       <div className="w-[420px] rounded-xl bg-white p-10 shadow-lg">
         <img
-          src="/altheon-logo-full.png"
+          src="/altheon-logo-full.svg"
           alt="Altheon"
+          className="login-logo"
           style={{
             width: "220px",
             minWidth: "220px",
