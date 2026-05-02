@@ -30,28 +30,28 @@ export default function AdminLoginPage() {
 
   return (
     <div
-      className="min-h-screen flex flex-col items-center"
+      className="flex min-h-screen flex-col items-center justify-center"
       style={{
         background: "linear-gradient(180deg, #f9fafb 0%, #f3f4f6 100%)",
-        paddingTop: "8vh",
       }}
     >
-      <div
-        style={{ display: "flex", flexDirection: "column", alignItems: "center" }}
-      >
+      <div className="w-[420px] rounded-xl bg-white p-10 shadow-lg">
         <img
           src="/altheon-logo-full.png"
           alt="Altheon"
           style={{
-            width: "280px",
+            width: "220px",
             height: "auto",
-            marginBottom: "16px",
+            marginBottom: "24px",
             display: "block",
           }}
+          className="mx-auto"
         />
-        <div className="w-[400px] rounded-xl border-t-[3px] border-t-[#1F7A47] bg-white p-8 shadow-md">
-          <h1 className="mb-6 text-center text-xl font-semibold">Sign in</h1>
-          <form onSubmit={handleSubmit}>
+        <h1 className="text-center text-xl font-semibold">Sign in</h1>
+        <p className="mb-6 text-center text-sm text-gray-500">
+          Enter your credentials to continue
+        </p>
+        <form onSubmit={handleSubmit}>
           <label
             htmlFor="admin-email"
             className="mb-1 block text-sm font-medium text-gray-700"
@@ -99,8 +99,7 @@ export default function AdminLoginPage() {
           >
             Secure access for clinic staff
           </p>
-          </form>
-        </div>
+        </form>
       </div>
     </div>
   );
