@@ -12,6 +12,7 @@ import {
   CreditCard,
   Receipt,
   Briefcase,
+  Phone,
   Settings,
 } from "lucide-react";
 
@@ -243,6 +244,19 @@ function AdminAuthenticatedShell({
                   aria-hidden
                 />
                 PI Cases
+              </span>
+            </Link>
+            <Link
+              href="/admin/voice-agent"
+              className={navLinkClass("/admin/voice-agent")}
+              onClick={() => setSidebarOpen(false)}
+            >
+              <span className="flex items-center gap-3">
+                <Phone
+                  className={navIconClass("/admin/voice-agent")}
+                  aria-hidden
+                />
+                Voice Agent
               </span>
             </Link>
             <Link

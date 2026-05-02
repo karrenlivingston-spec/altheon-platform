@@ -1,3 +1,7 @@
+import json
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -574,3 +578,87 @@ def patch_clinic_settings(clinic_id: str, body: dict = Body(...)):
     if not rows:
         raise HTTPException(status_code=404, detail="Clinic settings not found")
     return rows[0]
+
+
+_VOICE_AGENT_DISPLAY_NAME = "Aria"
+_VOICE_UPSTREAM_BASE = "https://api.elevenlabs.io/v1/convai"
+
+
+def _voice_upstream_headers() -> dict[str, str]:
+    key = os.environ.get("ELEVENLABS_API_KEY") or ""
+    return {"xi-api-key": key, "Accept": "application/json"}
+
+
+def _voice_upstream_get_json(url: str, timeout: int = 30) -> Any | None:
+    try:
+        req = urllib.request.Request(url, headers=_voice_upstream_headers(), method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            if resp.status != 200:
+                return None
+            raw = resp.read().decode("utf-8")
+            return json.loads(raw)
+    except (
+        urllib.error.HTTPError,
+        urllib.error.URLError,
+        TimeoutError,
+        json.JSONDecodeError,
+        ValueError,
+    ):
+        return None
+
+
+@app.get("/voice-agent/status")
+def voice_agent_status(
+    _clinic_id: Optional[str] = Query(None, alias="clinic_id"),
+):
+    agent_id = os.environ.get("ELEVENLABS_AGENT_ID")
+    api_key = os.environ.get("ELEVENLABS_API_KEY")
+    if not agent_id or not api_key:
+        return {"status": "offline", "agent_name": _VOICE_AGENT_DISPLAY_NAME}
+    safe_id = urllib.parse.quote(agent_id, safe="")
+    url = f"{_VOICE_UPSTREAM_BASE}/agents/{safe_id}"
+    data = _voice_upstream_get_json(url, timeout=15)
+    if data is not None:
+        return {"status": "online", "agent_name": _VOICE_AGENT_DISPLAY_NAME}
+    return {"status": "offline", "agent_name": _VOICE_AGENT_DISPLAY_NAME}
+
+
+@app.get("/voice-agent/conversations")
+def voice_agent_conversations(
+    _clinic_id: Optional[str] = Query(None, alias="clinic_id"),
+    page_size: int = Query(20, ge=1, le=50),
+):
+    agent_id = os.environ.get("ELEVENLABS_AGENT_ID")
+    api_key = os.environ.get("ELEVENLABS_API_KEY")
+    if not agent_id or not api_key:
+        return {"conversations": []}
+    qs = urllib.parse.urlencode(
+        {"agent_id": agent_id, "page_size": str(page_size)},
+        doseq=True,
+    )
+    url = f"{_VOICE_UPSTREAM_BASE}/conversations?{qs}"
+    data = _voice_upstream_get_json(url, timeout=30)
+    if not isinstance(data, dict):
+        return {"conversations": []}
+    convs = data.get("conversations")
+    if not isinstance(convs, list):
+        return {"conversations": []}
+    out: list[dict[str, Any]] = []
+    for c in convs:
+        if not isinstance(c, dict):
+            continue
+        direction = c.get("direction")
+        if direction is not None and not isinstance(direction, str):
+            direction = str(direction)
+        out.append(
+            {
+                "conversation_id": c.get("conversation_id"),
+                "start_time_unix_secs": c.get("start_time_unix_secs"),
+                "call_duration_secs": c.get("call_duration_secs"),
+                "message_count": c.get("message_count"),
+                "call_successful": c.get("call_successful"),
+                "transcript_summary": c.get("transcript_summary"),
+                "direction": direction,
+            }
+        )
+    return {"conversations": out}
