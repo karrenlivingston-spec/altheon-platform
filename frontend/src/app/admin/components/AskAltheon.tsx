@@ -19,6 +19,9 @@ const SUGGESTIONS = [
   "How many open PI cases?",
 ] as const;
 
+const cleanText = (text: string) =>
+  text.replace(/\*\*(.*?)\*\*/g, "$1").replace(/\*(.*?)\*/g, "$1");
+
 export default function AskAltheon() {
   const [isOpen, setIsOpen] = useState(false);
   const [question, setQuestion] = useState("");
@@ -157,7 +160,7 @@ export default function AskAltheon() {
                       : "max-w-[85%] rounded-2xl rounded-bl-sm bg-gray-100 px-3 py-2 text-sm text-gray-800"
                   }
                 >
-                  {m.content}
+                  {m.role === "assistant" ? cleanText(m.content) : m.content}
                 </div>
               </div>
             ))}
