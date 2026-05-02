@@ -210,9 +210,12 @@ export default function AdminAppointmentsPage() {
 
     const accent = flowCardClinicianBorderClass(row.clinician_id);
     const cardShell = [
-      "rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-all duration-150 hover:shadow-md",
+      "rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-all duration-150 ease-out hover:-translate-y-[1px] hover:shadow-md",
       accent,
-    ].join(" ");
+      column === "completed" ? "opacity-90" : "",
+    ]
+      .filter(Boolean)
+      .join(" ");
 
     if (isCancelledScheduled) {
       return (
@@ -249,7 +252,7 @@ export default function AdminAppointmentsPage() {
           <p className="text-xs text-gray-500">{serviceName(row)}</p>
         </div>
         {column === "completed" ? (
-          <p className="mt-3 text-xs font-medium text-emerald-700">✓ Completed</p>
+          <p className="mt-1 text-xs text-green-600">✓ Completed</p>
         ) : (
           <div className="mt-3 flex items-center gap-2">
             {column === "scheduled" ? (
@@ -257,7 +260,7 @@ export default function AdminAppointmentsPage() {
                 type="button"
                 disabled={busy}
                 onClick={() => void patchStatus(row.id, "checked_in")}
-                className="rounded-lg bg-[#1a6b3c] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                className="rounded-md bg-green-600/90 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-60"
               >
                 Check In
               </button>
@@ -266,7 +269,7 @@ export default function AdminAppointmentsPage() {
                 type="button"
                 disabled={busy}
                 onClick={() => void patchStatus(row.id, "completed")}
-                className="rounded-lg bg-[#1a6b3c] px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                className="rounded-md bg-green-600/90 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-60"
               >
                 Complete
               </button>
@@ -322,7 +325,7 @@ export default function AdminAppointmentsPage() {
         <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-gray-500">
           Patient Flow Board
         </h2>
-        <div className="mt-4 rounded-2xl bg-white p-6 shadow-sm">
+        <div className="mt-4 rounded-2xl bg-white p-6 shadow-md">
           {loading ? (
             <p className="text-sm text-gray-500">Loading…</p>
           ) : (
@@ -394,7 +397,7 @@ export default function AdminAppointmentsPage() {
                         ? "border-l-2 border-l-[#1A6B8A] bg-blue-50"
                         : sharpe
                           ? "border-l-2 border-l-[#7C3AED] bg-purple-50"
-                          : "border-l-2 border-l-gray-300 bg-gray-50";
+                          : "border-l-2 border-l-gray-300 bg-gray-50/60";
 
                       return (
                         <div
@@ -454,13 +457,13 @@ function FlowColumn({
     count === 1 ? "1 patient" : `${count} patients`;
 
   return (
-    <div className="flex min-h-[400px] flex-col rounded-xl bg-gray-50 p-5">
-      <div className="mb-3">
+    <div className="flex min-h-[400px] flex-col rounded-xl bg-gray-50/50 p-4">
+      <div className="mb-4 border-b border-gray-100 pb-2">
         <p className="text-xs uppercase tracking-wide text-gray-500">{label}</p>
         <p className="text-sm text-gray-600">{countLine}</p>
       </div>
       {items.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center py-10 text-center">
+        <div className="flex flex-1 flex-col items-center justify-center py-12 text-center">
           <div className="mb-3 h-8 w-8 rounded-full bg-gray-200" />
           <p className="text-sm text-gray-500">{emptyMessage}</p>
         </div>
