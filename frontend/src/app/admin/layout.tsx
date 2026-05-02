@@ -4,6 +4,17 @@ import type { Session } from "@supabase/supabase-js";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
+import {
+  LayoutDashboard,
+  CalendarDays,
+  Scale,
+  Users,
+  CreditCard,
+  Receipt,
+  Briefcase,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- no Settings route yet; keep import per design spec
+  Settings,
+} from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 
@@ -147,49 +158,70 @@ function AdminAuthenticatedShell({
               className={navLinkClass("/admin")}
               onClick={() => setSidebarOpen(false)}
             >
-              Overview
+              <span className="flex items-center gap-3">
+                <LayoutDashboard className="w-4 h-4 shrink-0" aria-hidden />
+                Overview
+              </span>
             </Link>
             <Link
               href="/admin/appointments"
               className={navLinkClass("/admin/appointments")}
               onClick={() => setSidebarOpen(false)}
             >
-              Appointments
+              <span className="flex items-center gap-3">
+                <CalendarDays className="w-4 h-4 shrink-0" aria-hidden />
+                Appointments
+              </span>
             </Link>
             <Link
               href="/admin/legal-requests"
               className={navLinkClass("/admin/legal-requests")}
               onClick={() => setSidebarOpen(false)}
             >
-              Legal Requests
+              <span className="flex items-center gap-3">
+                <Scale className="w-4 h-4 shrink-0" aria-hidden />
+                Legal Requests
+              </span>
             </Link>
             <Link
               href="/admin/patients"
               className={navLinkClass("/admin/patients")}
               onClick={() => setSidebarOpen(false)}
             >
-              Patients
+              <span className="flex items-center gap-3">
+                <Users className="w-4 h-4 shrink-0" aria-hidden />
+                Patients
+              </span>
             </Link>
             <Link
               href="/admin/memberships"
               className={navLinkClass("/admin/memberships")}
               onClick={() => setSidebarOpen(false)}
             >
-              Memberships
+              <span className="flex items-center gap-3">
+                <CreditCard className="w-4 h-4 shrink-0" aria-hidden />
+                Memberships
+              </span>
             </Link>
             <Link
               href="/admin/billing"
               className={navLinkClass("/admin/billing")}
               onClick={() => setSidebarOpen(false)}
             >
-              Billing
+              <span className="flex items-center gap-3">
+                <Receipt className="w-4 h-4 shrink-0" aria-hidden />
+                Billing
+              </span>
             </Link>
             <Link
               href="/admin/pi-cases"
               className={navLinkClass("/admin/pi-cases")}
               onClick={() => setSidebarOpen(false)}
             >
-              PI Cases
+              <span className="flex items-center gap-3">
+                <Briefcase className="w-4 h-4 shrink-0" aria-hidden />
+                PI Cases
+              </span>
             </Link>
           </nav>
           <div className="border-t border-white/10 px-3 py-5">
