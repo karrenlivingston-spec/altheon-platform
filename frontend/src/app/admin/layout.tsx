@@ -136,14 +136,10 @@ function AdminAuthenticatedShell({
             sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           ].join(" ")}
         >
-          <div className="px-4 py-5">
-            <div
-              className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/15 shadow-sm"
-              role="img"
-              aria-label="Altheon"
-            >
-              <span className="text-white font-semibold text-base">A</span>
-            </div>
+          <div className="flex items-center gap-2 px-4 py-5">
+            <span className="text-white font-semibold text-xl tracking-wide">
+              Altheon
+            </span>
           </div>
           <nav className="flex flex-1 flex-col gap-2 px-3 py-6">
             <Link
