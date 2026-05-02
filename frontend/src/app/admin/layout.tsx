@@ -136,12 +136,14 @@ function AdminAuthenticatedShell({
             sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           ].join(" ")}
         >
-          <div className="flex items-center border-b border-white/10 px-4 py-4">
-            <img
-              src="/altheon-logo-white.svg"
-              alt="Altheon"
-              className="h-auto w-32 object-contain"
-            />
+          <div className="border-b border-white/10 px-4 py-4">
+            <div className="flex items-center rounded-lg bg-white/10 px-3 py-2">
+              <img
+                src="/altheon-logo-white.svg"
+                alt="Altheon"
+                className="h-10 w-auto origin-left scale-110 object-contain brightness-110 contrast-110"
+              />
+            </div>
           </div>
           <nav className="flex flex-1 flex-col gap-2 px-3 py-6">
             <Link
