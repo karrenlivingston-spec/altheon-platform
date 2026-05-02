@@ -31,13 +31,10 @@ function formatReceived(iso?: string): string {
 
 function statusPillClass(status: string): string {
   const s = status.toLowerCase();
-  if (s === "pending")
-    return "bg-amber-100 text-amber-900 ring-1 ring-amber-200";
-  if (s === "in_progress")
-    return "bg-blue-100 text-blue-900 ring-1 ring-blue-200";
-  if (s === "completed")
-    return "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200";
-  return "bg-neutral-100 text-neutral-700 ring-1 ring-neutral-200";
+  if (s === "pending") return "bg-amber-50 text-amber-800";
+  if (s === "in_progress") return "bg-blue-50 text-blue-700";
+  if (s === "completed") return "bg-emerald-50 text-emerald-700";
+  return "bg-gray-100 text-gray-700";
 }
 
 export default function AdminLegalRequestsPage() {
@@ -149,56 +146,67 @@ export default function AdminLegalRequestsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl">
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-semibold text-neutral-900">Legal Requests</h1>
-        <span className="inline-flex items-center rounded-full border border-[#2D5E3F]/30 bg-[#2D5E3F]/10 px-3 py-1 text-sm font-medium text-[#2D5E3F]">
+    <div className="w-full">
+      <h1 className="mb-1 text-2xl font-semibold text-gray-900">Legal Requests</h1>
+      <div className="mb-8 flex flex-wrap items-center gap-3">
+        <p className="text-sm tracking-wide text-gray-500">
+          Attorney and records requests
+        </p>
+        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
           {loading ? "…" : `${counts.total} request${counts.total === 1 ? "" : "s"}`}
         </span>
       </div>
 
       {fetchNote ? (
-        <p className="mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+        <p className="mb-6 rounded-2xl border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
           {fetchNote}
         </p>
       ) : null}
 
-      <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
         <SummaryCard label="Total Requests" value={String(counts.total)} />
         <SummaryCard label="Pending" value={String(counts.pending)} />
         <SummaryCard label="In Progress" value={String(counts.inProgress)} />
         <SummaryCard label="Completed" value={String(counts.completed)} />
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="border-b border-neutral-200 bg-neutral-50">
+            <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 font-medium text-neutral-700">
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Date Received
                 </th>
-                <th className="px-4 py-3 font-medium text-neutral-700">
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Attorney Name
                 </th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Firm Name</th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Phone</th>
-                <th className="px-4 py-3 font-medium text-neutral-700">
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Firm Name
+                </th>
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Phone
+                </th>
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Patient Name
                 </th>
-                <th className="px-4 py-3 font-medium text-neutral-700">
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Request Type
                 </th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Status</th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Actions</th>
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Status
+                </th>
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Actions
+                </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
                   <td
                     colSpan={8}
-                    className="px-4 py-10 text-center text-neutral-500"
+                    className="px-6 py-10 text-center text-gray-500"
                   >
                     Loading…
                   </td>
@@ -207,56 +215,53 @@ export default function AdminLegalRequestsPage() {
                 <tr>
                   <td
                     colSpan={8}
-                    className="px-4 py-10 text-center text-neutral-500"
+                    className="px-6 py-10 text-center text-gray-500"
                   >
                     No legal requests logged yet.
                   </td>
                 </tr>
               ) : (
-                rows.map((row, idx) => {
+                rows.map((row) => {
                   const st = (row.status ?? "pending").toLowerCase();
                   const busy = !!updatingIds[row.id];
                   return (
                     <tr
                       key={row.id}
-                      className={[
-                        "border-b border-neutral-100 transition-colors hover:bg-[#2D5E3F]/5",
-                        idx % 2 === 1 ? "bg-neutral-50/80" : "bg-white",
-                      ].join(" ")}
+                      className="transition-colors hover:bg-gray-50"
                     >
-                      <td className="whitespace-nowrap px-4 py-3 text-neutral-800">
+                      <td className="whitespace-nowrap px-6 py-4 text-gray-800">
                         {formatReceived(row.created_at)}
                       </td>
-                      <td className="px-4 py-3 text-neutral-900">
+                      <td className="px-6 py-4 text-gray-900">
                         {row.attorney_name ?? "—"}
                       </td>
-                      <td className="px-4 py-3 text-neutral-800">
+                      <td className="px-6 py-4 text-gray-800">
                         {row.firm_name ?? "—"}
                       </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-neutral-800">
+                      <td className="whitespace-nowrap px-6 py-4 text-gray-800">
                         {row.attorney_phone ?? "—"}
                       </td>
-                      <td className="px-4 py-3 font-medium text-neutral-900">
+                      <td className="px-6 py-4 font-medium text-gray-900">
                         {row.patient_name ?? "—"}
                       </td>
-                      <td className="px-4 py-3 text-neutral-800">
+                      <td className="px-6 py-4 text-gray-800">
                         {row.request_type ?? "—"}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-6 py-4">
                         <span
                           className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${statusPillClass(st)}`}
                         >
                           {st.replace(/_/g, " ")}
                         </span>
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-2">
                           {st === "pending" ? (
                             <button
                               type="button"
                               disabled={busy}
                               onClick={() => void patchStatus(row.id, "in_progress")}
-                              className="rounded-md bg-[#2D5E3F] px-2.5 py-1 text-xs font-medium text-white hover:opacity-95 disabled:opacity-50"
+                              className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                             >
                               Start
                             </button>
@@ -266,13 +271,13 @@ export default function AdminLegalRequestsPage() {
                               type="button"
                               disabled={busy}
                               onClick={() => void patchStatus(row.id, "completed")}
-                              className="rounded-md bg-[#2D5E3F] px-2.5 py-1 text-xs font-medium text-white hover:opacity-95 disabled:opacity-50"
+                              className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                             >
                               Complete
                             </button>
                           ) : null}
                           {st === "completed" ? (
-                            <span className="text-xs text-neutral-400">—</span>
+                            <span className="text-xs text-gray-400">—</span>
                           ) : null}
                         </div>
                       </td>
@@ -290,9 +295,11 @@ export default function AdminLegalRequestsPage() {
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-neutral-200 bg-white p-4 shadow-sm">
-      <p className="text-2xl font-semibold tabular-nums text-neutral-900">{value}</p>
-      <p className="mt-1 text-xs font-medium text-neutral-600">{label}</p>
+    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <p className="text-3xl font-semibold tabular-nums text-gray-900">{value}</p>
+      <p className="mt-2 text-xs font-medium uppercase tracking-wider text-gray-500">
+        {label}
+      </p>
     </div>
   );
 }

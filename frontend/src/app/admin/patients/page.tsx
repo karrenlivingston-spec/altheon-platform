@@ -166,49 +166,62 @@ export default function AdminPatientsPage() {
   const total = patients.length;
 
   return (
-    <div className="mx-auto max-w-7xl">
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-semibold text-neutral-900">Patients</h1>
-        <span className="inline-flex items-center rounded-full border border-[#2D5E3F]/30 bg-[#2D5E3F]/10 px-3 py-1 text-sm font-medium text-[#2D5E3F]">
+    <div className="w-full">
+      <h1 className="mb-1 text-2xl font-semibold text-gray-900">Patients</h1>
+      <div className="mb-8 flex flex-wrap items-center gap-3">
+        <p className="text-sm tracking-wide text-gray-500">
+          Directory and visit history
+        </p>
+        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
           {loading ? "…" : `${total} patient${total === 1 ? "" : "s"}`}
         </span>
       </div>
 
-      <input
-        type="search"
-        placeholder="Search by name or phone…"
-        value={search}
-        onChange={(e) => setSearch(e.target.value)}
-        className="mb-6 w-full max-w-md rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none ring-[#2D5E3F] focus:ring-2"
-        aria-label="Search patients"
-      />
+      <div className="mb-6 rounded-2xl border border-gray-100 bg-white px-6 py-4 shadow-sm">
+        <input
+          type="search"
+          placeholder="Search by name or phone…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-9 w-full max-w-md rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+          aria-label="Search patients"
+        />
+      </div>
 
-      <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="border-b border-neutral-200 bg-neutral-50">
+            <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 font-medium text-neutral-700">Name</th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Phone</th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Email</th>
-                <th className="px-4 py-3 font-medium text-neutral-700">
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Name
+                </th>
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Phone
+                </th>
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Email
+                </th>
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   First Seen
                 </th>
-                <th className="px-4 py-3 font-medium text-neutral-700">
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Last Seen
                 </th>
-                <th className="px-4 py-3 font-medium text-neutral-700 text-right">
+                <th className="px-6 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
                   Total Visits
                 </th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Status</th>
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Status
+                </th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
                   <td
                     colSpan={7}
-                    className="px-4 py-10 text-center text-neutral-500"
+                    className="px-6 py-10 text-center text-gray-500"
                   >
                     Loading…
                   </td>
@@ -217,45 +230,42 @@ export default function AdminPatientsPage() {
                 <tr>
                   <td
                     colSpan={7}
-                    className="px-4 py-10 text-center text-neutral-500"
+                    className="px-6 py-10 text-center text-gray-500"
                   >
                     No patients match your search.
                   </td>
                 </tr>
               ) : (
-                rows.map((row, idx) => (
+                rows.map((row) => (
                   <tr
                     key={row.patient.id}
-                    className={[
-                      "border-b border-neutral-100 transition-colors hover:bg-[#2D5E3F]/5",
-                      idx % 2 === 1 ? "bg-neutral-50/80" : "bg-white",
-                    ].join(" ")}
+                    className="transition-colors hover:bg-gray-50"
                   >
-                    <td className="px-4 py-3 font-semibold text-neutral-900">
+                    <td className="px-6 py-4 font-semibold text-gray-900">
                       {patientDisplayName(row.patient)}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-neutral-800">
+                    <td className="whitespace-nowrap px-6 py-4 text-gray-800">
                       {row.patient.phone ?? "—"}
                     </td>
-                    <td className="px-4 py-3 text-neutral-700">
+                    <td className="px-6 py-4 text-gray-700">
                       {row.patient.email?.trim() ? row.patient.email : "—"}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-neutral-700">
+                    <td className="whitespace-nowrap px-6 py-4 text-gray-700">
                       {row.firstSeen}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-neutral-700">
+                    <td className="whitespace-nowrap px-6 py-4 text-gray-700">
                       {row.lastSeen}
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums text-neutral-800">
+                    <td className="px-6 py-4 text-right tabular-nums text-gray-800">
                       {row.totalVisits}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-6 py-4">
                       {row.active ? (
-                        <span className="inline-flex rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
+                        <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
                           Active
                         </span>
                       ) : (
-                        <span className="inline-flex rounded-full bg-neutral-200 px-2.5 py-0.5 text-xs font-medium text-neutral-600">
+                        <span className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600">
                           Inactive
                         </span>
                       )}

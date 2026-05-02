@@ -220,36 +220,38 @@ export default function AdminOverviewPage() {
   const patientCount = patients.length;
 
   return (
-    <div className="mx-auto max-w-7xl">
-      <h1 className="mb-2 text-3xl font-bold text-neutral-900">Overview</h1>
-      <p className="mb-8 text-sm text-neutral-600">
+    <div className="w-full">
+      <h1 className="mb-1 text-2xl font-semibold text-gray-900">Overview</h1>
+      <p className="mb-8 text-sm tracking-wide text-gray-500">
         Snapshot for clinic operations. Data loads from the live API.
       </p>
 
       <section className="mb-8">
         {loading ? (
-          <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
             <p className="text-sm text-gray-500">Loading…</p>
           </div>
         ) : nextFocusAppointment ? (
           <div
-            className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
+            className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
             style={{
               borderLeftWidth: "4px",
               borderLeftStyle: "solid",
               borderLeftColor: focusBorderColor(nextFocusAppointment.clinician_id),
             }}
           >
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+            <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
               {"Today's Focus"}
             </p>
-            <div className="my-3 border-t border-gray-200" />
-            <p className="text-sm font-medium text-gray-700">Next Appointment</p>
-            <p className="mt-2 text-xl font-bold text-neutral-900">
+            <div className="my-4 border-t border-gray-100" />
+            <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
+              Next Appointment
+            </p>
+            <p className="mt-2 text-lg font-semibold text-gray-900">
               {formatTimeEastern(nextFocusAppointment.start_time)} ·{" "}
               {patientName(nextFocusAppointment)} · {serviceName(nextFocusAppointment)}
             </p>
-            <div className="mt-4 flex flex-wrap items-end justify-between gap-3">
+            <div className="mt-6 flex flex-wrap items-end justify-between gap-4">
               <p className="text-sm text-gray-500">
                 {clinicianLabel(nextFocusAppointment.clinician_id)}
               </p>
@@ -257,18 +259,18 @@ export default function AdminOverviewPage() {
                 type="button"
                 disabled={focusCheckInBusy}
                 onClick={() => void handleFocusCheckIn(nextFocusAppointment.id)}
-                className="rounded-md border border-[#2D5E3F]/30 bg-[#2D5E3F] px-4 py-2 text-sm font-semibold text-white hover:opacity-95 disabled:opacity-60"
+                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
               >
                 {focusCheckInBusy ? "Checking in…" : "Check In"}
               </button>
             </div>
           </div>
         ) : (
-          <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
-            <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+            <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
               {"Today's Focus"}
             </p>
-            <div className="my-3 border-t border-gray-200" />
+            <div className="my-4 border-t border-gray-100" />
             <p className="text-sm text-gray-500">
               All caught up — no more appointments today.
             </p>
@@ -276,7 +278,7 @@ export default function AdminOverviewPage() {
         )}
       </section>
 
-      <div className="mb-10 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-8 grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label={"Today's Appointments"}
           value={loading ? "…" : String(todayCount)}
@@ -295,15 +297,15 @@ export default function AdminOverviewPage() {
         />
       </div>
 
-      <section className="mb-10">
-        <h2 className="mb-4 text-lg font-semibold text-gray-700">
+      <section className="mb-8">
+        <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-gray-500">
           Next 3 Days
         </h2>
         <MiniCalendarStrip appointments={appointments} loading={loading} />
       </section>
 
       <section>
-        <h2 className="mb-4 text-lg font-semibold text-gray-700">
+        <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-gray-500">
           Recent Activity
         </h2>
         <RecentActivityFeed appointments={appointments} loading={loading} />
@@ -314,11 +316,13 @@ export default function AdminOverviewPage() {
 
 function StatCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
-      <p className="text-3xl font-semibold tabular-nums text-neutral-900">
+    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <p className="text-3xl font-semibold tabular-nums text-gray-900">
         {value}
       </p>
-      <p className="mt-2 text-sm text-gray-500">{label}</p>
+      <p className="mt-2 text-xs font-medium uppercase tracking-wider text-gray-500">
+        {label}
+      </p>
     </div>
   );
 }
@@ -336,7 +340,7 @@ function MiniCalendarStrip({
   );
 
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+    <div className="grid grid-cols-1 gap-6 md:grid-cols-3">
       {dayKeys.map((ymd) => {
         const rows = appointments
           .filter((a) => getEasternYMD(new Date(a.start_time)) === ymd)
@@ -365,9 +369,9 @@ function MiniCalendarStrip({
         return (
           <div
             key={ymd}
-            className="rounded-lg border border-gray-200 bg-white p-4 shadow-sm"
+            className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
           >
-            <p className="mb-3 text-sm font-semibold text-neutral-800">{label}</p>
+            <p className="mb-4 text-sm font-semibold text-gray-900">{label}</p>
             {loading ? (
               <p className="text-xs text-neutral-500">Loading…</p>
             ) : rows.length === 0 ? (
@@ -379,7 +383,7 @@ function MiniCalendarStrip({
                 {rows.map((row) => (
                   <div
                     key={row.id}
-                    className="rounded border border-neutral-200 bg-neutral-50 px-2.5 py-2 text-xs"
+                    className="rounded-lg border border-gray-100 bg-gray-50/80 px-3 py-2.5 text-xs transition-colors hover:bg-gray-50"
                     style={{
                       borderLeftColor:
                         clinicianLabel(row.clinician_id) === "Dr. West"
@@ -421,30 +425,33 @@ function RecentActivityFeed({
   }, [appointments]);
 
   return (
-    <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+    <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
       {loading ? (
-        <p className="p-6 text-sm text-neutral-500">Loading…</p>
+        <p className="p-6 text-sm text-gray-500">Loading…</p>
       ) : items.length === 0 ? (
-        <p className="p-6 text-sm text-neutral-500">No recent bookings.</p>
+        <p className="p-6 text-sm text-gray-500">No recent bookings.</p>
       ) : (
-        <ul className="divide-y divide-neutral-100">
+        <ul className="divide-y divide-gray-100">
           {items.map((row) => {
             const west = clinicianLabel(row.clinician_id) === "Dr. West";
             const dotColor = west ? "#1A6B8A" : "#7C3AED";
             return (
-              <li key={row.id} className="flex gap-3 px-4 py-3">
+              <li
+                key={row.id}
+                className="flex gap-3 px-6 py-4 transition-colors hover:bg-gray-50"
+              >
                 <div
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#2D5E3F]/10 text-xs font-bold text-[#2D5E3F]"
+                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-xs font-semibold text-emerald-800"
                   aria-hidden
                 >
                   {patientInitials(row)}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-neutral-900">
+                  <p className="text-sm font-semibold text-gray-900">
                     {patientName(row)}
                   </p>
-                  <p className="text-xs text-neutral-600">{serviceName(row)}</p>
-                  <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-neutral-600">
+                  <p className="text-xs text-gray-600">{serviceName(row)}</p>
+                  <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-600">
                     <span
                       className="inline-block h-2 w-2 shrink-0 rounded-full"
                       style={{ backgroundColor: dotColor }}
@@ -452,7 +459,7 @@ function RecentActivityFeed({
                     />
                     <span>{clinicianLabel(row.clinician_id)}</span>
                   </p>
-                  <p className="mt-0.5 text-xs text-neutral-500">
+                  <p className="mt-0.5 text-xs text-gray-500">
                     {row.created_at ? formatBookedAt(row.created_at) : ""}
                   </p>
                 </div>

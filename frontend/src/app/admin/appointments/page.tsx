@@ -191,36 +191,36 @@ export default function AdminAppointmentsPage() {
 
     if (isCancelledScheduled) {
       return (
-        <div key={row.id} className="rounded-md border border-gray-200 bg-white p-3 shadow-sm">
-          <p className="text-sm font-semibold text-neutral-500 line-through">
+        <div key={row.id} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+          <p className="text-sm font-semibold text-gray-500 line-through">
             {patientName(row)}
           </p>
-          <p className="mt-1 text-xs text-neutral-600">
+          <p className="mt-1 text-xs text-gray-600">
             {formatTimeEastern(row.start_time)} • {clinicianLabel(row.clinician_id)}
           </p>
-          <p className="mt-1 text-xs text-neutral-600">{serviceName(row)}</p>
-          <p className="mt-2 text-xs font-medium text-neutral-500">Cancelled</p>
+          <p className="mt-1 text-xs text-gray-600">{serviceName(row)}</p>
+          <p className="mt-2 text-xs font-medium text-gray-500">Cancelled</p>
         </div>
       );
     }
 
     return (
-      <div key={row.id} className="rounded-md border border-gray-200 bg-white p-3 shadow-sm">
-        <p className="text-sm font-semibold text-neutral-900">{patientName(row)}</p>
-        <p className="mt-1 text-xs text-neutral-600">
+      <div key={row.id} className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm">
+        <p className="text-sm font-semibold text-gray-900">{patientName(row)}</p>
+        <p className="mt-1 text-xs text-gray-600">
           {formatTimeEastern(row.start_time)} • {clinicianLabel(row.clinician_id)}
         </p>
-        <p className="mt-1 text-xs text-neutral-600">{serviceName(row)}</p>
+        <p className="mt-1 text-xs text-gray-600">{serviceName(row)}</p>
         {column === "completed" ? (
-          <p className="mt-2 text-xs font-medium text-green-700">✓ Completed</p>
+          <p className="mt-2 text-xs font-medium text-emerald-700">✓ Completed</p>
         ) : (
-          <div className="mt-3 flex gap-2">
+          <div className="mt-4 flex flex-wrap gap-2">
             {column === "scheduled" ? (
               <button
                 type="button"
                 disabled={busy}
                 onClick={() => void patchStatus(row.id, "checked_in")}
-                className="rounded border border-[#2D5E3F]/30 bg-[#2D5E3F]/10 px-2 py-1 text-xs font-medium text-[#2D5E3F] disabled:opacity-60"
+                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
               >
                 Check In
               </button>
@@ -229,7 +229,7 @@ export default function AdminAppointmentsPage() {
                 type="button"
                 disabled={busy}
                 onClick={() => void patchStatus(row.id, "completed")}
-                className="rounded border border-[#2D5E3F]/30 bg-[#2D5E3F]/10 px-2 py-1 text-xs font-medium text-[#2D5E3F] disabled:opacity-60"
+                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
               >
                 Complete
               </button>
@@ -239,7 +239,7 @@ export default function AdminAppointmentsPage() {
                 type="button"
                 disabled={busy}
                 onClick={() => void patchStatus(row.id, "cancelled")}
-                className="rounded border border-red-200 bg-red-50 px-2 py-1 text-xs font-medium text-red-700 disabled:opacity-60"
+                className="text-sm font-medium text-red-500 transition-colors hover:text-red-700 disabled:opacity-60"
               >
                 Cancel
               </button>
@@ -251,16 +251,20 @@ export default function AdminAppointmentsPage() {
   }
 
   const pill =
-    "rounded-full px-3 py-1.5 text-xs font-semibold transition-colors border border-transparent";
-  const pillActive = "bg-[#2D5E3F] text-white border-[#2D5E3F]";
+    "rounded-full px-3 py-2 text-xs font-medium transition-colors border";
+  const pillActive =
+    "border-transparent bg-[#1F7A47] text-white hover:opacity-90 transition-opacity";
   const pillIdle =
-    "bg-white text-neutral-700 border-neutral-200 hover:border-[#2D5E3F]/40";
+    "border-gray-200 bg-white text-gray-600 hover:border-gray-400 hover:text-gray-900 transition-colors";
 
   return (
-    <div className="mx-auto max-w-7xl">
-      <h1 className="mb-6 text-3xl font-bold text-neutral-900">Appointments</h1>
+    <div className="w-full">
+      <h1 className="mb-1 text-2xl font-semibold text-gray-900">Appointments</h1>
+      <p className="mb-8 text-sm tracking-wide text-gray-500">
+        Today&apos;s flow and week view
+      </p>
 
-      <div className="mb-6 flex flex-wrap gap-2">
+      <div className="mb-6 flex flex-wrap gap-2 rounded-2xl border border-gray-100 bg-white px-6 py-4 shadow-sm">
         <button
           type="button"
           className={`${pill} ${clinicianFilter === "all" ? pillActive : pillIdle}`}
@@ -284,27 +288,26 @@ export default function AdminAppointmentsPage() {
         </button>
       </div>
 
-      <section className="mb-10">
-        <h2 className="mb-4 text-lg font-semibold text-gray-700">Patient Flow Board</h2>
+      <section className="mb-8">
+        <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+          Patient Flow Board
+        </h2>
         {loading ? (
-          <p className="text-sm text-neutral-600">Loading…</p>
+          <p className="text-sm text-gray-500">Loading…</p>
         ) : (
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+          <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
             <FlowColumn
               title={`Scheduled (${scheduled.length})`}
-              bg="#F0F4F8"
               emptyMessage="No appointments scheduled"
               items={scheduled.map((row) => renderCard(row, "scheduled"))}
             />
             <FlowColumn
               title={`Checked In (${checkedIn.length})`}
-              bg="#FFF8E7"
               emptyMessage="No patients checked in yet"
               items={checkedIn.map((row) => renderCard(row, "checked_in"))}
             />
             <FlowColumn
               title={`Completed (${completed.length})`}
-              bg="#F0FFF4"
               emptyMessage="No completed appointments yet"
               items={completed.map((row) => renderCard(row, "completed"))}
             />
@@ -313,8 +316,10 @@ export default function AdminAppointmentsPage() {
       </section>
 
       <section>
-        <h2 className="mb-4 text-lg font-semibold text-gray-700">Week Calendar</h2>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-7">
+        <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+          Week Calendar
+        </h2>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-7">
           {weekDays.map((ymd) => {
             const dayRows = weekAppointments
               .filter((a) => getEasternYMD(new Date(a.start_time)) === ymd)
@@ -327,13 +332,15 @@ export default function AdminAppointmentsPage() {
             return (
               <div
                 key={ymd}
-                className="rounded-lg border border-neutral-200 p-3"
-                style={{ backgroundColor: isToday ? "#F5FFF8" : "white" }}
+                className={[
+                  "rounded-2xl border border-gray-100 p-4 shadow-sm",
+                  isToday ? "bg-emerald-50/40" : "bg-white",
+                ].join(" ")}
               >
-                <p className="mb-3 text-sm font-semibold text-neutral-800">{dayLabel(ymd)}</p>
+                <p className="mb-3 text-sm font-semibold text-gray-900">{dayLabel(ymd)}</p>
                 <div className="space-y-2">
                   {dayRows.length === 0 ? (
-                    <p className="text-xs text-neutral-400">
+                    <p className="text-xs text-gray-400">
                       No appointments scheduled
                     </p>
                   ) : (
@@ -347,11 +354,13 @@ export default function AdminAppointmentsPage() {
                       return (
                         <div
                           key={row.id}
-                          className="rounded px-2 py-1.5 text-xs text-white"
-                          style={{
-                            backgroundColor: west ? "#1A6B8A" : "#7C3AED",
-                            opacity: cancelled ? 0.5 : 1,
-                          }}
+                          className={[
+                            "rounded-lg border px-2.5 py-2 text-xs transition-colors",
+                            west
+                              ? "border-sky-100 bg-sky-50 text-sky-900"
+                              : "border-violet-100 bg-violet-50 text-violet-900",
+                            cancelled ? "opacity-50" : "",
+                          ].join(" ")}
                         >
                           <div className="flex items-start justify-between gap-1">
                             <div className="min-w-0 flex-1">
@@ -363,11 +372,11 @@ export default function AdminAppointmentsPage() {
                               </p>
                             </div>
                             {checkedInBlock ? (
-                              <span className="shrink-0 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-neutral-800">
+                              <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium leading-tight text-amber-800">
                                 Checked In
                               </span>
                             ) : completedBlock ? (
-                              <span className="shrink-0 rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold leading-tight text-neutral-800">
+                              <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium leading-tight text-emerald-800">
                                 ✓ Done
                               </span>
                             ) : null}
@@ -388,23 +397,21 @@ export default function AdminAppointmentsPage() {
 
 function FlowColumn({
   title,
-  bg,
   items,
   emptyMessage,
 }: {
   title: string;
-  bg: string;
   items: React.ReactNode[];
   emptyMessage: string;
 }) {
   return (
-    <div className="rounded-lg border border-neutral-200 p-4" style={{ backgroundColor: bg }}>
-      <p className="mb-3 text-sm font-semibold uppercase tracking-wide text-gray-700">
+    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <p className="mb-4 text-xs font-medium uppercase tracking-wider text-gray-500">
         {title}
       </p>
-      <div className="space-y-3">
+      <div className="space-y-4">
         {items.length === 0 ? (
-          <p className="text-xs text-neutral-500">{emptyMessage}</p>
+          <p className="text-xs text-gray-500">{emptyMessage}</p>
         ) : (
           items
         )}

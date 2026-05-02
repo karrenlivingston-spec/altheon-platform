@@ -76,32 +76,30 @@ function formatAccidentDate(ymd: string | null | undefined): string {
 
 function piStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
-  if (s === "open") return "bg-blue-100 text-blue-900 ring-1 ring-blue-200";
-  if (s === "in_treatment")
-    return "bg-amber-100 text-amber-900 ring-1 ring-amber-200";
-  if (s === "pending_settlement")
-    return "bg-orange-100 text-orange-900 ring-1 ring-orange-200";
-  if (s === "settled") return "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200";
-  if (s === "closed") return "bg-neutral-200 text-neutral-700 ring-1 ring-neutral-300";
-  return "bg-neutral-100 text-neutral-700 ring-1 ring-neutral-200";
+  if (s === "open") return "bg-blue-50 text-blue-700";
+  if (s === "in_treatment") return "bg-amber-50 text-amber-800";
+  if (s === "pending_settlement") return "bg-orange-50 text-orange-800";
+  if (s === "settled") return "bg-emerald-50 text-emerald-700";
+  if (s === "closed") return "bg-gray-100 text-gray-600";
+  return "bg-gray-100 text-gray-700";
 }
 
 function billingTypeBadgeClass(t: string): string {
   const s = t.toLowerCase();
-  if (s === "cash") return "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200";
-  if (s === "insurance") return "bg-blue-100 text-blue-900 ring-1 ring-blue-200";
-  if (s === "mixed") return "bg-violet-100 text-violet-900 ring-1 ring-violet-200";
-  return "bg-neutral-100 text-neutral-700 ring-1 ring-neutral-200";
+  if (s === "cash") return "bg-emerald-50 text-emerald-700";
+  if (s === "insurance") return "bg-blue-50 text-blue-700";
+  if (s === "mixed") return "bg-violet-50 text-violet-700";
+  return "bg-gray-100 text-gray-700";
 }
 
 function billingRecordStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
-  if (s === "draft") return "bg-neutral-200 text-neutral-800 ring-1 ring-neutral-300";
-  if (s === "submitted") return "bg-amber-100 text-amber-900 ring-1 ring-amber-200";
-  if (s === "paid") return "bg-emerald-100 text-emerald-900 ring-1 ring-emerald-200";
-  if (s === "denied") return "bg-red-100 text-red-900 ring-1 ring-red-200";
-  if (s === "partial") return "bg-orange-100 text-orange-900 ring-1 ring-orange-200";
-  return "bg-neutral-100 text-neutral-700 ring-1 ring-neutral-200";
+  if (s === "draft") return "bg-gray-100 text-gray-700";
+  if (s === "submitted") return "bg-amber-50 text-amber-800";
+  if (s === "paid") return "bg-emerald-50 text-emerald-700";
+  if (s === "denied") return "bg-red-50 text-red-700";
+  if (s === "partial") return "bg-orange-50 text-orange-800";
+  return "bg-gray-100 text-gray-700";
 }
 
 function compareCreatedDesc(a: PiCaseRow, b: PiCaseRow): number {
@@ -384,37 +382,36 @@ export default function AdminPiCasesPage() {
   }
 
   return (
-    <div className="mx-auto max-w-7xl">
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className="w-full">
+      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold text-neutral-900">PI Cases</h1>
-          <p className="mt-1 text-sm text-neutral-600">
+          <h1 className="mb-1 text-2xl font-semibold text-gray-900">PI Cases</h1>
+          <p className="text-sm tracking-wide text-gray-500">
             Personal injury case management
           </p>
         </div>
         <button
           type="button"
           onClick={openCreate}
-          className="inline-flex shrink-0 items-center justify-center rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:opacity-95"
-          style={{ backgroundColor: BRAND }}
+          className="inline-flex shrink-0 items-center justify-center rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90"
         >
           + New PI Case
         </button>
       </div>
 
       {error ? (
-        <p className="mb-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+        <p className="mb-6 rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
           {error}
         </p>
       ) : null}
 
-      <div className="mb-6 flex flex-wrap items-end gap-4 rounded-lg border border-neutral-200 bg-neutral-50/80 p-4">
-        <label className="block text-sm font-medium text-neutral-700">
+      <div className="mb-6 flex flex-wrap items-end gap-4 rounded-2xl border border-gray-100 bg-white px-6 py-4 shadow-sm">
+        <label className="block text-sm font-medium text-gray-700">
           Status
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="mt-1 block w-52 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900"
+            className="mt-1 block h-9 w-52 rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
           >
             {STATUS_FILTER_OPTIONS.map((o) => (
               <option key={o.label} value={o.value}>
@@ -423,59 +420,63 @@ export default function AdminPiCasesPage() {
             ))}
           </select>
         </label>
-        <label className="block min-w-[12rem] flex-1 text-sm font-medium text-neutral-700">
+        <label className="block min-w-[12rem] flex-1 text-sm font-medium text-gray-700">
           Search
           <input
             type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Patient name or insurance carrier…"
-            className="mt-1 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900 outline-none ring-[#2D5E3F] focus:ring-2"
+            className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
           />
         </label>
         <button
           type="button"
           onClick={clearFilters}
-          className="rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+          className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
         >
           Clear filters
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="border-b border-neutral-200 bg-neutral-50">
+            <thead className="bg-gray-50">
               <tr>
-                <th className="px-4 py-3 font-medium text-neutral-700">
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Patient Name
                 </th>
-                <th className="px-4 py-3 font-medium text-neutral-700">
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Insurance Carrier
                 </th>
-                <th className="px-4 py-3 font-medium text-neutral-700">
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Claim Number
                 </th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Attorney</th>
-                <th className="px-4 py-3 font-medium text-neutral-700">
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Attorney
+                </th>
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Date of Accident
                 </th>
-                <th className="px-4 py-3 font-medium text-neutral-700">Status</th>
-                <th className="px-4 py-3 text-right font-medium text-neutral-700">
+                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Status
+                </th>
+                <th className="px-6 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
                   Actions
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-neutral-100">
+            <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-neutral-500">
+                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
                     Loading…
                   </td>
                 </tr>
               ) : tableRows.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-neutral-500">
+                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
                     No PI cases found
                   </td>
                 </tr>
@@ -485,32 +486,35 @@ export default function AdminPiCasesPage() {
                   const name = p ? patientDisplayName(p) : "—";
                   const st = (c.status ?? "open").toLowerCase();
                   return (
-                    <tr key={c.id} className="hover:bg-neutral-50/80">
-                      <td className="px-4 py-3 text-neutral-800">{name}</td>
-                      <td className="px-4 py-3 text-neutral-800">
+                    <tr
+                      key={c.id}
+                      className="transition-colors hover:bg-gray-50"
+                    >
+                      <td className="px-6 py-4 text-gray-800">{name}</td>
+                      <td className="px-6 py-4 text-gray-800">
                         {dash(c.insurance_carrier)}
                       </td>
-                      <td className="px-4 py-3 font-mono text-xs text-neutral-800">
+                      <td className="px-6 py-4 font-mono text-xs text-gray-800">
                         {dash(c.claim_number)}
                       </td>
-                      <td className="px-4 py-3 text-neutral-800">
+                      <td className="px-6 py-4 text-gray-800">
                         {dash(c.attorney_name)}
                       </td>
-                      <td className="px-4 py-3 text-neutral-800">
+                      <td className="px-6 py-4 text-gray-800">
                         {formatAccidentDate(c.date_of_accident ?? undefined)}
                       </td>
-                      <td className="px-4 py-3">
+                      <td className="px-6 py-4">
                         <span
                           className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${piStatusBadgeClass(st)}`}
                         >
                           {st.replace(/_/g, " ")}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-6 py-4 text-right">
                         <button
                           type="button"
                           onClick={() => openDetail(c)}
-                          className="rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-medium text-neutral-800 hover:bg-neutral-50"
+                          className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
                         >
                           View
                         </button>
@@ -527,24 +531,24 @@ export default function AdminPiCasesPage() {
       {createOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border border-neutral-200 bg-white p-6 shadow-xl"
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-xl"
             role="dialog"
             aria-modal
             aria-labelledby="pi-create-title"
           >
             <h2
               id="pi-create-title"
-              className="text-lg font-semibold text-neutral-900"
+              className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900"
             >
               New PI Case
             </h2>
-            <div className="mt-4 space-y-4">
-              <label className="block text-sm font-medium text-neutral-700">
+            <div className="space-y-4 pt-5">
+              <label className="block text-sm font-medium text-gray-700">
                 Patient
                 <select
                   value={cPatientId}
                   onChange={(e) => setCPatientId(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm"
+                  className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 >
                   <option value="">Select patient…</option>
                   {patients.map((p) => (
@@ -554,75 +558,75 @@ export default function AdminPiCasesPage() {
                   ))}
                 </select>
               </label>
-              <label className="block text-sm font-medium text-neutral-700">
+              <label className="block text-sm font-medium text-gray-700">
                 Date of Accident (optional)
                 <input
                   type="date"
                   value={cDateAccident}
                   onChange={(e) => setCDateAccident(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                  className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
-              <label className="block text-sm font-medium text-neutral-700">
+              <label className="block text-sm font-medium text-gray-700">
                 Insurance Carrier (optional)
                 <input
                   type="text"
                   value={cInsurance}
                   onChange={(e) => setCInsurance(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
-              <label className="block text-sm font-medium text-neutral-700">
+              <label className="block text-sm font-medium text-gray-700">
                 Claim Number (optional)
                 <input
                   type="text"
                   value={cClaim}
                   onChange={(e) => setCClaim(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
-              <label className="block text-sm font-medium text-neutral-700">
+              <label className="block text-sm font-medium text-gray-700">
                 Attorney Name (optional)
                 <input
                   type="text"
                   value={cAttorneyName}
                   onChange={(e) => setCAttorneyName(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
-              <label className="block text-sm font-medium text-neutral-700">
+              <label className="block text-sm font-medium text-gray-700">
                 Attorney Email (optional)
                 <input
                   type="email"
                   value={cAttorneyEmail}
                   onChange={(e) => setCAttorneyEmail(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
-              <label className="block text-sm font-medium text-neutral-700">
+              <label className="block text-sm font-medium text-gray-700">
                 Attorney Phone (optional)
                 <input
                   type="text"
                   value={cAttorneyPhone}
                   onChange={(e) => setCAttorneyPhone(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
-              <label className="block text-sm font-medium text-neutral-700">
+              <label className="block text-sm font-medium text-gray-700">
                 Notes (optional)
                 <textarea
                   value={cNotes}
                   onChange={(e) => setCNotes(e.target.value)}
                   rows={3}
-                  className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
             </div>
-            <div className="mt-6 flex justify-end gap-2">
+            <div className="mt-6 flex justify-end gap-2 border-t border-gray-100 pt-5">
               <button
                 type="button"
                 onClick={() => setCreateOpen(false)}
-                className="rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+                className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
               >
                 Cancel
               </button>
@@ -630,8 +634,7 @@ export default function AdminPiCasesPage() {
                 type="button"
                 disabled={createBusy}
                 onClick={() => void submitCreate()}
-                className="rounded-md px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                style={{ backgroundColor: BRAND }}
+                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
               >
                 {createBusy ? "Saving…" : "Create"}
               </button>
@@ -649,23 +652,23 @@ export default function AdminPiCasesPage() {
           role="presentation"
         >
           <div
-            className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-lg border border-neutral-200 bg-white p-6 shadow-xl"
+            className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-xl"
             role="dialog"
             aria-modal
             aria-labelledby="pi-detail-title"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start justify-between gap-4 border-b border-gray-100 pb-4">
               <h2
                 id="pi-detail-title"
-                className="text-lg font-semibold text-neutral-900"
+                className="text-lg font-semibold text-gray-900"
               >
                 PI Case
               </h2>
               <button
                 type="button"
                 onClick={closeDetail}
-                className="rounded-md px-2 py-1 text-sm text-neutral-500 hover:bg-neutral-100"
+                className="rounded-lg px-2 py-1 text-sm text-gray-500 transition-colors hover:bg-gray-50"
                 aria-label="Close"
               >
                 ✕
@@ -673,16 +676,16 @@ export default function AdminPiCasesPage() {
             </div>
 
             {detailError ? (
-              <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+              <p className="mt-4 rounded-xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
                 {detailError}
               </p>
             ) : null}
 
-            <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50/60 p-4">
-              <p className="text-xs font-medium uppercase text-neutral-500">
+            <div className="mt-5 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+              <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
                 Patient
               </p>
-              <p className="text-xl font-semibold text-neutral-900">
+              <p className="text-2xl font-semibold text-gray-900">
                 {patientDisplayName(
                   patientById.get(activeCase.patient_id) ?? {
                     id: activeCase.patient_id,
@@ -694,56 +697,56 @@ export default function AdminPiCasesPage() {
 
               {!editMode ? (
                 <>
-                  <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                  <div className="mt-6 grid gap-6 sm:grid-cols-3">
                     <div>
-                      <p className="text-xs text-neutral-500">Date of accident</p>
-                      <p className="text-sm font-medium text-neutral-900">
+                      <p className="text-xs text-gray-500">Date of accident</p>
+                      <p className="text-sm font-medium text-gray-900">
                         {formatAccidentDate(activeCase.date_of_accident ?? undefined)}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-neutral-500">Insurance carrier</p>
-                      <p className="text-sm font-medium text-neutral-900">
+                      <p className="text-xs text-gray-500">Insurance carrier</p>
+                      <p className="text-sm font-medium text-gray-900">
                         {dash(activeCase.insurance_carrier)}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-neutral-500">Claim number</p>
-                      <p className="text-sm font-medium text-neutral-900">
+                      <p className="text-xs text-gray-500">Claim number</p>
+                      <p className="text-sm font-medium text-gray-900">
                         {dash(activeCase.claim_number)}
                       </p>
                     </div>
                   </div>
-                  <div className="mt-4 grid gap-4 sm:grid-cols-3">
+                  <div className="mt-6 grid gap-6 sm:grid-cols-3">
                     <div>
-                      <p className="text-xs text-neutral-500">Attorney name</p>
-                      <p className="text-sm font-medium text-neutral-900">
+                      <p className="text-xs text-gray-500">Attorney name</p>
+                      <p className="text-sm font-medium text-gray-900">
                         {dash(activeCase.attorney_name)}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-neutral-500">Attorney email</p>
-                      <p className="text-sm font-medium text-neutral-900">
+                      <p className="text-xs text-gray-500">Attorney email</p>
+                      <p className="text-sm font-medium text-gray-900">
                         {dash(activeCase.attorney_email)}
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-neutral-500">Attorney phone</p>
-                      <p className="text-sm font-medium text-neutral-900">
+                      <p className="text-xs text-gray-500">Attorney phone</p>
+                      <p className="text-sm font-medium text-gray-900">
                         {dash(activeCase.attorney_phone)}
                       </p>
                     </div>
                   </div>
-                  <div className="mt-4">
-                    <p className="text-xs text-neutral-500">Notes</p>
-                    <p className="whitespace-pre-wrap text-sm text-neutral-800">
+                  <div className="mt-6">
+                    <p className="text-xs text-gray-500">Notes</p>
+                    <p className="whitespace-pre-wrap text-sm text-gray-800">
                       {dash(activeCase.notes)}
                     </p>
                   </div>
                 </>
               ) : (
-                <div className="mt-4 space-y-4">
-                  <label className="block text-sm font-medium text-neutral-700">
+                <div className="mt-5 space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
                     Date of Accident
                     <input
                       type="date"
@@ -754,11 +757,11 @@ export default function AdminPiCasesPage() {
                           date_of_accident: e.target.value,
                         }))
                       }
-                      className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                      className="mt-1 h-9 w-full rounded-lg border border-gray-200 px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                     />
                   </label>
                   <div className="grid gap-4 sm:grid-cols-3">
-                    <label className="block text-sm font-medium text-neutral-700">
+                    <label className="block text-sm font-medium text-gray-700">
                       Insurance carrier
                       <input
                         type="text"
@@ -769,10 +772,10 @@ export default function AdminPiCasesPage() {
                             insurance_carrier: e.target.value,
                           }))
                         }
-                        className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                       />
                     </label>
-                    <label className="block text-sm font-medium text-neutral-700 sm:col-span-2">
+                    <label className="block text-sm font-medium text-gray-700 sm:col-span-2">
                       Claim number
                       <input
                         type="text"
@@ -780,12 +783,12 @@ export default function AdminPiCasesPage() {
                         onChange={(e) =>
                           setEditDraft((d) => ({ ...d, claim_number: e.target.value }))
                         }
-                        className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                       />
                     </label>
                   </div>
                   <div className="grid gap-4 sm:grid-cols-3">
-                    <label className="block text-sm font-medium text-neutral-700">
+                    <label className="block text-sm font-medium text-gray-700">
                       Attorney name
                       <input
                         type="text"
@@ -796,10 +799,10 @@ export default function AdminPiCasesPage() {
                             attorney_name: e.target.value,
                           }))
                         }
-                        className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                       />
                     </label>
-                    <label className="block text-sm font-medium text-neutral-700">
+                    <label className="block text-sm font-medium text-gray-700">
                       Attorney email
                       <input
                         type="email"
@@ -810,10 +813,10 @@ export default function AdminPiCasesPage() {
                             attorney_email: e.target.value,
                           }))
                         }
-                        className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                       />
                     </label>
-                    <label className="block text-sm font-medium text-neutral-700">
+                    <label className="block text-sm font-medium text-gray-700">
                       Attorney phone
                       <input
                         type="text"
@@ -824,11 +827,11 @@ export default function AdminPiCasesPage() {
                             attorney_phone: e.target.value,
                           }))
                         }
-                        className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                        className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                       />
                     </label>
                   </div>
-                  <label className="block text-sm font-medium text-neutral-700">
+                  <label className="block text-sm font-medium text-gray-700">
                     Notes
                     <textarea
                       value={editDraft.notes}
@@ -836,19 +839,19 @@ export default function AdminPiCasesPage() {
                         setEditDraft((d) => ({ ...d, notes: e.target.value }))
                       }
                       rows={3}
-                      className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
+                      className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                     />
                   </label>
                 </div>
               )}
 
-              <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-neutral-200 pt-4">
-                <label className="text-sm font-medium text-neutral-700">
+              <div className="mt-6 flex flex-wrap items-end gap-3 border-t border-gray-100 pt-5">
+                <label className="text-sm font-medium text-gray-700">
                   Update status
                   <select
                     value={statusDraft}
                     onChange={(e) => setStatusDraft(e.target.value)}
-                    className="ml-2 rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm"
+                    className="ml-2 h-9 rounded-lg border border-gray-200 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                   >
                     {PI_STATUS_OPTIONS.map((s) => (
                       <option key={s} value={s}>
@@ -861,8 +864,7 @@ export default function AdminPiCasesPage() {
                   type="button"
                   disabled={statusBusy}
                   onClick={() => void updateStatus()}
-                  className="rounded-md px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                  style={{ backgroundColor: BRAND }}
+                  className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
                 >
                   {statusBusy ? "Updating…" : "Update Status"}
                 </button>
@@ -872,16 +874,16 @@ export default function AdminPiCasesPage() {
                 <button
                   type="button"
                   onClick={() => setEditMode(true)}
-                  className="mt-4 rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                  className="mt-6 rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
                 >
                   Edit Case
                 </button>
               ) : (
-                <div className="mt-4 flex gap-2">
+                <div className="mt-6 flex gap-2">
                   <button
                     type="button"
                     onClick={cancelEdit}
-                    className="rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-700 hover:bg-neutral-50"
+                    className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
                   >
                     Cancel
                   </button>
@@ -889,8 +891,7 @@ export default function AdminPiCasesPage() {
                     type="button"
                     disabled={editBusy}
                     onClick={() => void saveEdit()}
-                    className="rounded-md px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                    style={{ backgroundColor: BRAND }}
+                    className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
                   >
                     {editBusy ? "Saving…" : "Save"}
                   </button>
@@ -898,32 +899,34 @@ export default function AdminPiCasesPage() {
               )}
             </div>
 
-            <h3 className="mt-8 text-sm font-semibold text-neutral-900">
+            <h3 className="mt-8 text-xs font-medium uppercase tracking-wider text-gray-500">
               Billing Records
             </h3>
-            <div className="mt-2 overflow-hidden rounded-lg border border-neutral-200">
+            <div className="mt-3 overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
               <div className="overflow-x-auto">
                 <table className="min-w-full text-left text-sm">
-                  <thead className="border-b border-neutral-200 bg-neutral-50">
+                  <thead className="bg-gray-50">
                     <tr>
-                      <th className="px-3 py-2 font-medium text-neutral-700">
+                      <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                         Date of Service
                       </th>
-                      <th className="px-3 py-2 font-medium text-neutral-700">
+                      <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                         Billing Type
                       </th>
-                      <th className="px-3 py-2 font-medium text-neutral-700">
+                      <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                         Total Billed
                       </th>
-                      <th className="px-3 py-2 font-medium text-neutral-700">Status</th>
+                      <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+                        Status
+                      </th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-neutral-100">
+                  <tbody className="divide-y divide-gray-100">
                     {linkedBilling.length === 0 ? (
                       <tr>
                         <td
                           colSpan={4}
-                          className="px-3 py-4 text-center text-neutral-500"
+                          className="px-6 py-4 text-center text-gray-500"
                         >
                           No billing records linked to this case
                         </td>
@@ -933,23 +936,26 @@ export default function AdminPiCasesPage() {
                         const bt = (r.billing_type ?? "cash").toLowerCase();
                         const st = (r.status ?? "draft").toLowerCase();
                         return (
-                          <tr key={r.id}>
-                            <td className="px-3 py-2 text-neutral-800">
+                          <tr
+                            key={r.id}
+                            className="transition-colors hover:bg-gray-50"
+                          >
+                            <td className="px-6 py-4 text-gray-800">
                               {r.date_of_service ?? "—"}
                             </td>
-                            <td className="px-3 py-2">
+                            <td className="px-6 py-4">
                               <span
-                                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium capitalize ${billingTypeBadgeClass(bt)}`}
+                                className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${billingTypeBadgeClass(bt)}`}
                               >
                                 {r.billing_type ?? "cash"}
                               </span>
                             </td>
-                            <td className="px-3 py-2 text-neutral-800">
+                            <td className="px-6 py-4 text-gray-800">
                               {formatUsdFromCents(r.total_billed_cents)}
                             </td>
-                            <td className="px-3 py-2">
+                            <td className="px-6 py-4">
                               <span
-                                className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium capitalize ${billingRecordStatusBadgeClass(st)}`}
+                                className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${billingRecordStatusBadgeClass(st)}`}
                               >
                                 {r.status ?? "draft"}
                               </span>

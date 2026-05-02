@@ -52,19 +52,34 @@ export default function AdminLayout({
     );
   }
 
-  return <AdminAuthenticatedShell>{children}</AdminAuthenticatedShell>;
+  return (
+    <AdminAuthenticatedShell pathname={pathname}>
+      {children}
+    </AdminAuthenticatedShell>
+  );
 }
 
 function AdminAuthenticatedShell({
   children,
+  pathname,
 }: {
   children: React.ReactNode;
+  pathname: string;
 }) {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  const navClass =
-    "block rounded-md px-3 py-2 text-sm font-medium text-white/95 hover:bg-white/10 transition-colors";
+  function navLinkClass(href: string) {
+    const active =
+      pathname === href ||
+      (href !== "/admin" && pathname.startsWith(href));
+    return [
+      "block rounded-lg px-4 py-3 text-sm font-medium transition-colors",
+      active
+        ? "bg-white/15 text-white"
+        : "text-white/90 hover:bg-white/10",
+    ].join(" ");
+  }
 
   async function handleSignOut() {
     await supabase.auth.signOut();
@@ -121,7 +136,7 @@ function AdminAuthenticatedShell({
             sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           ].join(" ")}
         >
-          <div className="border-b border-white/10 px-5 py-6">
+          <div className="border-b border-white/10 px-5 py-10">
             <div
               style={{
                 backgroundColor: "white",
@@ -137,73 +152,73 @@ function AdminAuthenticatedShell({
               />
             </div>
           </div>
-          <nav className="flex flex-1 flex-col gap-1 px-3 py-4">
+          <nav className="flex flex-1 flex-col gap-2 px-3 py-6">
             <Link
               href="/admin"
-              className={navClass}
+              className={navLinkClass("/admin")}
               onClick={() => setSidebarOpen(false)}
             >
               Overview
             </Link>
             <Link
               href="/admin/appointments"
-              className={navClass}
+              className={navLinkClass("/admin/appointments")}
               onClick={() => setSidebarOpen(false)}
             >
               Appointments
             </Link>
             <Link
               href="/admin/legal-requests"
-              className={navClass}
+              className={navLinkClass("/admin/legal-requests")}
               onClick={() => setSidebarOpen(false)}
             >
               Legal Requests
             </Link>
             <Link
               href="/admin/patients"
-              className={navClass}
+              className={navLinkClass("/admin/patients")}
               onClick={() => setSidebarOpen(false)}
             >
               Patients
             </Link>
             <Link
               href="/admin/memberships"
-              className={navClass}
+              className={navLinkClass("/admin/memberships")}
               onClick={() => setSidebarOpen(false)}
             >
               Memberships
             </Link>
             <Link
               href="/admin/billing"
-              className={navClass}
+              className={navLinkClass("/admin/billing")}
               onClick={() => setSidebarOpen(false)}
             >
               Billing
             </Link>
             <Link
               href="/admin/pi-cases"
-              className={navClass}
+              className={navLinkClass("/admin/pi-cases")}
               onClick={() => setSidebarOpen(false)}
             >
               PI Cases
             </Link>
           </nav>
-          <div className="border-t border-white/10 px-3 py-4">
+          <div className="border-t border-white/10 px-3 py-5">
             <button
               type="button"
               onClick={() => {
                 setSidebarOpen(false);
                 void handleSignOut();
               }}
-              className="w-full rounded-md px-3 py-2 text-left text-sm font-medium text-white/95 hover:bg-white/10 transition-colors"
+              className="w-full rounded-lg px-4 py-3 text-left text-sm font-medium text-white/90 transition-colors hover:bg-white/10"
             >
               Sign Out
             </button>
           </div>
         </aside>
 
-        <main className="flex min-h-screen flex-1 flex-col md:min-h-0">
-          <div className="flex-1 bg-white p-4 pt-16 md:p-8 md:pt-8">
+        <main className="flex min-h-screen flex-1 flex-col bg-gray-50 md:min-h-0">
+          <div className="mx-auto w-full max-w-7xl flex-1 px-6 pb-8 pt-16 md:py-8">
             {children}
           </div>
         </main>

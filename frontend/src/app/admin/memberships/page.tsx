@@ -91,11 +91,11 @@ function treatmentTypeLabel(id: string): string {
 
 function statusBadgeClass(status: string): string {
   const s = status.toLowerCase();
-  if (s === "active") return "bg-emerald-100 text-emerald-800";
-  if (s === "paused") return "bg-amber-100 text-amber-900";
-  if (s === "cancelled") return "bg-red-100 text-red-800";
-  if (s === "expired") return "bg-neutral-200 text-neutral-600";
-  return "bg-neutral-100 text-neutral-700";
+  if (s === "active") return "bg-emerald-50 text-emerald-700";
+  if (s === "paused") return "bg-amber-50 text-amber-800";
+  if (s === "cancelled") return "bg-red-50 text-red-700";
+  if (s === "expired") return "bg-gray-100 text-gray-600";
+  return "bg-gray-100 text-gray-700";
 }
 
 type TabId = "tiers" | "enrollments";
@@ -349,17 +349,13 @@ export default function AdminMembershipsPage() {
     "rounded-full px-3 py-1.5 text-xs font-semibold transition-colors border";
 
   return (
-    <div className="mx-auto max-w-7xl">
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <h1 className="text-2xl font-semibold text-neutral-900">Memberships</h1>
-        <span
-          className="inline-flex items-center rounded-full border px-3 py-1 text-sm font-medium"
-          style={{
-            borderColor: `${BRAND}4d`,
-            backgroundColor: `${BRAND}1a`,
-            color: BRAND,
-          }}
-        >
+    <div className="w-full">
+      <h1 className="mb-1 text-2xl font-semibold text-gray-900">Memberships</h1>
+      <div className="mb-8 flex flex-wrap items-center gap-3">
+        <p className="text-sm tracking-wide text-gray-500">
+          Tiers and patient enrollments
+        </p>
+        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
           {loading
             ? "…"
             : `${tiers.length} tier${tiers.length === 1 ? "" : "s"} · ${enrollments.length} enrollment${enrollments.length === 1 ? "" : "s"}`}
@@ -367,15 +363,12 @@ export default function AdminMembershipsPage() {
       </div>
 
       {error ? (
-        <div
-          className="mb-4 rounded-md border px-3 py-2 text-sm text-red-800"
-          style={{ borderColor: "#fecaca", backgroundColor: "#fef2f2" }}
-        >
+        <div className="mb-6 rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
           {error}
         </div>
       ) : null}
 
-      <div className="mb-6 flex flex-wrap gap-2">
+      <div className="mb-6 flex flex-wrap gap-2 rounded-2xl border border-gray-100 bg-white px-6 py-4 shadow-sm">
         <button
           type="button"
           className={[
@@ -406,70 +399,69 @@ export default function AdminMembershipsPage() {
 
       {tab === "tiers" ? (
         <section>
-          <div className="mb-4 flex justify-end">
+          <div className="mb-6 flex justify-end">
             <button
               type="button"
               onClick={() => openCreateTierModal()}
-              className="rounded-md px-4 py-2 text-sm font-semibold text-white shadow-sm transition-opacity hover:opacity-90"
-              style={{ backgroundColor: BRAND }}
+              className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90"
             >
               New tier
             </button>
           </div>
           {loading ? (
-            <p className="text-sm text-neutral-600">Loading tiers…</p>
+            <p className="text-sm text-gray-500">Loading tiers…</p>
           ) : tiers.length === 0 ? (
-            <p className="text-sm text-neutral-600">No membership tiers yet.</p>
+            <p className="text-sm text-gray-500">No membership tiers yet.</p>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
               {tiers.map((tier) => {
                 const ids = tierServiceIds(tier);
                 const busy = savingTierId === tier.id;
                 return (
                   <div
                     key={tier.id}
-                    className="rounded-lg border border-neutral-200 bg-white p-4 shadow-sm"
+                    className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <h2 className="text-lg font-semibold text-neutral-900">
+                      <h2 className="text-lg font-semibold text-gray-900">
                         {tier.name}
                       </h2>
                       <span
-                        className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ${
+                        className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
                           tier.is_active
-                            ? "bg-emerald-100 text-emerald-800"
-                            : "bg-neutral-200 text-neutral-600"
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-gray-100 text-gray-600"
                         }`}
                       >
                         {tier.is_active ? "Active" : "Inactive"}
                       </span>
                     </div>
-                    <p className="mt-2 text-2xl font-bold tabular-nums text-neutral-900">
+                    <p className="mt-2 text-3xl font-semibold tabular-nums text-gray-900">
                       {formatPrice(tier.price_cents)}
                     </p>
-                    <p className="mt-1 text-sm text-neutral-600">
+                    <p className="mt-1 text-sm text-gray-600">
                       {formatBillingCycle(tier.billing_cycle)} ·{" "}
                       {tier.visits_included} visit
                       {tier.visits_included === 1 ? "" : "s"} included
                     </p>
-                    <p className="mt-1 text-sm text-neutral-600">
+                    <p className="mt-1 text-sm text-gray-600">
                       Roll over:{" "}
-                      <span className="font-medium text-neutral-800">
+                      <span className="font-medium text-gray-800">
                         {tier.visits_roll_over ? "Yes" : "No"}
                       </span>
                     </p>
-                    <div className="mt-3 border-t border-neutral-100 pt-3">
-                      <p className="text-xs font-medium uppercase tracking-wide text-neutral-500">
+                    <div className="mt-4 border-t border-gray-100 pt-4">
+                      <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
                         Treatment types
                       </p>
                       {ids.length === 0 ? (
-                        <p className="mt-1 text-xs text-neutral-500">None</p>
+                        <p className="mt-1 text-xs text-gray-500">None</p>
                       ) : (
                         <ul className="mt-2 flex max-h-24 flex-wrap gap-1 overflow-y-auto">
                           {ids.map((id) => (
                             <li
                               key={id}
-                              className="inline-flex rounded-full border border-neutral-200 bg-neutral-100 px-2 py-0.5 text-xs font-medium text-neutral-700"
+                              className="inline-flex rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-700"
                               title={id}
                             >
                               {treatmentTypeLabel(id)}
@@ -478,13 +470,12 @@ export default function AdminMembershipsPage() {
                         </ul>
                       )}
                     </div>
-                    <div className="mt-4 flex flex-wrap gap-2">
+                    <div className="mt-6 flex flex-wrap gap-2">
                       <button
                         type="button"
                         disabled={busy}
                         onClick={() => openEditTierModal(tier)}
-                        className="rounded-md border px-3 py-1.5 text-xs font-semibold text-neutral-800 transition-colors hover:bg-neutral-50 disabled:opacity-50"
-                        style={{ borderColor: `${BRAND}66` }}
+                        className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:opacity-50"
                       >
                         Edit
                       </button>
@@ -492,7 +483,7 @@ export default function AdminMembershipsPage() {
                         type="button"
                         disabled={busy}
                         onClick={() => void toggleTierActive(tier)}
-                        className="rounded-md border border-neutral-200 bg-neutral-50 px-3 py-1.5 text-xs font-medium text-neutral-800 hover:bg-neutral-100 disabled:opacity-50"
+                        className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:opacity-50"
                       >
                         {tier.is_active ? "Deactivate" : "Activate"}
                       </button>
@@ -505,43 +496,43 @@ export default function AdminMembershipsPage() {
         </section>
       ) : (
         <section>
-          <div className="overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-sm">
+          <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-neutral-200 bg-neutral-50">
+                <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 font-medium text-neutral-700">
+                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                       Patient ID
                     </th>
-                    <th className="px-4 py-3 font-medium text-neutral-700">
+                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                       Tier
                     </th>
-                    <th className="px-4 py-3 font-medium text-neutral-700">
+                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                       Status
                     </th>
-                    <th className="px-4 py-3 font-medium text-neutral-700 text-right">
+                    <th className="px-6 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
                       Visits used
                     </th>
-                    <th className="px-4 py-3 font-medium text-neutral-700 text-right">
+                    <th className="px-6 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
                       Visits remaining
                     </th>
-                    <th className="px-4 py-3 font-medium text-neutral-700">
+                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                       Next billing
                     </th>
-                    <th className="px-4 py-3 font-medium text-neutral-700">
+                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                       Auto renew
                     </th>
-                    <th className="px-4 py-3 font-medium text-neutral-700">
+                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                       Actions
                     </th>
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-gray-100">
                   {loading ? (
                     <tr>
                       <td
                         colSpan={8}
-                        className="px-4 py-10 text-center text-neutral-500"
+                        className="px-6 py-10 text-center text-gray-500"
                       >
                         Loading…
                       </td>
@@ -550,13 +541,13 @@ export default function AdminMembershipsPage() {
                     <tr>
                       <td
                         colSpan={8}
-                        className="px-4 py-10 text-center text-neutral-500"
+                        className="px-6 py-10 text-center text-gray-500"
                       >
                         No enrollments for this clinic.
                       </td>
                     </tr>
                   ) : (
-                    enrollments.map((row, idx) => {
+                    enrollments.map((row) => {
                       const busy = savingEnrollmentId === row.id;
                       const nb = row.next_billing_date
                         ? new Date(
@@ -570,40 +561,37 @@ export default function AdminMembershipsPage() {
                       return (
                         <tr
                           key={row.id}
-                          className={[
-                            "border-b border-neutral-100 transition-colors hover:bg-neutral-50/80",
-                            idx % 2 === 1 ? "bg-neutral-50/80" : "bg-white",
-                          ].join(" ")}
+                          className="transition-colors hover:bg-gray-50"
                         >
-                          <td className="max-w-[200px] px-4 py-3 font-mono text-xs text-neutral-800 break-all">
+                          <td className="max-w-[200px] break-all px-6 py-4 font-mono text-xs text-gray-800">
                             {row.patient_id}
                           </td>
-                          <td className="px-4 py-3 font-medium text-neutral-900">
+                          <td className="px-6 py-4 font-medium text-gray-900">
                             {nestedTierName(row)}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-6 py-4">
                             <span
                               className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${statusBadgeClass(row.status)}`}
                             >
                               {row.status}
                             </span>
                           </td>
-                          <td className="px-4 py-3 text-right tabular-nums text-neutral-800">
+                          <td className="px-6 py-4 text-right tabular-nums text-gray-800">
                             {row.visits_used}
                           </td>
-                          <td className="px-4 py-3 text-right tabular-nums text-neutral-800">
+                          <td className="px-6 py-4 text-right tabular-nums text-gray-800">
                             {row.visits_remaining}
                           </td>
-                          <td className="whitespace-nowrap px-4 py-3 text-neutral-700">
+                          <td className="whitespace-nowrap px-6 py-4 text-gray-700">
                             {nb}
                           </td>
-                          <td className="px-4 py-3 text-neutral-700">
+                          <td className="px-6 py-4 text-gray-700">
                             {row.auto_renew ? "Yes" : "No"}
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-6 py-4">
                             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                               <select
-                                className="min-w-[8rem] rounded-md border border-neutral-300 bg-white px-2 py-1 text-xs outline-none disabled:opacity-50"
+                                className="h-9 min-w-[8rem] rounded-lg border border-gray-200 bg-white px-2 text-sm outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 disabled:opacity-50"
                                 style={{ boxShadow: `0 0 0 1px transparent` }}
                                 onFocus={(e) => {
                                   e.target.style.boxShadow = `0 0 0 2px ${BRAND}40`;
@@ -636,8 +624,7 @@ export default function AdminMembershipsPage() {
                                         ?.id ?? "",
                                   })
                                 }
-                                className="whitespace-nowrap rounded-md px-2 py-1 text-xs font-semibold text-white disabled:opacity-50"
-                                style={{ backgroundColor: BRAND }}
+                                className="whitespace-nowrap rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
                               >
                                 Change tier
                               </button>
@@ -657,38 +644,37 @@ export default function AdminMembershipsPage() {
       {tierModalOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-lg border border-neutral-200 bg-white p-6 shadow-xl"
+            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-xl"
             role="dialog"
             aria-modal
             aria-labelledby="tier-modal-title"
           >
             <h2
               id="tier-modal-title"
-              className="text-lg font-semibold text-neutral-900"
+              className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900"
             >
               {editingTier ? "Edit tier" : "Create tier"}
             </h2>
-            <div className="mt-4 space-y-4">
-              <label className="block text-sm font-medium text-neutral-700">
+            <div className="space-y-4 pt-5">
+              <label className="block text-sm font-medium text-gray-700">
                 Name
                 <input
                   type="text"
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none"
-                  style={{ boxShadow: "none" }}
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
-              <label className="block text-sm font-medium text-neutral-700">
+              <label className="block text-sm font-medium text-gray-700">
                 Description
                 <textarea
                   value={formDescription}
                   onChange={(e) => setFormDescription(e.target.value)}
                   rows={2}
-                  className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none"
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
-              <label className="block text-sm font-medium text-neutral-700">
+              <label className="block text-sm font-medium text-gray-700">
                 Price (USD)
                 <input
                   type="number"
@@ -696,10 +682,10 @@ export default function AdminMembershipsPage() {
                   step="0.01"
                   value={formPriceDollars}
                   onChange={(e) => setFormPriceDollars(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none"
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
-              <label className="block text-sm font-medium text-neutral-700">
+              <label className="block text-sm font-medium text-gray-700">
                 Billing cycle
                 <select
                   value={formBillingCycle}
@@ -708,14 +694,14 @@ export default function AdminMembershipsPage() {
                       e.target.value as "monthly" | "quarterly" | "annual",
                     )
                   }
-                  className="mt-1 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm"
+                  className="mt-1 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 >
                   <option value="monthly">Monthly</option>
                   <option value="quarterly">Quarterly</option>
                   <option value="annual">Annual</option>
                 </select>
               </label>
-              <label className="block text-sm font-medium text-neutral-700">
+              <label className="block text-sm font-medium text-gray-700">
                 Visits included
                 <input
                   type="number"
@@ -723,30 +709,30 @@ export default function AdminMembershipsPage() {
                   step={1}
                   value={formVisitsIncluded}
                   onChange={(e) => setFormVisitsIncluded(e.target.value)}
-                  className="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm outline-none"
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
                 />
               </label>
-              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-neutral-700">
+              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-700">
                 <input
                   type="checkbox"
                   checked={formVisitsRollOver}
                   onChange={(e) => setFormVisitsRollOver(e.target.checked)}
-                  className="h-4 w-4 rounded border-neutral-300"
+                  className="h-4 w-4 rounded border-gray-300"
                   style={{ accentColor: BRAND }}
                 />
                 Visits roll over
               </label>
               <fieldset>
-                <legend className="text-sm font-medium text-neutral-700">
+                <legend className="text-sm font-medium text-gray-700">
                   Treatment types (from clinic appointments)
                 </legend>
                 {treatmentOptions.length === 0 ? (
-                  <p className="mt-2 text-xs text-neutral-500">
+                  <p className="mt-2 text-xs text-gray-500">
                     No treatment types found in recent appointments. You can still
                     save the tier and add services later via Edit.
                   </p>
                 ) : (
-                  <ul className="mt-2 max-h-40 space-y-2 overflow-y-auto rounded-md border border-neutral-200 p-2">
+                  <ul className="mt-2 max-h-40 space-y-2 overflow-y-auto rounded-lg border border-gray-100 p-2">
                     {treatmentOptions.map((opt) => (
                       <li key={opt.id}>
                         <label className="flex cursor-pointer items-start gap-2 text-sm">
@@ -754,14 +740,14 @@ export default function AdminMembershipsPage() {
                             type="checkbox"
                             checked={formTreatmentIds.includes(opt.id)}
                             onChange={() => toggleTreatmentId(opt.id)}
-                            className="mt-0.5 h-4 w-4 rounded border-neutral-300"
+                            className="mt-0.5 h-4 w-4 rounded border-gray-300"
                             style={{ accentColor: BRAND }}
                           />
                           <span>
-                            <span className="font-medium text-neutral-900">
+                            <span className="font-medium text-gray-900">
                               {treatmentTypeLabel(opt.id)}
                             </span>
-                            <span className="mt-0.5 block font-mono text-xs text-neutral-500">
+                            <span className="mt-0.5 block font-mono text-xs text-gray-500">
                               {opt.id}
                             </span>
                           </span>
@@ -772,11 +758,11 @@ export default function AdminMembershipsPage() {
                 )}
               </fieldset>
             </div>
-            <div className="mt-6 flex justify-end gap-2">
+            <div className="mt-6 flex justify-end gap-2 border-t border-gray-100 pt-5">
               <button
                 type="button"
                 onClick={() => setTierModalOpen(false)}
-                className="rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
               >
                 Cancel
               </button>
@@ -784,8 +770,7 @@ export default function AdminMembershipsPage() {
                 type="button"
                 disabled={tierSubmitBusy}
                 onClick={() => void submitTierModal()}
-                className="rounded-md px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                style={{ backgroundColor: BRAND }}
+                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 {tierSubmitBusy ? "Saving…" : "Save"}
               </button>
@@ -796,43 +781,47 @@ export default function AdminMembershipsPage() {
 
       {changeTierModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-lg border border-neutral-200 bg-white p-6 shadow-xl">
-            <h2 className="text-lg font-semibold text-neutral-900">Change tier</h2>
-            <p className="mt-2 text-sm text-neutral-600">
-              Patient membership:{" "}
-              <span className="font-mono text-xs">{changeTierModal.membership.id}</span>
-            </p>
-            {tierOptionsForChange.length === 0 ? (
-              <p className="mt-4 text-sm text-neutral-600">
-                No other tiers available. Create another tier first.
+          <div className="w-full max-w-md rounded-2xl border border-gray-100 bg-white p-6 shadow-xl">
+            <h2 className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900">
+              Change tier
+            </h2>
+            <div className="pt-5">
+              <p className="text-sm text-gray-600">
+                Patient membership:{" "}
+                <span className="font-mono text-xs">{changeTierModal.membership.id}</span>
               </p>
-            ) : (
-              <label className="mt-4 block text-sm font-medium text-neutral-700">
-                New tier
-                <select
-                  className="mt-1 w-full rounded-md border border-neutral-300 bg-white px-3 py-2 text-sm"
-                  value={changeTierModal.newTierId}
-                  onChange={(e) =>
-                    setChangeTierModal((m) =>
-                      m ? { ...m, newTierId: e.target.value } : m,
-                    )
-                  }
-                >
-                  <option value="">Select tier…</option>
-                  {tierOptionsForChange.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.name} — {formatPrice(t.price_cents)} /{" "}
-                      {formatBillingCycle(t.billing_cycle)}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
-            <div className="mt-6 flex justify-end gap-2">
+              {tierOptionsForChange.length === 0 ? (
+                <p className="mt-4 text-sm text-gray-600">
+                  No other tiers available. Create another tier first.
+                </p>
+              ) : (
+                <label className="mt-4 block text-sm font-medium text-gray-700">
+                  New tier
+                  <select
+                    className="mt-1 h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                    value={changeTierModal.newTierId}
+                    onChange={(e) =>
+                      setChangeTierModal((m) =>
+                        m ? { ...m, newTierId: e.target.value } : m,
+                      )
+                    }
+                  >
+                    <option value="">Select tier…</option>
+                    {tierOptionsForChange.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name} — {formatPrice(t.price_cents)} /{" "}
+                        {formatBillingCycle(t.billing_cycle)}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+            <div className="mt-6 flex justify-end gap-2 border-t border-gray-100 pt-5">
               <button
                 type="button"
                 onClick={() => setChangeTierModal(null)}
-                className="rounded-md border border-neutral-300 bg-white px-4 py-2 text-sm font-medium text-neutral-800 hover:bg-neutral-50"
+                className="rounded-xl border border-gray-200 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
               >
                 Cancel
               </button>
@@ -844,8 +833,7 @@ export default function AdminMembershipsPage() {
                   tierOptionsForChange.length === 0
                 }
                 onClick={() => void submitChangeTier()}
-                className="rounded-md px-4 py-2 text-sm font-semibold text-white disabled:opacity-50"
-                style={{ backgroundColor: BRAND }}
+                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
               >
                 {changeTierBusy ? "Saving…" : "Apply"}
               </button>
