@@ -1,6 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  Bar,
+  BarChart,
+  Legend,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
 import {
   addDaysToYmd,
@@ -65,31 +74,6 @@ function formatUsdFromCents(cents: number): string {
     style: "currency",
     currency: "USD",
   }).format(cents / 100);
-}
-
-function formatDateBooked(iso: string): string {
-  const d = new Date(iso);
-  const datePart = new Intl.DateTimeFormat("en-US", {
-    timeZone: NY,
-    month: "long",
-    day: "numeric",
-  }).format(d);
-  const timePart = new Intl.DateTimeFormat("en-US", {
-    timeZone: NY,
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  }).format(d);
-  return `${datePart} at ${timePart}`;
-}
-
-function appointmentStatusPillClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === "scheduled") return "bg-amber-50 text-amber-800";
-  if (s === "checked_in") return "bg-blue-50 text-blue-700";
-  if (s === "completed") return "bg-emerald-50 text-emerald-700";
-  if (s === "cancelled") return "bg-red-50 text-red-700";
-  return "bg-gray-50 text-gray-700";
 }
 
 function focusBorderColor(clinicianId: string): string {
@@ -296,14 +280,38 @@ export default function AdminOverviewPage() {
     [billingRecordsThisMonth],
   );
 
-  const recentBookedAppointments = useMemo(() => {
-    return [...appointments]
-      .sort((a, b) => {
-        const ta = new Date(a.created_at ?? a.start_time).getTime();
-        const tb = new Date(b.created_at ?? b.start_time).getTime();
-        return tb - ta;
-      })
-      .slice(0, 10);
+  const appointmentsLast7DaysChart = useMemo(() => {
+    const todayY = getEasternYMD(new Date());
+    const rows: { day: string; west: number; sharpe: number; ymd: string }[] =
+      [];
+    for (let i = -6; i <= 0; i++) {
+      const ymd = addDaysToYmd(todayY, i);
+      const dayShort = new Intl.DateTimeFormat("en-US", {
+        timeZone: NY,
+        weekday: "short",
+      }).format(
+        new Date(
+          Date.UTC(
+            Number(ymd.slice(0, 4)),
+            Number(ymd.slice(5, 7)) - 1,
+            Number(ymd.slice(8, 10)),
+            15,
+            0,
+            0,
+          ),
+        ),
+      );
+      let west = 0;
+      let sharpe = 0;
+      for (const a of appointments) {
+        if (getEasternYMD(new Date(a.start_time)) !== ymd) continue;
+        const name = clinicianLabel(a.clinician_id);
+        if (name.includes("West")) west += 1;
+        else if (name.includes("Sharpe")) sharpe += 1;
+      }
+      rows.push({ day: dayShort, west, sharpe, ymd });
+    }
+    return rows;
   }, [appointments]);
 
   return (
@@ -413,13 +421,11 @@ export default function AdminOverviewPage() {
 
       <section className="mb-10">
         <h2 className="mb-1 text-2xl font-semibold text-gray-900">
-          Recent Appointments
+          Appointments — Last 7 Days
         </h2>
-        <p className="mb-4 text-sm tracking-wide text-gray-500">
-          Last 10 booked
-        </p>
-        <RecentAppointmentsTable
-          rows={recentBookedAppointments}
+        <p className="mb-4 text-sm tracking-wide text-gray-500">By clinician</p>
+        <AppointmentsLast7DaysChart
+          data={appointmentsLast7DaysChart}
           loading={loading}
         />
       </section>
@@ -516,99 +522,95 @@ function BillingSummaryCard({
   );
 }
 
-function RecentAppointmentsTable({
-  rows,
+function AppointmentsLast7DaysChart({
+  data,
   loading,
 }: {
-  rows: AppointmentRow[];
+  data: { day: string; west: number; sharpe: number; ymd: string }[];
   loading: boolean;
 }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-      <div className="overflow-x-auto">
-        <table className="min-w-full text-left text-sm">
-          <thead className="bg-gray-50">
-            <tr>
-              <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
-                Patient
-              </th>
-              <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
-                Service
-              </th>
-              <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
-                Clinician
-              </th>
-              <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
-                Date Booked
-              </th>
-              <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
-                Status
-              </th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-gray-100">
-            {loading ? (
-              <tr>
-                <td
-                  colSpan={5}
-                  className="px-6 py-6 text-center text-gray-500"
-                >
-                  Loading…
-                </td>
-              </tr>
-            ) : rows.length === 0 ? (
-              <tr>
-                <td
-                  colSpan={5}
-                  className="px-6 py-6 text-center text-gray-500"
-                >
-                  No appointments yet
-                </td>
-              </tr>
-            ) : (
-              rows.map((row) => {
-                const bookedIso = row.created_at ?? row.start_time;
-                const st = (row.status ?? "").toLowerCase();
+    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      {loading ? (
+        <p className="text-sm text-gray-500">Loading…</p>
+      ) : (
+        <ResponsiveContainer width="100%" height={260}>
+          <BarChart
+            data={data}
+            margin={{ top: 8, right: 8, left: 0, bottom: 8 }}
+            barCategoryGap="30%"
+            barGap={4}
+          >
+            <XAxis
+              dataKey="day"
+              axisLine={false}
+              tickLine={false}
+              tick={{ fill: "#9CA3AF", fontSize: 12 }}
+            />
+            <YAxis
+              allowDecimals={false}
+              axisLine={false}
+              tickLine={false}
+              tick={{ fill: "#9CA3AF", fontSize: 12 }}
+              width={24}
+            />
+            <Tooltip
+              cursor={{ fill: "transparent" }}
+              content={({ active, payload }) => {
+                if (!active || !payload?.length) return null;
+                const row = payload[0]?.payload as {
+                  day: string;
+                  west: number;
+                  sharpe: number;
+                  ymd: string;
+                };
+                if (!row) return null;
                 return (
-                  <tr
-                    key={row.id}
-                    className="transition-colors hover:bg-gray-50"
-                  >
-                    <td className="px-6 py-3 font-medium text-gray-900">
-                      {patientName(row)}
-                    </td>
-                    <td className="px-6 py-3 text-gray-700">
-                      {serviceName(row)}
-                    </td>
-                    <td className="px-6 py-3">
-                      <span className="inline-flex items-center gap-2 text-gray-800">
-                        <span
-                          className="inline-block h-2 w-2 shrink-0 rounded-full"
-                          style={{
-                            backgroundColor: focusBorderColor(row.clinician_id),
-                          }}
-                          aria-hidden
-                        />
-                        {clinicianLabel(row.clinician_id)}
+                  <div className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-sm shadow-md">
+                    <p className="font-medium text-gray-900">{row.day}</p>
+                    <p className="mt-1 text-gray-600">
+                      Dr. West:{" "}
+                      <span className="font-medium tabular-nums text-gray-900">
+                        {row.west}
                       </span>
-                    </td>
-                    <td className="whitespace-nowrap px-6 py-3 text-gray-700">
-                      {formatDateBooked(bookedIso)}
-                    </td>
-                    <td className="px-6 py-3">
-                      <span
-                        className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${appointmentStatusPillClass(row.status)}`}
-                      >
-                        {st.replace(/_/g, " ")}
+                    </p>
+                    <p className="text-gray-600">
+                      Dr. Sharpe:{" "}
+                      <span className="font-medium tabular-nums text-gray-900">
+                        {row.sharpe}
                       </span>
-                    </td>
-                  </tr>
+                    </p>
+                  </div>
                 );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+              }}
+            />
+            <Legend
+              verticalAlign="bottom"
+              align="center"
+              wrapperStyle={{ paddingTop: 12 }}
+              iconType="circle"
+              iconSize={8}
+              formatter={(value) => (
+                <span className="text-sm text-gray-500">{value}</span>
+              )}
+            />
+            <Bar
+              dataKey="west"
+              name="Dr. West"
+              fill="#1A6B8A"
+              radius={[4, 4, 0, 0]}
+              barSize={28}
+            />
+            <Bar
+              dataKey="sharpe"
+              name="Dr. Sharpe"
+              fill="#7C3AED"
+              radius={[4, 4, 0, 0]}
+              barSize={28}
+            />
+          </BarChart>
+        </ResponsiveContainer>
+      )}
     </div>
   );
 }
