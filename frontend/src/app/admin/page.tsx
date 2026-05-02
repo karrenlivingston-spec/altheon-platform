@@ -33,6 +33,14 @@ type AppointmentRow = {
   treatment_types?: { name?: string } | null;
 };
 
+type BillingRecordRow = {
+  id: string;
+  date_of_service?: string;
+  status?: string;
+  total_billed_cents?: number | null;
+  total_paid_cents?: number | null;
+};
+
 function clinicianLabel(id: string): string {
   if (id === CLINICIAN_WEST_ID) return "Dr. West";
   if (id === CLINICIAN_SHARPE_ID) return "Dr. Sharpe";
@@ -52,27 +60,18 @@ function serviceName(row: AppointmentRow): string {
   return row.treatment_types?.name ?? "—";
 }
 
-function patientInitials(row: AppointmentRow): string {
-  const p = row.patients;
-  const f = (p?.first_name ?? "").trim();
-  const l = (p?.last_name ?? "").trim();
-  const a = f.charAt(0).toUpperCase();
-  const b = l.charAt(0).toUpperCase();
-  if (a && b) return `${a}${b}`;
-  if (a) return a;
-  const name = patientName(row);
-  const parts = name.split(/\s+/).filter(Boolean);
-  if (parts.length >= 2) {
-    return `${parts[0].charAt(0)}${parts[1].charAt(0)}`.toUpperCase();
-  }
-  return (name.slice(0, 2).toUpperCase() || "?").slice(0, 2);
+function formatUsdFromCents(cents: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(cents / 100);
 }
 
-function formatBookedAt(iso: string): string {
+function formatDateBooked(iso: string): string {
   const d = new Date(iso);
   const datePart = new Intl.DateTimeFormat("en-US", {
     timeZone: NY,
-    month: "short",
+    month: "long",
     day: "numeric",
   }).format(d);
   const timePart = new Intl.DateTimeFormat("en-US", {
@@ -81,7 +80,16 @@ function formatBookedAt(iso: string): string {
     minute: "2-digit",
     hour12: true,
   }).format(d);
-  return `Booked ${datePart} at ${timePart}`;
+  return `${datePart} at ${timePart}`;
+}
+
+function appointmentStatusPillClass(status: string): string {
+  const s = status.toLowerCase();
+  if (s === "scheduled") return "bg-amber-50 text-amber-800";
+  if (s === "checked_in") return "bg-blue-50 text-blue-700";
+  if (s === "completed") return "bg-emerald-50 text-emerald-700";
+  if (s === "cancelled") return "bg-red-50 text-red-700";
+  return "bg-gray-50 text-gray-700";
 }
 
 function focusBorderColor(clinicianId: string): string {
@@ -91,6 +99,8 @@ function focusBorderColor(clinicianId: string): string {
 export default function AdminOverviewPage() {
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [patients, setPatients] = useState<PatientRow[]>([]);
+  const [billingRecords, setBillingRecords] = useState<BillingRecordRow[]>([]);
+  const [openPiCasesCount, setOpenPiCasesCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [focusCheckInBusy, setFocusCheckInBusy] = useState(false);
 
@@ -113,22 +123,34 @@ export default function AdminOverviewPage() {
         setLoading(true);
       }
       try {
-        const [apRes, ptRes] = await Promise.all([
+        const [apRes, ptRes, brRes, piRes] = await Promise.all([
           fetch(
             `${API_BASE}/appointments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
           ),
           fetch(`${API_BASE}/patients?clinic_id=${encodeURIComponent(CLINIC_ID)}`),
+          fetch(
+            `${API_BASE}/billing-records?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+          ),
+          fetch(
+            `${API_BASE}/pi-cases?clinic_id=${encodeURIComponent(CLINIC_ID)}&status=open`,
+          ),
         ]);
         const apJson = apRes.ok ? await apRes.json() : [];
         const ptJson = ptRes.ok ? await ptRes.json() : [];
+        const brJson = brRes.ok ? await brRes.json() : [];
+        const piJson = piRes.ok ? await piRes.json() : [];
         if (!cancelled) {
           setAppointments(Array.isArray(apJson) ? apJson : []);
           setPatients(Array.isArray(ptJson) ? ptJson : []);
+          setBillingRecords(Array.isArray(brJson) ? brJson : []);
+          setOpenPiCasesCount(Array.isArray(piJson) ? piJson.length : 0);
         }
       } catch {
         if (!cancelled) {
           setAppointments([]);
           setPatients([]);
+          setBillingRecords([]);
+          setOpenPiCasesCount(0);
         }
       } finally {
         if (!cancelled && !silent) {
@@ -219,6 +241,71 @@ export default function AdminOverviewPage() {
   const todayCount = todayAppointments.length;
   const patientCount = patients.length;
 
+  const billingRecordsThisMonth = useMemo(() => {
+    const ymd = getEasternYMD(new Date());
+    const [yStr, mStr] = ymd.split("-");
+    const y = Number(yStr);
+    const m = Number(mStr);
+    const mi = m - 1;
+    const lastDay = new Date(y, mi + 1, 0).getDate();
+    const start = `${yStr}-${mStr}-01`;
+    const end = `${yStr}-${mStr}-${String(lastDay).padStart(2, "0")}`;
+    return billingRecords.filter((r) => {
+      const raw = (r.date_of_service ?? "").trim();
+      if (!raw) return false;
+      const d = raw.slice(0, 10);
+      return d >= start && d <= end;
+    });
+  }, [billingRecords]);
+
+  const totalBilledThisMonthCents = useMemo(
+    () =>
+      billingRecordsThisMonth.reduce(
+        (acc, r) => acc + (Number(r.total_billed_cents) || 0),
+        0,
+      ),
+    [billingRecordsThisMonth],
+  );
+
+  const billingSummaryCounts = useMemo(() => {
+    let draft = 0;
+    let submitted = 0;
+    let paid = 0;
+    let deniedPartial = 0;
+    for (const r of billingRecordsThisMonth) {
+      const s = (r.status ?? "draft").toLowerCase();
+      if (s === "draft") draft += 1;
+      else if (s === "submitted") submitted += 1;
+      else if (s === "paid") paid += 1;
+      else if (s === "denied" || s === "partial") deniedPartial += 1;
+    }
+    return { draft, submitted, paid, deniedPartial };
+  }, [billingRecordsThisMonth]);
+
+  const totalOutstandingThisMonthCents = useMemo(
+    () =>
+      billingRecordsThisMonth
+        .filter((r) => String(r.status ?? "").toLowerCase() !== "paid")
+        .reduce(
+          (acc, r) =>
+            acc +
+            (Number(r.total_billed_cents) || 0) -
+            (Number(r.total_paid_cents) || 0),
+          0,
+        ),
+    [billingRecordsThisMonth],
+  );
+
+  const recentBookedAppointments = useMemo(() => {
+    return [...appointments]
+      .sort((a, b) => {
+        const ta = new Date(a.created_at ?? a.start_time).getTime();
+        const tb = new Date(b.created_at ?? b.start_time).getTime();
+        return tb - ta;
+      })
+      .slice(0, 10);
+  }, [appointments]);
+
   return (
     <div className="w-full">
       <h1 className="mb-1 text-2xl font-semibold text-gray-900">Overview</h1>
@@ -278,7 +365,7 @@ export default function AdminOverviewPage() {
         )}
       </section>
 
-      <div className="mb-10 grid grid-cols-1 gap-6 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-10 grid grid-cols-2 gap-6 md:grid-cols-3 lg:grid-cols-6">
         <StatCard
           label={"Today's Appointments"}
           value={loading ? "…" : String(todayCount)}
@@ -295,20 +382,46 @@ export default function AdminOverviewPage() {
           label={"This Month's Appointments"}
           value={loading ? "…" : String(monthAppointmentCount)}
         />
+        <StatCard
+          label="Billed This Month"
+          value={
+            loading ? "…" : formatUsdFromCents(totalBilledThisMonthCents)
+          }
+        />
+        <StatCard
+          label="Open PI Cases"
+          value={loading ? "…" : String(openPiCasesCount)}
+        />
+      </div>
+
+      <div className="mb-10 grid grid-cols-1 gap-6 lg:grid-cols-2">
+        <section>
+          <h2 className="mb-4 text-xs text-gray-500 uppercase tracking-wide">
+            Next 3 Days
+          </h2>
+          <MiniCalendarStrip appointments={appointments} loading={loading} />
+        </section>
+        <BillingSummaryCard
+          loading={loading}
+          draft={billingSummaryCounts.draft}
+          submitted={billingSummaryCounts.submitted}
+          paid={billingSummaryCounts.paid}
+          deniedPartial={billingSummaryCounts.deniedPartial}
+          outstandingCents={totalOutstandingThisMonthCents}
+        />
       </div>
 
       <section className="mb-10">
-        <h2 className="mb-4 text-xs text-gray-500 uppercase tracking-wide">
-          Next 3 Days
+        <h2 className="mb-1 text-2xl font-semibold text-gray-900">
+          Recent Appointments
         </h2>
-        <MiniCalendarStrip appointments={appointments} loading={loading} />
-      </section>
-
-      <section className="mb-10">
-        <h2 className="mb-4 text-xs text-gray-500 uppercase tracking-wide">
-          Recent Activity
-        </h2>
-        <RecentActivityFeed appointments={appointments} loading={loading} />
+        <p className="mb-4 text-sm tracking-wide text-gray-500">
+          Last 10 booked
+        </p>
+        <RecentAppointmentsTable
+          rows={recentBookedAppointments}
+          loading={loading}
+        />
       </section>
     </div>
   );
@@ -323,6 +436,179 @@ function StatCard({ label, value }: { label: string; value: string }) {
       <p className="mt-2 text-xs text-gray-500 uppercase tracking-wide">
         {label}
       </p>
+    </div>
+  );
+}
+
+function BillingSummaryCard({
+  loading,
+  draft,
+  submitted,
+  paid,
+  deniedPartial,
+  outstandingCents,
+}: {
+  loading: boolean;
+  draft: number;
+  submitted: number;
+  paid: number;
+  deniedPartial: number;
+  outstandingCents: number;
+}) {
+  const summaryRows: { key: string; label: string; badge: string }[] = [
+    { key: "draft", label: "Draft", badge: "bg-gray-100 text-gray-600" },
+    {
+      key: "submitted",
+      label: "Submitted",
+      badge: "bg-yellow-50 text-yellow-700",
+    },
+    { key: "paid", label: "Paid", badge: "bg-green-50 text-green-700" },
+    {
+      key: "denied",
+      label: "Denied / Partial",
+      badge: "bg-red-50 text-red-700",
+    },
+  ];
+
+  return (
+    <section>
+      <h2 className="mb-1 text-2xl font-semibold text-gray-900">
+        Billing Summary
+      </h2>
+      <p className="mb-4 text-sm tracking-wide text-gray-500">This month</p>
+      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+        {loading ? (
+          <p className="text-sm text-gray-500">Loading…</p>
+        ) : (
+          <>
+            <div className="space-y-3">
+              {summaryRows.map((r) => (
+                <div
+                  key={r.key}
+                  className="flex items-center justify-between gap-3 text-sm text-gray-700"
+                >
+                  <span>{r.label}</span>
+                  <span
+                    className={`inline-flex min-w-[2rem] justify-center rounded-full px-2.5 py-0.5 text-xs font-medium tabular-nums ${r.badge}`}
+                  >
+                    {r.key === "draft"
+                      ? draft
+                      : r.key === "submitted"
+                        ? submitted
+                        : r.key === "paid"
+                          ? paid
+                          : deniedPartial}
+                  </span>
+                </div>
+              ))}
+            </div>
+            <div className="my-4 border-t border-gray-100" />
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm text-gray-600">Total outstanding</span>
+              <span className="text-lg font-semibold tabular-nums text-gray-900">
+                {formatUsdFromCents(outstandingCents)}
+              </span>
+            </div>
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function RecentAppointmentsTable({
+  rows,
+  loading,
+}: {
+  rows: AppointmentRow[];
+  loading: boolean;
+}) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+      <div className="overflow-x-auto">
+        <table className="min-w-full text-left text-sm">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
+                Patient
+              </th>
+              <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
+                Service
+              </th>
+              <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
+                Clinician
+              </th>
+              <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
+                Date Booked
+              </th>
+              <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
+                Status
+              </th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {loading ? (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="px-6 py-6 text-center text-gray-500"
+                >
+                  Loading…
+                </td>
+              </tr>
+            ) : rows.length === 0 ? (
+              <tr>
+                <td
+                  colSpan={5}
+                  className="px-6 py-6 text-center text-gray-500"
+                >
+                  No appointments yet
+                </td>
+              </tr>
+            ) : (
+              rows.map((row) => {
+                const bookedIso = row.created_at ?? row.start_time;
+                const st = (row.status ?? "").toLowerCase();
+                return (
+                  <tr
+                    key={row.id}
+                    className="transition-colors hover:bg-gray-50"
+                  >
+                    <td className="px-6 py-3 font-medium text-gray-900">
+                      {patientName(row)}
+                    </td>
+                    <td className="px-6 py-3 text-gray-700">
+                      {serviceName(row)}
+                    </td>
+                    <td className="px-6 py-3">
+                      <span className="inline-flex items-center gap-2 text-gray-800">
+                        <span
+                          className="inline-block h-2 w-2 shrink-0 rounded-full"
+                          style={{
+                            backgroundColor: focusBorderColor(row.clinician_id),
+                          }}
+                          aria-hidden
+                        />
+                        {clinicianLabel(row.clinician_id)}
+                      </span>
+                    </td>
+                    <td className="whitespace-nowrap px-6 py-3 text-gray-700">
+                      {formatDateBooked(bookedIso)}
+                    </td>
+                    <td className="px-6 py-3">
+                      <span
+                        className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${appointmentStatusPillClass(row.status)}`}
+                      >
+                        {st.replace(/_/g, " ")}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -396,71 +682,6 @@ function MiniCalendarStrip({
           </div>
         );
       })}
-    </div>
-  );
-}
-
-function RecentActivityFeed({
-  appointments,
-  loading,
-}: {
-  appointments: AppointmentRow[];
-  loading: boolean;
-}) {
-  const items = useMemo(() => {
-    return [...appointments]
-      .filter((a) => a.created_at)
-      .sort(
-        (a, b) =>
-          new Date(b.created_at!).getTime() - new Date(a.created_at!).getTime(),
-      )
-      .slice(0, 8);
-  }, [appointments]);
-
-  return (
-    <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-      {loading ? (
-        <p className="p-6 text-sm text-gray-500">Loading…</p>
-      ) : items.length === 0 ? (
-        <p className="p-6 text-sm text-gray-500">No recent bookings.</p>
-      ) : (
-        <ul className="divide-y divide-gray-100">
-          {items.map((row) => {
-            const west = clinicianLabel(row.clinician_id) === "Dr. West";
-            const dotColor = west ? "#1A6B8A" : "#7C3AED";
-            return (
-              <li
-                key={row.id}
-                className="flex gap-3 px-6 py-4 transition-colors hover:bg-gray-100"
-              >
-                <div
-                  className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-xs font-semibold text-emerald-800"
-                  aria-hidden
-                >
-                  {patientInitials(row)}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-semibold text-gray-900">
-                    {patientName(row)}
-                  </p>
-                  <p className="text-xs text-gray-600">{serviceName(row)}</p>
-                  <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-600">
-                    <span
-                      className="inline-block h-2 w-2 shrink-0 rounded-full"
-                      style={{ backgroundColor: dotColor }}
-                      aria-hidden
-                    />
-                    <span>{clinicianLabel(row.clinician_id)}</span>
-                  </p>
-                  <p className="mt-0.5 text-xs text-gray-500">
-                    {row.created_at ? formatBookedAt(row.created_at) : ""}
-                  </p>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
-      )}
     </div>
   );
 }
