@@ -40,14 +40,6 @@ export default function AdminLoginPage() {
           src="/altheon-logo-full.svg"
           alt="Altheon"
           className="login-logo"
-          style={{
-            width: "220px",
-            minWidth: "220px",
-            maxWidth: "220px",
-            height: "auto",
-            display: "block",
-            margin: "0 auto 24px auto",
-          }}
         />
         <h1 className="text-center text-xl font-semibold">Sign in</h1>
         <p className="mb-6 text-center text-sm text-gray-500">

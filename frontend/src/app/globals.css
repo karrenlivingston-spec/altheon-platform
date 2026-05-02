@@ -24,3 +24,11 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+.login-logo {
+  width: 220px !important;
+  max-width: none !important;
+  height: auto !important;
+  display: block;
+  margin: 0 auto 24px auto;
+}
