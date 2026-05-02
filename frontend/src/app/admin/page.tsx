@@ -76,10 +76,6 @@ function formatUsdFromCents(cents: number): string {
   }).format(cents / 100);
 }
 
-function focusBorderColor(clinicianId: string): string {
-  return clinicianLabel(clinicianId) === "Dr. West" ? "#1A6B8A" : "#7C3AED";
-}
-
 export default function AdminOverviewPage() {
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [patients, setPatients] = useState<PatientRow[]>([]);
@@ -315,7 +311,7 @@ export default function AdminOverviewPage() {
   }, [appointments]);
 
   return (
-    <div className="w-full">
+    <div className="w-full bg-gray-50/50">
       <h1 className="mb-1 text-2xl font-semibold text-gray-900">Overview</h1>
       <p className="mb-10 text-sm tracking-wide text-gray-500">
         Snapshot for clinic operations. Data loads from the live API.
@@ -323,19 +319,15 @@ export default function AdminOverviewPage() {
 
       <section className="mb-10">
         {loading ? (
-          <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
+          <div className="rounded-2xl border-l-4 border-l-[#1a6b3c] bg-green-50 p-5 shadow-none">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#1a6b3c]">
+              {"Today's Focus"}
+            </p>
             <p className="text-sm text-gray-500">Loading…</p>
           </div>
         ) : nextFocusAppointment ? (
-          <div
-            className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm"
-            style={{
-              borderLeftWidth: "4px",
-              borderLeftStyle: "solid",
-              borderLeftColor: focusBorderColor(nextFocusAppointment.clinician_id),
-            }}
-          >
-            <p className="text-xs text-gray-500 uppercase tracking-wide">
+          <div className="rounded-2xl border-l-4 border-l-[#1a6b3c] bg-green-50 p-5 shadow-none">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#1a6b3c]">
               {"Today's Focus"}
             </p>
             <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
@@ -362,8 +354,8 @@ export default function AdminOverviewPage() {
             </div>
           </div>
         ) : (
-          <div className="rounded-2xl border border-gray-100 bg-white p-4 shadow-sm">
-            <p className="text-xs text-gray-500 uppercase tracking-wide">
+          <div className="rounded-2xl border-l-4 border-l-[#1a6b3c] bg-green-50 p-5 shadow-none">
+            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#1a6b3c]">
               {"Today's Focus"}
             </p>
             <p className="mt-2 text-sm text-gray-500">
@@ -377,46 +369,54 @@ export default function AdminOverviewPage() {
         <StatCard
           label={"Today's Appointments"}
           value={loading ? "…" : String(todayCount)}
+          topBorderClass="border-t-4 border-t-[#1a6b3c]"
         />
         <StatCard
           label={"This Week's Appointments"}
           value={loading ? "…" : String(weekAppointmentCount)}
+          topBorderClass="border-t-4 border-t-[#1a6b3c]"
         />
         <StatCard
           label="Total Patients"
           value={loading ? "…" : String(patientCount)}
+          topBorderClass="border-t-4 border-t-[#1A6B8A]"
         />
         <StatCard
           label={"This Month's Appointments"}
           value={loading ? "…" : String(monthAppointmentCount)}
+          topBorderClass="border-t-4 border-t-[#1A6B8A]"
         />
         <StatCard
           label="Billed This Month"
           value={
             loading ? "…" : formatUsdFromCents(totalBilledThisMonthCents)
           }
+          topBorderClass="border-t-4 border-t-[#7C3AED]"
         />
         <StatCard
           label="Open PI Cases"
           value={loading ? "…" : String(openPiCasesCount)}
+          topBorderClass="border-t-4 border-t-orange-400"
         />
       </div>
 
-      <div className="mb-10 grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <section>
-          <h2 className="mb-4 text-xs text-gray-500 uppercase tracking-wide">
-            Next 3 Days
-          </h2>
-          <MiniCalendarStrip appointments={appointments} loading={loading} />
-        </section>
-        <BillingSummaryCard
-          loading={loading}
-          draft={billingSummaryCounts.draft}
-          submitted={billingSummaryCounts.submitted}
-          paid={billingSummaryCounts.paid}
-          deniedPartial={billingSummaryCounts.deniedPartial}
-          outstandingCents={totalOutstandingThisMonthCents}
-        />
+      <div className="mb-6 rounded-2xl bg-gray-50 p-6">
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <section>
+            <h2 className="mb-4 text-xs text-gray-500 uppercase tracking-wide">
+              Next 3 Days
+            </h2>
+            <MiniCalendarStrip appointments={appointments} loading={loading} />
+          </section>
+          <BillingSummaryCard
+            loading={loading}
+            draft={billingSummaryCounts.draft}
+            submitted={billingSummaryCounts.submitted}
+            paid={billingSummaryCounts.paid}
+            deniedPartial={billingSummaryCounts.deniedPartial}
+            outstandingCents={totalOutstandingThisMonthCents}
+          />
+        </div>
       </div>
 
       <section className="mb-10">
@@ -435,9 +435,19 @@ export default function AdminOverviewPage() {
   );
 }
 
-function StatCard({ label, value }: { label: string; value: string }) {
+function StatCard({
+  label,
+  value,
+  topBorderClass,
+}: {
+  label: string;
+  value: string;
+  topBorderClass: string;
+}) {
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+    <div
+      className={`rounded-2xl border border-gray-100 bg-white p-6 shadow-sm ${topBorderClass}`}
+    >
       <p className="text-3xl font-semibold tabular-nums text-gray-900">
         {value}
       </p>
@@ -532,7 +542,7 @@ function AppointmentsLast7DaysChart({
   loading: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-md">
       {loading ? (
         <p className="text-sm text-gray-500">Loading…</p>
       ) : (
