@@ -387,6 +387,9 @@ export default function AdminAppointmentsPage() {
                       const checkedInBlock = st === "checked_in";
                       const completedBlock = st === "completed";
                       const fullName = patientName(row);
+                      const firstNameOnly =
+                        fullName.trim().split(/\s+/).filter(Boolean)[0] ??
+                        fullName;
                       const cellAccent = west
                         ? "border-l-2 border-l-[#1A6B8A] bg-blue-50"
                         : sharpe
@@ -398,22 +401,15 @@ export default function AdminAppointmentsPage() {
                           key={row.id}
                           title={fullName}
                           className={[
-                            "overflow-visible rounded-lg py-1.5 px-2 text-xs",
+                            "overflow-hidden rounded-lg p-1.5 text-xs",
                             cellAccent,
                             cancelled ? "opacity-50" : "",
                           ].join(" ")}
                         >
-                          <div className="flex items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1">
-                              <p className="text-xs font-medium text-gray-500">
-                                {formatTimeEastern(row.start_time)}
-                              </p>
-                              <p
-                                className={`mt-0.5 break-words text-xs font-semibold text-gray-800 ${cancelled ? "line-through" : ""}`}
-                              >
-                                {fullName}
-                              </p>
-                            </div>
+                          <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-1 gap-y-0.5">
+                            <span className="shrink-0 text-xs text-gray-400">
+                              {formatTimeEastern(row.start_time)}
+                            </span>
                             {checkedInBlock ? (
                               <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium leading-tight text-amber-800">
                                 Checked In
@@ -424,6 +420,11 @@ export default function AdminAppointmentsPage() {
                               </span>
                             ) : null}
                           </div>
+                          <p
+                            className={`mt-0.5 min-w-0 truncate text-xs font-medium text-gray-800 ${cancelled ? "line-through" : ""}`}
+                          >
+                            {firstNameOnly}
+                          </p>
                         </div>
                       );
                     })
