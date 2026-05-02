@@ -43,14 +43,14 @@ export default function AdminLoginPage() {
           className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.08),transparent_60%)]"
           aria-hidden
         />
-        <div className="relative z-10 flex h-full min-h-0 flex-col items-center justify-center px-12 py-12 md:min-h-screen md:py-0">
-          <div className="flex flex-col items-center justify-center gap-8 h-full -translate-y-16">
+        <div className="relative z-10 flex h-full min-h-0 flex-col items-center justify-center px-12 py-12 text-center md:min-h-screen md:py-0">
+          <div className="flex flex-col items-center justify-center text-center h-full -translate-y-16">
             <img
               src="/altheon-logo-white.svg"
               alt="Altheon"
-              className="w-[520px] max-w-none"
+              className="w-[560px] max-w-none drop-shadow-[0_2px_8px_rgba(255,255,255,0.15)]"
             />
-            <p className="text-white text-base font-medium opacity-80 tracking-wide text-center">
+            <p className="mt-8 text-center text-lg font-medium tracking-wide text-white opacity-90">
               AI-powered clinic operations platform
             </p>
           </div>
