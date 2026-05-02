@@ -26,9 +26,9 @@ body {
 }
 
 .login-logo {
-  width: 360px !important;
+  width: 240px !important;
   max-width: none !important;
   height: auto !important;
   display: block;
-  margin: 0 auto 24px auto;
+  margin: 0 auto 12px auto;
 }

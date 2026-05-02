@@ -32,20 +32,37 @@ export default function AdminLoginPage() {
     <div
       className="flex min-h-screen flex-col items-center justify-center"
       style={{
-        background: "linear-gradient(180deg, #f9fafb 0%, #f3f4f6 100%)",
+        background: "linear-gradient(180deg, #f9fafb 0%, #eef2f5 100%)",
       }}
     >
-      <div className="w-[420px] rounded-xl bg-white p-10 shadow-lg">
+      <div
+        className="bg-white"
+        style={{
+          width: "420px",
+          padding: "32px",
+          borderRadius: "12px",
+          boxShadow: "0 10px 25px rgba(0, 0, 0, 0.06)",
+          borderTop: "3px solid #1F7A47",
+        }}
+      >
         <img
           src="/altheon-logo-full.svg"
           alt="Altheon"
           className="login-logo"
         />
-        <h1 className="text-center text-xl font-semibold">Sign in</h1>
-        <p className="mb-6 text-center text-sm text-gray-500">
+        <h1
+          className="text-center"
+          style={{ fontSize: "22px", fontWeight: 600, marginBottom: "4px" }}
+        >
+          Sign in
+        </h1>
+        <p
+          className="text-center"
+          style={{ fontSize: "14px", color: "#6b7280", margin: 0 }}
+        >
           Enter your credentials to continue
         </p>
-        <form onSubmit={handleSubmit}>
+        <form className="mt-6" onSubmit={handleSubmit}>
           <label
             htmlFor="admin-email"
             className="mb-1 block text-sm font-medium text-gray-700"
