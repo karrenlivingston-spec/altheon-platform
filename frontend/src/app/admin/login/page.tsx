@@ -28,89 +28,91 @@ export default function AdminLoginPage() {
     router.replace("/admin");
   }
 
+  const inputClassName =
+    "h-11 w-full rounded-lg border border-gray-300 px-3 text-gray-900 transition focus:border-green-600 focus:outline-none focus:ring-2 focus:ring-green-600";
+
   return (
-    <div
-      className="flex min-h-screen flex-col items-center justify-center"
-      style={{
-        background: "linear-gradient(180deg, #f9fafb 0%, #eef2f5 100%)",
-      }}
-    >
+    <div className="flex min-h-screen flex-col md:flex-row">
+      {/* Left brand panel */}
       <div
-        className="bg-white"
+        className="relative flex h-40 w-full shrink-0 flex-col items-center justify-center px-6 md:h-auto md:min-h-screen md:w-[40%]"
         style={{
-          width: "420px",
-          padding: "32px",
-          borderRadius: "12px",
-          boxShadow: "0 10px 25px rgba(0, 0, 0, 0.06)",
-          borderTop: "3px solid #1F7A47",
+          background: "linear-gradient(135deg, #14532d 0%, #166534 100%)",
         }}
       >
-        <img
-          src="/altheon-logo-full.svg"
-          alt="Altheon"
-          className="login-logo"
+        <div
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_40%)]"
+          aria-hidden
         />
-        <h1
-          className="text-center"
-          style={{ fontSize: "22px", fontWeight: 600, marginBottom: "4px" }}
-        >
-          Sign in
-        </h1>
-        <p
-          className="text-center"
-          style={{ fontSize: "14px", color: "#6b7280", margin: 0 }}
-        >
-          Enter your credentials to continue
-        </p>
-        <form className="mt-6" onSubmit={handleSubmit}>
-          <label
-            htmlFor="admin-email"
-            className="mb-1 block text-sm font-medium text-gray-700"
-          >
-            Email
-          </label>
-          <input
-            id="admin-email"
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-            className="mb-4 w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 outline-none focus-visible:ring-2 focus-visible:ring-[#1F7A47]"
+        <div className="relative z-10 flex flex-col items-center text-center">
+          <img
+            src="/altheon-logo-white.svg"
+            alt="Altheon"
+            className="mx-auto w-[240px]"
           />
-          <label
-            htmlFor="admin-password"
-            className="mb-1 block text-sm font-medium text-gray-700"
-          >
-            Password
-          </label>
-          <input
-            id="admin-password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            className="mb-6 w-full rounded-md border border-gray-300 px-3 py-2 text-gray-900 outline-none focus-visible:ring-2 focus-visible:ring-[#1F7A47]"
-          />
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded-md bg-[#1F7A47] py-2.5 font-semibold text-white hover:bg-[#2D5E3F] disabled:opacity-60"
-          >
-            {submitting ? "Signing in…" : "Sign In"}
-          </button>
-          {error ? (
-            <p className="mt-3 text-center text-sm text-red-600">
-              Invalid email or password.
-            </p>
-          ) : null}
-          <p
-            className={`text-center text-sm text-gray-500 ${error ? "mt-3" : "mt-4"}`}
-          >
-            Secure access for clinic staff
+          <p className="mt-4 text-center text-sm text-white opacity-80">
+            AI-powered clinic operations platform
           </p>
-        </form>
+        </div>
+      </div>
+
+      {/* Right login panel */}
+      <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-gray-50 px-6 py-8 md:min-h-screen md:w-[60%] md:px-8 md:py-12">
+        <div className="mx-auto w-full max-w-md rounded-xl bg-white p-8 shadow-xl">
+          <h1 className="mb-1 text-2xl font-semibold text-gray-900">Sign in</h1>
+          <p className="mb-6 text-sm text-gray-500">
+            Enter your credentials to continue
+          </p>
+          <form onSubmit={handleSubmit}>
+            <label
+              htmlFor="admin-email"
+              className="mb-1 block text-sm font-medium text-gray-700"
+            >
+              Email
+            </label>
+            <input
+              id="admin-email"
+              type="email"
+              autoComplete="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className={`${inputClassName} mb-4`}
+            />
+            <label
+              htmlFor="admin-password"
+              className="mb-1 block text-sm font-medium text-gray-700"
+            >
+              Password
+            </label>
+            <input
+              id="admin-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+              className={`${inputClassName} mb-6`}
+            />
+            <button
+              type="submit"
+              disabled={submitting}
+              className="h-11 w-full rounded-lg bg-[#166534] font-medium text-white transition hover:bg-[#14532d] disabled:opacity-60"
+            >
+              {submitting ? "Signing in…" : "Sign In"}
+            </button>
+            {error ? (
+              <p className="mt-3 text-center text-sm text-red-600">
+                Invalid email or password.
+              </p>
+            ) : null}
+            <p
+              className={`text-center text-sm text-gray-500 ${error ? "mt-3" : "mt-4"}`}
+            >
+              Secure access for clinic staff
+            </p>
+          </form>
+        </div>
       </div>
     </div>
   );
