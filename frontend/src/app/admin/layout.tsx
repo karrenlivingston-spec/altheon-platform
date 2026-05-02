@@ -76,7 +76,7 @@ function AdminAuthenticatedShell({
     return [
       "block rounded-lg px-4 py-3 text-sm font-medium transition-colors",
       active
-        ? "bg-green-600 text-white/90"
+        ? "bg-white/15 text-white"
         : "text-white/90 hover:bg-white/10",
     ].join(" ");
   }
@@ -140,7 +140,7 @@ function AdminAuthenticatedShell({
             <img
               src="/altheon-logo-white.svg"
               alt="Altheon"
-              className="h-9 w-auto max-w-full object-contain"
+              className="h-auto w-32 object-contain"
             />
           </div>
           <nav className="flex flex-1 flex-col gap-2 px-3 py-6">
