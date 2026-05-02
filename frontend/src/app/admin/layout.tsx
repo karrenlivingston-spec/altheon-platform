@@ -137,20 +137,11 @@ function AdminAuthenticatedShell({
           ].join(" ")}
         >
           <div className="border-b border-white/10 px-5 py-10">
-            <div
-              style={{
-                backgroundColor: "white",
-                borderRadius: "8px",
-                padding: "8px 12px",
-                display: "inline-block",
-              }}
-            >
-              <img
-                src="/altheon-logo-full.svg"
-                alt="Altheon"
-                style={{ width: "180px", height: "auto", display: "block" }}
-              />
-            </div>
+            <img
+              src="/altheon-logo-white.svg"
+              alt="Altheon"
+              style={{ width: "180px", height: "auto", display: "block" }}
+            />
           </div>
           <nav className="flex flex-1 flex-col gap-2 px-3 py-6">
             <Link
