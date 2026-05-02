@@ -29,91 +29,97 @@ export default function AdminLoginPage() {
   }
 
   const inputClassName =
-    "h-11 w-full rounded-lg border border-gray-300 px-3 text-gray-900 transition focus:border-green-600 focus:outline-none focus:ring-2 focus:ring-green-600";
+    "h-11 w-full rounded-lg border border-gray-300 px-3 text-gray-900 outline-none transition focus:border-transparent focus:ring-2 focus:ring-[#166534]";
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      {/* Left brand panel */}
-      <div
-        className="relative flex h-40 w-full shrink-0 flex-col items-center justify-center px-6 md:h-auto md:min-h-screen md:w-[40%]"
-        style={{
-          background: "linear-gradient(135deg, #14532d 0%, #166534 100%)",
-        }}
-      >
+      {/* Left — brand */}
+      <aside className="relative flex w-full shrink-0 flex-col bg-gradient-to-br from-[#14532d] to-[#166534] md:w-[38%] md:min-h-screen">
         <div
-          className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.08),transparent_40%)]"
+          className="pointer-events-none absolute inset-0 bg-white/5 blur-3xl"
           aria-hidden
         />
-        <div className="relative z-10 flex flex-col items-center text-center">
-          <div className="flex flex-col items-center justify-center gap-8 h-full">
+        <div className="relative z-10 flex h-full min-h-0 flex-col items-center justify-center px-12 py-12 md:min-h-screen md:py-0">
+          <div className="flex flex-col items-center space-y-8">
             <img
               src="/altheon-logo-white.svg"
               alt="Altheon"
-              className="w-[320px] max-w-none"
+              className="w-[240px] max-w-none md:w-[360px]"
             />
+            <p className="text-center text-lg font-medium tracking-wide text-white opacity-90">
+              AI-powered clinic operations platform
+            </p>
           </div>
-          <p className="mt-4 text-center text-sm text-white opacity-80">
-            AI-powered clinic operations platform
-          </p>
         </div>
-      </div>
+      </aside>
 
-      {/* Right login panel */}
-      <div className="flex min-h-0 flex-1 flex-col items-center justify-center bg-gray-50 px-6 py-8 md:min-h-screen md:w-[60%] md:px-8 md:py-12">
-        <div className="mx-auto w-full max-w-md rounded-xl bg-white p-8 shadow-xl">
-          <h1 className="mb-1 text-2xl font-semibold text-gray-900">Sign in</h1>
-          <p className="mb-6 text-sm text-gray-500">
-            Enter your credentials to continue
-          </p>
-          <form onSubmit={handleSubmit}>
-            <label
-              htmlFor="admin-email"
-              className="mb-1 block text-sm font-medium text-gray-700"
-            >
-              Email
-            </label>
-            <input
-              id="admin-email"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              className={`${inputClassName} mb-4`}
+      {/* Right — auth */}
+      <div className="flex w-full flex-1 flex-col items-center justify-center bg-[#f8fafc] px-6 md:w-[62%] md:min-h-screen">
+        <div className="w-[440px] max-w-full rounded-2xl bg-white p-10 shadow-[0_20px_60px_rgba(0,0,0,0.08)]">
+          <div className="space-y-6">
+            <img
+              src="/altheon-logo-full.svg"
+              alt="Altheon"
+              className="mx-auto block w-[150px]"
             />
-            <label
-              htmlFor="admin-password"
-              className="mb-1 block text-sm font-medium text-gray-700"
-            >
-              Password
-            </label>
-            <input
-              id="admin-password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className={`${inputClassName} mb-6`}
-            />
-            <button
-              type="submit"
-              disabled={submitting}
-              className="h-11 w-full rounded-lg bg-[#166534] font-medium text-white transition hover:bg-[#14532d] disabled:opacity-60"
-            >
-              {submitting ? "Signing in…" : "Sign In"}
-            </button>
-            {error ? (
-              <p className="mt-3 text-center text-sm text-red-600">
-                Invalid email or password.
-              </p>
-            ) : null}
-            <p
-              className={`text-center text-sm text-gray-500 ${error ? "mt-3" : "mt-4"}`}
-            >
+            <h1 className="text-center text-2xl font-semibold text-gray-900">
+              Sign in
+            </h1>
+            <p className="text-center text-sm text-gray-500">
+              Enter your credentials to continue
+            </p>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label
+                  htmlFor="admin-email"
+                  className="mb-1 block text-sm font-medium text-gray-700"
+                >
+                  Email
+                </label>
+                <input
+                  id="admin-email"
+                  type="email"
+                  autoComplete="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  className={inputClassName}
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="admin-password"
+                  className="mb-1 block text-sm font-medium text-gray-700"
+                >
+                  Password
+                </label>
+                <input
+                  id="admin-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                  className={inputClassName}
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="h-11 w-full rounded-lg bg-[#166534] font-medium text-white transition hover:bg-[#14532d] disabled:opacity-60"
+              >
+                {submitting ? "Signing in…" : "Sign In"}
+              </button>
+              {error ? (
+                <p className="text-center text-sm text-red-600">
+                  Invalid email or password.
+                </p>
+              ) : null}
+            </form>
+            <p className="pt-2 text-center text-xs text-gray-500">
               Secure access for clinic staff
             </p>
-          </form>
+          </div>
         </div>
       </div>
     </div>
