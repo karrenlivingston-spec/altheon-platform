@@ -180,6 +180,13 @@ function AdminAuthenticatedShell({
             >
               Billing
             </Link>
+            <Link
+              href="/admin/pi-cases"
+              className={navClass}
+              onClick={() => setSidebarOpen(false)}
+            >
+              PI Cases
+            </Link>
           </nav>
           <div className="border-t border-white/10 px-3 py-4">
             <button
