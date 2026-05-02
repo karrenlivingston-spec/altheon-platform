@@ -373,7 +373,7 @@ export default function AdminOverviewPage() {
         )}
       </section>
 
-      <div className="mb-10 grid grid-cols-2 gap-6 md:grid-cols-3 lg:grid-cols-6">
+      <div className="mb-10 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
         <StatCard
           label={"Today's Appointments"}
           value={loading ? "…" : String(todayCount)}
@@ -420,10 +420,12 @@ export default function AdminOverviewPage() {
       </div>
 
       <section className="mb-10">
-        <h2 className="mb-1 text-2xl font-semibold text-gray-900">
-          Appointments — Last 7 Days
-        </h2>
-        <p className="mb-4 text-sm tracking-wide text-gray-500">By clinician</p>
+        <div className="mb-4">
+          <h2 className="mb-1 text-2xl font-semibold text-gray-900">
+            Appointments — Last 7 Days
+          </h2>
+          <p className="text-sm tracking-wide text-gray-500">By clinician</p>
+        </div>
         <AppointmentsLast7DaysChart
           data={appointmentsLast7DaysChart}
           loading={loading}

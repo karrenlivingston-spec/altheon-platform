@@ -80,16 +80,27 @@ function AdminAuthenticatedShell({
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
-  function navLinkClass(href: string) {
-    const active =
+  function isNavLinkActive(href: string): boolean {
+    return (
       pathname === href ||
-      (href !== "/admin" && pathname.startsWith(href));
+      (href !== "/admin" && pathname.startsWith(href))
+    );
+  }
+
+  function navLinkClass(href: string) {
+    const active = isNavLinkActive(href);
     return [
-      "block rounded-lg px-4 py-3 text-sm font-medium transition-colors",
+      "block rounded-lg px-4 py-3 text-sm font-medium transition-all duration-150",
       active
-        ? "bg-white/15 text-white"
-        : "text-white/90 hover:bg-white/10",
+        ? "bg-white/15 text-white shadow-sm ring-1 ring-white/10"
+        : "text-white/90 hover:bg-white/15",
     ].join(" ");
+  }
+
+  function navIconClass(href: string): string {
+    return isNavLinkActive(href)
+      ? "w-4 h-4 shrink-0 opacity-100"
+      : "w-4 h-4 shrink-0 opacity-90";
   }
 
   async function handleSignOut() {
@@ -143,7 +154,7 @@ function AdminAuthenticatedShell({
       <div className="flex min-h-screen">
         <aside
           className={[
-            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-white/10 bg-green-700 text-white transition-transform duration-200 md:static md:translate-x-0",
+            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-white/10 bg-[#1a6b3c] text-white transition-transform duration-200 md:static md:translate-x-0",
             sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           ].join(" ")}
         >
@@ -159,7 +170,7 @@ function AdminAuthenticatedShell({
               onClick={() => setSidebarOpen(false)}
             >
               <span className="flex items-center gap-3">
-                <LayoutDashboard className="w-4 h-4 shrink-0" aria-hidden />
+                <LayoutDashboard className={navIconClass("/admin")} aria-hidden />
                 Overview
               </span>
             </Link>
@@ -169,7 +180,10 @@ function AdminAuthenticatedShell({
               onClick={() => setSidebarOpen(false)}
             >
               <span className="flex items-center gap-3">
-                <CalendarDays className="w-4 h-4 shrink-0" aria-hidden />
+                <CalendarDays
+                  className={navIconClass("/admin/appointments")}
+                  aria-hidden
+                />
                 Appointments
               </span>
             </Link>
@@ -179,7 +193,10 @@ function AdminAuthenticatedShell({
               onClick={() => setSidebarOpen(false)}
             >
               <span className="flex items-center gap-3">
-                <Scale className="w-4 h-4 shrink-0" aria-hidden />
+                <Scale
+                  className={navIconClass("/admin/legal-requests")}
+                  aria-hidden
+                />
                 Legal Requests
               </span>
             </Link>
@@ -189,7 +206,7 @@ function AdminAuthenticatedShell({
               onClick={() => setSidebarOpen(false)}
             >
               <span className="flex items-center gap-3">
-                <Users className="w-4 h-4 shrink-0" aria-hidden />
+                <Users className={navIconClass("/admin/patients")} aria-hidden />
                 Patients
               </span>
             </Link>
@@ -199,7 +216,10 @@ function AdminAuthenticatedShell({
               onClick={() => setSidebarOpen(false)}
             >
               <span className="flex items-center gap-3">
-                <CreditCard className="w-4 h-4 shrink-0" aria-hidden />
+                <CreditCard
+                  className={navIconClass("/admin/memberships")}
+                  aria-hidden
+                />
                 Memberships
               </span>
             </Link>
@@ -209,7 +229,7 @@ function AdminAuthenticatedShell({
               onClick={() => setSidebarOpen(false)}
             >
               <span className="flex items-center gap-3">
-                <Receipt className="w-4 h-4 shrink-0" aria-hidden />
+                <Receipt className={navIconClass("/admin/billing")} aria-hidden />
                 Billing
               </span>
             </Link>
@@ -219,7 +239,10 @@ function AdminAuthenticatedShell({
               onClick={() => setSidebarOpen(false)}
             >
               <span className="flex items-center gap-3">
-                <Briefcase className="w-4 h-4 shrink-0" aria-hidden />
+                <Briefcase
+                  className={navIconClass("/admin/pi-cases")}
+                  aria-hidden
+                />
                 PI Cases
               </span>
             </Link>
