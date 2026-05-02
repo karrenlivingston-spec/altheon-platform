@@ -12,7 +12,6 @@ import {
   CreditCard,
   Receipt,
   Briefcase,
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- no Settings route yet; keep import per design spec
   Settings,
 } from "lucide-react";
 
@@ -244,6 +243,19 @@ function AdminAuthenticatedShell({
                   aria-hidden
                 />
                 PI Cases
+              </span>
+            </Link>
+            <Link
+              href="/admin/settings"
+              className={navLinkClass("/admin/settings")}
+              onClick={() => setSidebarOpen(false)}
+            >
+              <span className="flex items-center gap-3">
+                <Settings
+                  className={navIconClass("/admin/settings")}
+                  aria-hidden
+                />
+                Settings
               </span>
             </Link>
           </nav>
