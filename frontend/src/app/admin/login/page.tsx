@@ -34,9 +34,13 @@ export default function AdminLoginPage() {
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
       {/* Left — brand */}
-      <aside className="relative flex w-full shrink-0 flex-col bg-gradient-to-br from-[#14532d] to-[#166534] md:w-[34%] md:min-h-screen">
+      <aside className="relative flex w-full shrink-0 flex-col bg-gradient-to-br from-[#14532d] via-[#166534] to-[#14532d] md:w-[34%] md:min-h-screen">
         <div
           className="pointer-events-none absolute inset-0 bg-white/5 blur-3xl"
+          aria-hidden
+        />
+        <div
+          className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.08),transparent_60%)]"
           aria-hidden
         />
         <div className="relative z-10 flex h-full min-h-0 flex-col items-center justify-center px-12 py-12 md:min-h-screen md:py-0">
@@ -44,9 +48,9 @@ export default function AdminLoginPage() {
             <img
               src="/altheon-logo-white.svg"
               alt="Altheon"
-              className="w-[460px] max-w-none"
+              className="w-[520px] max-w-none"
             />
-            <p className="text-white text-lg font-semibold opacity-90 text-center tracking-wide">
+            <p className="text-white text-base font-medium opacity-80 tracking-wide text-center">
               AI-powered clinic operations platform
             </p>
           </div>
@@ -55,7 +59,7 @@ export default function AdminLoginPage() {
 
       {/* Right — auth */}
       <div className="flex w-full flex-1 flex-col items-center justify-center bg-[#f8fafc] px-6 md:w-[62%] md:min-h-screen">
-        <div className="w-[440px] max-w-full rounded-2xl bg-white p-10 shadow-[0_20px_60px_rgba(0,0,0,0.08)]">
+        <div className="w-[440px] max-w-full rounded-2xl bg-white p-10 shadow-xl">
           <div className="space-y-6">
             <img
               src="/altheon-logo-full.svg"
