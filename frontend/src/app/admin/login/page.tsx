@@ -41,11 +41,12 @@ export default function AdminLoginPage() {
           alt="Altheon"
           style={{
             width: "220px",
+            minWidth: "220px",
+            maxWidth: "220px",
             height: "auto",
-            marginBottom: "24px",
             display: "block",
+            margin: "0 auto 24px auto",
           }}
-          className="mx-auto"
         />
         <h1 className="text-center text-xl font-semibold">Sign in</h1>
         <p className="mb-6 text-center text-sm text-gray-500">
