@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ChevronRight } from "lucide-react";
 
 const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 const API_BASE = "https://altheon-platform.onrender.com";
@@ -59,6 +61,7 @@ function normalizePhone(s: string): string {
 }
 
 export default function AdminPatientsPage() {
+  const router = useRouter();
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -214,13 +217,14 @@ export default function AdminPatientsPage() {
                 <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Status
                 </th>
+                <th className="w-10 px-2 py-4" aria-hidden />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {loading ? (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-6 py-10 text-center text-gray-500"
                   >
                     Loading…
@@ -229,7 +233,7 @@ export default function AdminPatientsPage() {
               ) : rows.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-6 py-10 text-center text-gray-500"
                   >
                     No patients match your search.
@@ -239,7 +243,22 @@ export default function AdminPatientsPage() {
                 rows.map((row) => (
                   <tr
                     key={row.patient.id}
-                    className="transition-colors hover:bg-gray-100"
+                    role="button"
+                    tabIndex={0}
+                    className="cursor-pointer transition-colors hover:bg-gray-100"
+                    onClick={() =>
+                      router.push(
+                        `/admin/patients/${encodeURIComponent(row.patient.id)}`,
+                      )
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        router.push(
+                          `/admin/patients/${encodeURIComponent(row.patient.id)}`,
+                        );
+                      }
+                    }}
                   >
                     <td className="px-6 py-4 font-semibold text-gray-900">
                       {patientDisplayName(row.patient)}
@@ -269,6 +288,9 @@ export default function AdminPatientsPage() {
                           Inactive
                         </span>
                       )}
+                    </td>
+                    <td className="px-2 py-4 text-gray-400" aria-hidden>
+                      <ChevronRight className="h-5 w-5 shrink-0" />
                     </td>
                   </tr>
                 ))
