@@ -59,7 +59,7 @@ export default function AdminLayout({
 
   if (!ready || !session) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F5F5F5] text-sm text-neutral-600">
+      <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC] text-sm text-slate-500">
         Loading…
       </div>
     );
@@ -92,17 +92,17 @@ function AdminAuthenticatedShell({
   function navLinkClass(href: string) {
     const active = isNavLinkActive(href);
     return [
-      "block rounded-lg px-4 py-3 text-sm font-medium transition-all duration-150",
+      "block rounded-lg px-4 py-3 text-sm font-medium transition-colors duration-150",
       active
-        ? "bg-white/15 text-white shadow-sm ring-1 ring-white/10"
-        : "text-white/90 hover:bg-white/15",
+        ? "bg-[rgba(255,255,255,0.08)] text-white"
+        : "text-[#94A3B8] hover:bg-[rgba(255,255,255,0.05)]",
     ].join(" ");
   }
 
   function navIconClass(href: string): string {
     return isNavLinkActive(href)
-      ? "w-4 h-4 shrink-0 opacity-100"
-      : "w-4 h-4 shrink-0 opacity-90";
+      ? "w-4 h-4 shrink-0 text-white"
+      : "w-4 h-4 shrink-0 text-[#94A3B8]";
   }
 
   async function handleSignOut() {
@@ -111,11 +111,11 @@ function AdminAuthenticatedShell({
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-[#F8FAFC]">
       <button
         type="button"
         aria-label="Toggle menu"
-        className="fixed left-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-md border border-white/20 bg-green-700 text-white shadow-sm md:hidden"
+        className="fixed left-4 top-4 z-50 flex h-10 w-10 items-center justify-center rounded-lg border border-slate-600 bg-[#0F172A] text-white shadow-sm md:hidden"
         onClick={() => setSidebarOpen((o) => !o)}
       >
         <span className="sr-only">Menu</span>
@@ -156,16 +156,16 @@ function AdminAuthenticatedShell({
       <div className="flex min-h-screen">
         <aside
           className={[
-            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-white/10 bg-[#1a6b3c] text-white transition-transform duration-200 md:static md:translate-x-0",
+            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-800/80 bg-[#0F172A] text-white transition-transform duration-200 md:static md:translate-x-0",
             sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           ].join(" ")}
         >
           <div className="flex items-center gap-2 px-4 py-5">
-            <span className="text-white font-semibold text-xl tracking-wide">
+            <span className="text-xl font-semibold tracking-wide text-white">
               Altheon
             </span>
           </div>
-          <nav className="flex flex-1 flex-col gap-2 px-3 py-6">
+          <nav className="flex flex-1 flex-col gap-1 px-3 py-8">
             <Link
               href="/admin"
               className={navLinkClass("/admin")}
@@ -212,6 +212,7 @@ function AdminAuthenticatedShell({
                 Patients
               </span>
             </Link>
+            <div className="mt-8" aria-hidden />
             <Link
               href="/admin/memberships"
               className={navLinkClass("/admin/memberships")}
@@ -275,22 +276,22 @@ function AdminAuthenticatedShell({
               </span>
             </Link>
           </nav>
-          <div className="border-t border-white/10 px-3 py-5">
+          <div className="border-t border-slate-700/60 px-3 py-5">
             <button
               type="button"
               onClick={() => {
                 setSidebarOpen(false);
                 void handleSignOut();
               }}
-              className="w-full rounded-lg px-4 py-3 text-left text-sm font-medium text-white/90 transition-colors hover:bg-white/10"
+              className="w-full rounded-lg px-4 py-3 text-left text-sm font-medium text-[#94A3B8] transition-colors hover:bg-[rgba(255,255,255,0.05)]"
             >
               Sign Out
             </button>
           </div>
         </aside>
 
-        <main className="flex min-h-screen flex-1 flex-col bg-white md:min-h-0">
-          <div className="mx-auto w-full max-w-6xl flex-1 px-6 py-6 pt-16 md:pt-6">
+        <main className="flex min-h-screen flex-1 flex-col bg-transparent md:min-h-0">
+          <div className="mx-auto w-full max-w-6xl flex-1 px-6 py-6 pt-16 text-slate-900 md:pt-6">
             {children}
           </div>
         </main>
