@@ -21,6 +21,7 @@ from app.routers import (
     patients,
     legal_requests,
     memberships,
+    billing as billing_router,
 )
 from app.routes.legal import router as legal_router
 
@@ -49,6 +50,9 @@ app.include_router(
 )
 app.include_router(next_available.router, prefix="/next-available", tags=["next-available"])
 app.include_router(memberships.router, tags=["Memberships"])
+app.include_router(
+    billing_router.router, prefix="/billing-records", tags=["billing-payments"]
+)
 app.include_router(legal_router)
 
 
@@ -213,7 +217,9 @@ def _ask_altheon_build_clinic_context(clinic_id: str) -> str:
 
     br_resp = (
         supabase.table("billing_records")
-        .select("date_of_service,total_billed_cents,total_paid_cents,status")
+        .select(
+            "date_of_service,total_billed_cents,total_paid_cents,amount_paid_cents,status"
+        )
         .eq("clinic_id", clinic_id)
         .execute()
     )
@@ -227,7 +233,12 @@ def _ask_altheon_build_clinic_context(clinic_id: str) -> str:
         dos_s = (str(dos).strip()[:10] if dos is not None else "") or ""
         if dos_s and month_start <= dos_s <= month_end:
             bill_month_billed += int(row.get("total_billed_cents") or 0)
-            bill_month_paid += int(row.get("total_paid_cents") or 0)
+            bill_month_paid += int(
+                row.get("amount_paid_cents")
+                if row.get("amount_paid_cents") is not None
+                else row.get("total_paid_cents")
+                or 0
+            )
         st = (str(row.get("status") or "")).lower() or "draft"
         if st == "draft":
             bill_draft += 1
@@ -392,6 +403,12 @@ def _recalculate_billing_record_total(billing_record_id: str) -> None:
         .execute()
     )
     _handle_supabase_error(upd)
+    try:
+        billing_router.recalculate_amount_paid_and_status(billing_record_id)
+    except HTTPException:
+        raise
+    except Exception:
+        pass
 
 
 ALLOWED_BILLING_STATUSES = frozenset(

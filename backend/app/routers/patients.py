@@ -166,7 +166,7 @@ def _related_billing(patient_id: str, clinic_id: str) -> list[dict[str, Any]]:
     try:
         resp = (
             supabase.table("billing_records")
-            .select("date_of_service,total_billed_cents,status")
+            .select("date_of_service,total_billed_cents,amount_paid_cents,status")
             .eq("patient_id", patient_id)
             .eq("clinic_id", clinic_id)
             .order("date_of_service", desc=True)

@@ -50,6 +50,7 @@ type BillingRecordRow = {
   status?: string;
   total_billed_cents?: number | null;
   total_paid_cents?: number | null;
+  amount_paid_cents?: number | null;
 };
 
 /** Shape from GET /voice-agent/conversations (see backend/app/main.py). */
@@ -353,7 +354,11 @@ export default function AdminOverviewPage() {
           (acc, r) =>
             acc +
             (Number(r.total_billed_cents) || 0) -
-            (Number(r.total_paid_cents) || 0),
+            (Number(
+              r.amount_paid_cents !== undefined && r.amount_paid_cents !== null
+                ? r.amount_paid_cents
+                : r.total_paid_cents,
+            ) || 0),
           0,
         ),
     [billingRecordsThisMonth],

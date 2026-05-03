@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
 const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 const API_BASE = "https://altheon-platform.onrender.com";
@@ -21,6 +21,18 @@ type BillingRecordRow = {
   status?: string;
   total_billed_cents?: number | null;
   total_paid_cents?: number | null;
+  amount_paid_cents?: number | null;
+  amount_remaining_cents?: number | null;
+};
+
+type BillingPaymentRow = {
+  id: string;
+  billing_record_id?: string;
+  amount_cents: number;
+  payment_date?: string;
+  payment_method?: string | null;
+  note?: string | null;
+  created_at?: string;
 };
 
 type BillingLineItem = {
@@ -67,6 +79,43 @@ function formatUsdFromCents(cents: number | null | undefined): string {
     style: "currency",
     currency: "USD",
   }).format((Number(cents) || 0) / 100);
+}
+
+function amountPaidCents(r: BillingRecordRow): number {
+  const a = r.amount_paid_cents;
+  if (a !== undefined && a !== null) return Number(a) || 0;
+  return Number(r.total_paid_cents) || 0;
+}
+
+function paymentProgressPct(r: BillingRecordRow): number {
+  const billed = Number(r.total_billed_cents) || 0;
+  const paid = amountPaidCents(r);
+  if (billed <= 0) return 0;
+  return Math.min(100, Math.round((paid / billed) * 100));
+}
+
+function showRecordPaymentButton(r: BillingRecordRow): boolean {
+  const st = (r.status ?? "").toLowerCase();
+  if (st === "denied") return false;
+  const billed = Number(r.total_billed_cents) || 0;
+  const paid = amountPaidCents(r);
+  return billed > 0 && paid < billed;
+}
+
+const PAYMENT_METHOD_OPTIONS = [
+  { value: "cash", label: "Cash" },
+  { value: "card", label: "Card" },
+  { value: "insurance", label: "Insurance" },
+  { value: "attorney", label: "Attorney" },
+  { value: "other", label: "Other" },
+] as const;
+
+function todayYmdLocal(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function billingTypeBadgeClass(t: string): string {
@@ -136,6 +185,20 @@ export default function AdminBillingPage() {
   const [lineBusy, setLineBusy] = useState(false);
   const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
 
+  const [paymentsByRecord, setPaymentsByRecord] = useState<
+    Record<string, BillingPaymentRow[]>
+  >({});
+  const [detailPayments, setDetailPayments] = useState<BillingPaymentRow[]>([]);
+
+  const [paymentModalRecordId, setPaymentModalRecordId] = useState<string | null>(
+    null,
+  );
+  const [paymentAmountDollars, setPaymentAmountDollars] = useState("");
+  const [paymentDate, setPaymentDate] = useState("");
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [paymentNote, setPaymentNote] = useState("");
+  const [paymentBusy, setPaymentBusy] = useState(false);
+
   const patientById = useMemo(() => {
     const m = new Map<string, PatientRow>();
     for (const p of patients) m.set(p.id, p);
@@ -165,21 +228,39 @@ export default function AdminBillingPage() {
       if (!res.ok) {
         setError(`Could not load billing records (HTTP ${res.status}).`);
         setRecords([]);
+        setPaymentsByRecord({});
         return;
       }
       const data = await res.json();
       const list = Array.isArray(data) ? data : [];
       list.sort(compareDateOfServiceDesc);
       setRecords(list);
+      const payMap: Record<string, BillingPaymentRow[]> = {};
+      await Promise.all(
+        list.map(async (row) => {
+          try {
+            const pr = await fetch(
+              `${API_BASE}/billing-records/${encodeURIComponent(row.id)}/payments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+            );
+            const pj = pr.ok ? await pr.json() : [];
+            payMap[row.id] = Array.isArray(pj) ? pj : [];
+          } catch {
+            payMap[row.id] = [];
+          }
+        }),
+      );
+      setPaymentsByRecord(payMap);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load billing records");
       setRecords([]);
+      setPaymentsByRecord({});
     }
   }, [statusFilter, dateFrom, dateTo]);
 
   const loadDetail = useCallback(async (recordId: string) => {
     setDetailLoading(true);
     setDetailError(null);
+    setDetailPayments([]);
     try {
       const res = await fetch(
         `${API_BASE}/billing-records/${encodeURIComponent(recordId)}`,
@@ -197,6 +278,15 @@ export default function AdminBillingPage() {
       const data = (await res.json()) as BillingRecordDetail;
       setDetail(data);
       setStatusDraft((data.status ?? "draft").toLowerCase());
+      try {
+        const pr = await fetch(
+          `${API_BASE}/billing-records/${encodeURIComponent(recordId)}/payments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+        );
+        const pj = pr.ok ? await pr.json() : [];
+        setDetailPayments(Array.isArray(pj) ? pj : []);
+      } catch {
+        setDetailPayments([]);
+      }
     } catch (e) {
       setDetailError(
         e instanceof Error ? e.message : "Failed to load billing record",
@@ -304,6 +394,69 @@ export default function AdminBillingPage() {
     setDetail(null);
     setDetailError(null);
     setLineFormOpen(false);
+    setDetailPayments([]);
+  }
+
+  function openPaymentModal(recordId: string) {
+    setPaymentModalRecordId(recordId);
+    setPaymentAmountDollars("");
+    setPaymentDate(todayYmdLocal());
+    setPaymentMethod("cash");
+    setPaymentNote("");
+    setDetailError(null);
+    setError(null);
+  }
+
+  function closePaymentModal() {
+    setPaymentModalRecordId(null);
+    setPaymentBusy(false);
+  }
+
+  async function submitPayment() {
+    if (!paymentModalRecordId) return;
+    const dollars = parseFloat(paymentAmountDollars);
+    if (Number.isNaN(dollars) || dollars <= 0) {
+      setError("Enter a valid payment amount greater than zero.");
+      return;
+    }
+    const amount_cents = Math.round(dollars * 100);
+    if (!paymentDate.trim()) {
+      setError("Payment date is required.");
+      return;
+    }
+    setPaymentBusy(true);
+    setError(null);
+    setDetailError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/billing-records/${encodeURIComponent(paymentModalRecordId)}/payments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            amount_cents,
+            payment_date: paymentDate.trim().slice(0, 10),
+            payment_method: paymentMethod,
+            note: paymentNote.trim() || null,
+          }),
+        },
+      );
+      if (!res.ok) {
+        const msg = await res.text().catch(() => res.statusText);
+        setError(msg || `Payment failed (HTTP ${res.status})`);
+        return;
+      }
+      const savedId = paymentModalRecordId;
+      closePaymentModal();
+      await loadRecords();
+      if (detailId && detailId === savedId) {
+        await loadDetail(detailId);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Payment failed");
+    } finally {
+      setPaymentBusy(false);
+    }
   }
 
   async function refreshListAndDetail() {
@@ -512,8 +665,8 @@ export default function AdminBillingPage() {
                 <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Total Billed
                 </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Total Paid
+                <th className="min-w-[12rem] px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
+                  Balance
                 </th>
                 <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
                   Status
@@ -542,45 +695,110 @@ export default function AdminBillingPage() {
                   const name = p ? patientDisplayName(p) : "—";
                   const bt = (r.billing_type ?? "cash").toLowerCase();
                   const st = (r.status ?? "draft").toLowerCase();
+                  const paid = amountPaidCents(r);
+                  const billed = Number(r.total_billed_cents) || 0;
+                  const pct = paymentProgressPct(r);
+                  const payments = paymentsByRecord[r.id] ?? [];
                   return (
-                    <tr
-                      key={r.id}
-                      className="transition-colors hover:bg-gray-100"
-                    >
-                      <td className="px-6 py-4 text-gray-800">
-                        {r.date_of_service ?? "—"}
-                      </td>
-                      <td className="px-6 py-4 text-gray-800">{name}</td>
-                      <td className="px-6 py-4">
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${billingTypeBadgeClass(bt)}`}
-                        >
-                          {r.billing_type ?? "cash"}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-gray-800">
-                        {formatUsdFromCents(r.total_billed_cents)}
-                      </td>
-                      <td className="px-6 py-4 text-gray-800">
-                        {formatUsdFromCents(r.total_paid_cents)}
-                      </td>
-                      <td className="px-6 py-4">
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${recordStatusBadgeClass(st)}`}
-                        >
-                          {r.status ?? "draft"}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <button
-                          type="button"
-                          onClick={() => void openDetail(r.id)}
-                          className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
-                        >
-                          View
-                        </button>
-                      </td>
-                    </tr>
+                    <Fragment key={r.id}>
+                      <tr className="transition-colors hover:bg-gray-100">
+                        <td className="px-6 py-4 text-gray-800">
+                          {r.date_of_service ?? "—"}
+                        </td>
+                        <td className="px-6 py-4 text-gray-800">{name}</td>
+                        <td className="px-6 py-4">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${billingTypeBadgeClass(bt)}`}
+                          >
+                            {r.billing_type ?? "cash"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-gray-800">
+                          {formatUsdFromCents(r.total_billed_cents)}
+                        </td>
+                        <td className="px-6 py-4">
+                          <p className="text-sm text-gray-800">
+                            Paid {formatUsdFromCents(paid)} of{" "}
+                            {formatUsdFromCents(billed)}
+                          </p>
+                          <div className="mt-2 h-1.5 w-full max-w-[11rem] overflow-hidden rounded-full bg-gray-100">
+                            <div
+                              className="h-full rounded-full bg-[#1F7A47] transition-[width]"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </td>
+                        <td className="px-6 py-4">
+                          <span
+                            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${recordStatusBadgeClass(st)}`}
+                          >
+                            {r.status ?? "draft"}
+                          </span>
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <div className="flex flex-wrap justify-end gap-2">
+                            {showRecordPaymentButton(r) ? (
+                              <button
+                                type="button"
+                                onClick={() => openPaymentModal(r.id)}
+                                className="rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-[#1F7A47] hover:text-[#1F7A47]"
+                              >
+                                Record Payment
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => void openDetail(r.id)}
+                              className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                            >
+                              View
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {payments.length > 0 ? (
+                        <tr className="bg-gray-50/90">
+                          <td colSpan={7} className="px-6 py-3">
+                            <p className="mb-2 text-xs font-medium uppercase tracking-wider text-gray-500">
+                              Payment history
+                            </p>
+                            <div className="overflow-x-auto rounded-lg border border-gray-100 bg-white">
+                              <table className="min-w-full text-left text-xs">
+                                <thead>
+                                  <tr className="border-b border-gray-100 text-gray-500">
+                                    <th className="px-3 py-2 font-medium">Date</th>
+                                    <th className="px-3 py-2 font-medium">Method</th>
+                                    <th className="px-3 py-2 font-medium">Amount</th>
+                                    <th className="px-3 py-2 font-medium">Note</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {payments.map((pay) => (
+                                    <tr
+                                      key={pay.id}
+                                      className="border-b border-gray-50 last:border-0"
+                                    >
+                                      <td className="px-3 py-2 text-gray-800">
+                                        {pay.payment_date ?? "—"}
+                                      </td>
+                                      <td className="px-3 py-2 capitalize text-gray-800">
+                                        {pay.payment_method ?? "—"}
+                                      </td>
+                                      <td className="px-3 py-2 font-medium text-gray-900">
+                                        {formatUsdFromCents(pay.amount_cents)}
+                                      </td>
+                                      <td className="max-w-[12rem] truncate px-3 py-2 text-gray-600">
+                                        {(pay.note ?? "").trim() || "—"}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
                   );
                 })
               )}
@@ -716,6 +934,86 @@ export default function AdminBillingPage() {
         </div>
       ) : null}
 
+      {paymentModalRecordId ? (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <div
+            className="w-full max-w-lg rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
+            role="dialog"
+            aria-modal
+            aria-labelledby="billing-payment-title"
+          >
+            <h2
+              id="billing-payment-title"
+              className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900"
+            >
+              Record payment
+            </h2>
+            <div className="space-y-4 pt-5">
+              <label className="block text-sm font-medium text-gray-700">
+                Amount (USD)
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={paymentAmountDollars}
+                  onChange={(e) => setPaymentAmountDollars(e.target.value)}
+                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                />
+              </label>
+              <label className="block text-sm font-medium text-gray-700">
+                Payment date
+                <input
+                  type="date"
+                  value={paymentDate}
+                  onChange={(e) => setPaymentDate(e.target.value)}
+                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                />
+              </label>
+              <label className="block text-sm font-medium text-gray-700">
+                Payment method
+                <select
+                  value={paymentMethod}
+                  onChange={(e) => setPaymentMethod(e.target.value)}
+                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                >
+                  {PAYMENT_METHOD_OPTIONS.map((o) => (
+                    <option key={o.value} value={o.value}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm font-medium text-gray-700">
+                Note (optional)
+                <textarea
+                  value={paymentNote}
+                  onChange={(e) => setPaymentNote(e.target.value)}
+                  rows={2}
+                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                />
+              </label>
+            </div>
+            <div className="mt-6 flex justify-end gap-2 border-t border-gray-100 pt-5">
+              <button
+                type="button"
+                onClick={closePaymentModal}
+                className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={paymentBusy}
+                onClick={() => void submitPayment()}
+                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+              >
+                {paymentBusy ? "Saving…" : "Submit"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {detailId ? (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
@@ -815,12 +1113,84 @@ export default function AdminBillingPage() {
                       </p>
                     </div>
                     <div>
-                      <p className="text-xs text-gray-500">Total paid</p>
+                      <p className="text-xs text-gray-500">Amount paid</p>
                       <p className="text-lg font-semibold text-gray-900">
-                        {formatUsdFromCents(detail.total_paid_cents)}
+                        {formatUsdFromCents(amountPaidCents(detail))}
                       </p>
                     </div>
                   </div>
+                  <div className="mt-4 max-w-md">
+                    <p className="text-sm text-gray-700">
+                      Paid {formatUsdFromCents(amountPaidCents(detail))} of{" "}
+                      {formatUsdFromCents(detail.total_billed_cents)}
+                    </p>
+                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+                      <div
+                        className="h-full rounded-full bg-[#1F7A47]"
+                        style={{
+                          width: `${paymentProgressPct(detail)}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                  {showRecordPaymentButton(detail) ? (
+                    <div className="mt-4">
+                      <button
+                        type="button"
+                        onClick={() => openPaymentModal(detail.id)}
+                        className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-[#1F7A47] hover:text-[#1F7A47]"
+                      >
+                        Record Payment
+                      </button>
+                    </div>
+                  ) : null}
+                  {detailPayments.length > 0 ? (
+                    <div className="mt-6">
+                      <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-gray-500">
+                        Payment history
+                      </h3>
+                      <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
+                        <div className="overflow-x-auto">
+                          <table className="min-w-full text-left text-sm">
+                            <thead className="border-b border-gray-100 bg-white">
+                              <tr>
+                                <th className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
+                                  Date
+                                </th>
+                                <th className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
+                                  Method
+                                </th>
+                                <th className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
+                                  Amount
+                                </th>
+                                <th className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
+                                  Note
+                                </th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100">
+                              {detailPayments.map((pay) => (
+                                <tr key={pay.id}>
+                                  <td className="px-4 py-3 text-gray-800">
+                                    {pay.payment_date ?? "—"}
+                                  </td>
+                                  <td className="px-4 py-3 capitalize text-gray-800">
+                                    {pay.payment_method ?? "—"}
+                                  </td>
+                                  <td className="px-4 py-3 font-medium text-gray-900">
+                                    {formatUsdFromCents(pay.amount_cents)}
+                                  </td>
+                                  <td className="max-w-[14rem] truncate px-4 py-3 text-gray-600">
+                                    {(pay.note ?? "").trim() || "—"}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  ) : null}
                   <div className="mt-6 flex flex-wrap items-end gap-3">
                     <label className="text-sm font-medium text-gray-700">
                       Update status
