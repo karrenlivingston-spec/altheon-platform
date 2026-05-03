@@ -2,6 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react";
 
+import {
+  DS_CARD,
+  DS_PAGE_ROOT,
+  DS_PAGE_SUBTITLE,
+  DS_PAGE_TITLE,
+  DS_PRIMARY_BTN,
+  DS_TABLE_HEAD,
+  DS_TABLE_WRAP,
+  DS_TD_PRIMARY,
+  DS_TD_SECONDARY,
+  DS_TH,
+  DS_TR,
+  legalStatusBadgeClass,
+} from "@/app/admin/designSystem";
+
 const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 const API_BASE = "https://altheon-platform.onrender.com";
 const NY = "America/New_York";
@@ -27,14 +42,6 @@ function formatReceived(iso?: string): string {
     day: "numeric",
     year: "numeric",
   }).format(new Date(iso));
-}
-
-function statusPillClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === "pending") return "bg-amber-50 text-amber-800";
-  if (s === "in_progress") return "bg-blue-50 text-blue-700";
-  if (s === "completed") return "bg-emerald-50 text-emerald-700";
-  return "bg-gray-50 text-gray-700";
 }
 
 export default function AdminLegalRequestsPage() {
@@ -159,62 +166,44 @@ export default function AdminLegalRequestsPage() {
   }
 
   return (
-    <div className="w-full">
-      <h1 className="mb-1 text-2xl font-semibold text-gray-900">Legal Requests</h1>
-      <div className="mb-8 flex flex-wrap items-center gap-3">
-        <p className="text-sm tracking-wide text-gray-500">
-          Attorney and records requests
-        </p>
-        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
+    <div className={DS_PAGE_ROOT}>
+      <h1 className={DS_PAGE_TITLE}>Legal Requests</h1>
+      <p className={DS_PAGE_SUBTITLE}>Attorney and records requests</p>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-500">
           {loading ? "…" : `${counts.total} request${counts.total === 1 ? "" : "s"}`}
         </span>
       </div>
 
       {fetchNote ? (
-        <p className="mb-6 rounded-2xl border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
+        <p className="mt-8 rounded-2xl border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
           {fetchNote}
         </p>
       ) : null}
 
-      <div className="mb-8 grid grid-cols-2 gap-4 sm:grid-cols-4">
+      <div className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-4">
         <SummaryCard label="Total Requests" value={String(counts.total)} />
         <SummaryCard label="Pending" value={String(counts.pending)} />
         <SummaryCard label="In Progress" value={String(counts.inProgress)} />
         <SummaryCard label="Completed" value={String(counts.completed)} />
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+      <div className={`${DS_TABLE_WRAP} mt-8`}>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="border-b border-gray-100 bg-white">
+            <thead className={DS_TABLE_HEAD}>
               <tr>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Date Received
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Attorney Name
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Firm Name
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Phone
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Patient Name
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Request Type
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Status
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Actions
-                </th>
+                <th className={DS_TH}>Date Received</th>
+                <th className={DS_TH}>Attorney Name</th>
+                <th className={DS_TH}>Firm Name</th>
+                <th className={DS_TH}>Phone</th>
+                <th className={DS_TH}>Patient Name</th>
+                <th className={DS_TH}>Request Type</th>
+                <th className={DS_TH}>Status</th>
+                <th className={DS_TH}>Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody>
               {loading ? (
                 <tr>
                   <td
@@ -238,43 +227,34 @@ export default function AdminLegalRequestsPage() {
                   const st = (row.status ?? "pending").toLowerCase();
                   const busy = !!updatingIds[row.id];
                   return (
-                    <tr
-                      key={row.id}
-                      className="transition-colors hover:bg-gray-100"
-                    >
-                      <td className="whitespace-nowrap px-6 py-4 text-gray-800">
+                    <tr key={row.id} className={DS_TR}>
+                      <td className={`${DS_TD_SECONDARY} whitespace-nowrap`}>
                         {formatReceived(row.created_at)}
                       </td>
-                      <td className="px-6 py-4 text-gray-900">
+                      <td className={`${DS_TD_PRIMARY} font-medium`}>
                         {row.attorney_name ?? "—"}
                       </td>
-                      <td className="px-6 py-4 text-gray-800">
-                        {row.firm_name ?? "—"}
-                      </td>
-                      <td className="whitespace-nowrap px-6 py-4 text-gray-800">
+                      <td className={DS_TD_PRIMARY}>{row.firm_name ?? "—"}</td>
+                      <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
                         {row.attorney_phone ?? "—"}
                       </td>
-                      <td className="px-6 py-4 font-medium text-gray-900">
+                      <td className={`${DS_TD_PRIMARY} font-medium`}>
                         {row.patient_name ?? "—"}
                       </td>
-                      <td className="px-6 py-4 text-gray-800">
-                        {row.request_type ?? "—"}
-                      </td>
-                      <td className="px-6 py-4">
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${statusPillClass(st)}`}
-                        >
+                      <td className={DS_TD_PRIMARY}>{row.request_type ?? "—"}</td>
+                      <td className={DS_TD_PRIMARY}>
+                        <span className={`capitalize ${legalStatusBadgeClass(st)}`}>
                           {st.replace(/_/g, " ")}
                         </span>
                       </td>
-                      <td className="px-6 py-4">
+                      <td className={DS_TD_PRIMARY}>
                         <div className="flex flex-wrap gap-2">
                           {st === "pending" ? (
                             <button
                               type="button"
                               disabled={busy}
                               onClick={() => void patchStatus(row.id, "in_progress")}
-                              className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                              className={`${DS_PRIMARY_BTN} hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50`}
                             >
                               Start
                             </button>
@@ -284,14 +264,14 @@ export default function AdminLegalRequestsPage() {
                               type="button"
                               disabled={busy}
                               onClick={() => void patchStatus(row.id, "completed")}
-                              className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                              className={`${DS_PRIMARY_BTN} hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50`}
                             >
                               Complete
                             </button>
                           ) : null}
                           {st === "completed" ? (
                             <span
-                              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${statusPillClass(st)}`}
+                              className={`capitalize ${legalStatusBadgeClass(st)}`}
                             >
                               {st.replace(/_/g, " ")}
                             </span>
@@ -312,7 +292,7 @@ export default function AdminLegalRequestsPage() {
 
 function SummaryCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+    <div className={DS_CARD}>
       <p className="text-3xl font-semibold tabular-nums text-gray-900">{value}</p>
       <p className="mt-2 text-xs font-medium uppercase tracking-wider text-gray-500">
         {label}

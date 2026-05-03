@@ -2,9 +2,26 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import {
+  activeInactiveBadgeClass,
+  DS_CARD,
+  DS_FILTER_BAR,
+  DS_INPUT,
+  DS_PAGE_ROOT,
+  DS_PAGE_SUBTITLE,
+  DS_PAGE_TITLE,
+  DS_PRIMARY_BTN,
+  DS_SECONDARY_BTN,
+  DS_TABLE_HEAD,
+  DS_TABLE_WRAP,
+  DS_TD_PRIMARY,
+  DS_TH,
+  DS_TR,
+  membershipStatusBadgeClass,
+} from "@/app/admin/designSystem";
+
 const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 const API_BASE = "https://altheon-platform.onrender.com";
-const BRAND = "#1F7A47";
 const TREATMENT_TYPE_NAMES: Record<string, string> = {
   "92e261f3-1f97-491c-96e1-8fddce8c4aa6": "Dry Needling",
   "3a1ef48b-966b-4240-881c-b7d2f4de7a7a": "Chiropractic",
@@ -87,15 +104,6 @@ function treatmentOptionsFromMap(): TreatmentOption[] {
 
 function treatmentTypeLabel(id: string): string {
   return TREATMENT_TYPE_NAMES[id] ?? id;
-}
-
-function statusBadgeClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === "active") return "bg-emerald-50 text-emerald-700";
-  if (s === "paused") return "bg-amber-50 text-amber-800";
-  if (s === "cancelled") return "bg-red-50 text-red-700";
-  if (s === "expired") return "bg-gray-50 text-gray-600";
-  return "bg-gray-50 text-gray-700";
 }
 
 type TabId = "tiers" | "enrollments";
@@ -349,13 +357,11 @@ export default function AdminMembershipsPage() {
     "rounded-full px-3 py-1.5 text-xs font-semibold transition-colors border";
 
   return (
-    <div className="w-full">
-      <h1 className="mb-1 text-2xl font-semibold text-gray-900">Memberships</h1>
-      <div className="mb-8 flex flex-wrap items-center gap-3">
-        <p className="text-sm tracking-wide text-gray-500">
-          Tiers and patient enrollments
-        </p>
-        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
+    <div className={DS_PAGE_ROOT}>
+      <h1 className={DS_PAGE_TITLE}>Memberships</h1>
+      <div className="mt-1 flex flex-wrap items-center gap-3">
+        <p className="text-sm text-gray-500">Tiers and patient enrollments</p>
+        <span className="inline-flex items-center rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700">
           {loading
             ? "…"
             : `${tiers.length} tier${tiers.length === 1 ? "" : "s"} · ${enrollments.length} enrollment${enrollments.length === 1 ? "" : "s"}`}
@@ -363,21 +369,20 @@ export default function AdminMembershipsPage() {
       </div>
 
       {error ? (
-        <div className="mb-6 rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
+        <div className="mt-8 rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
           {error}
         </div>
       ) : null}
 
-      <div className="mb-6 flex flex-wrap gap-2 rounded-2xl border border-gray-100 bg-white px-6 py-4 shadow-sm">
+      <div className={`${DS_FILTER_BAR} mt-8 flex flex-wrap gap-2`}>
         <button
           type="button"
           className={[
             pill,
             tab === "tiers"
-              ? "border-transparent text-white"
-              : "border-neutral-200 bg-white text-neutral-700 hover:border-[#1F7A47]/40",
+              ? "border-transparent bg-[#16A34A] text-white hover:bg-[#15803D]"
+              : "border-gray-200 bg-white text-gray-700 hover:border-green-500/40",
           ].join(" ")}
-          style={tab === "tiers" ? { backgroundColor: BRAND } : undefined}
           onClick={() => setTab("tiers")}
         >
           Tiers
@@ -387,10 +392,9 @@ export default function AdminMembershipsPage() {
           className={[
             pill,
             tab === "enrollments"
-              ? "border-transparent text-white"
-              : "border-neutral-200 bg-white text-neutral-700 hover:border-[#1F7A47]/40",
+              ? "border-transparent bg-[#16A34A] text-white hover:bg-[#15803D]"
+              : "border-gray-200 bg-white text-gray-700 hover:border-green-500/40",
           ].join(" ")}
-          style={tab === "enrollments" ? { backgroundColor: BRAND } : undefined}
           onClick={() => setTab("enrollments")}
         >
           Enrollments
@@ -398,12 +402,12 @@ export default function AdminMembershipsPage() {
       </div>
 
       {tab === "tiers" ? (
-        <section>
+        <section className="mt-8">
           <div className="mb-6 flex justify-end">
             <button
               type="button"
               onClick={() => openCreateTierModal()}
-              className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90"
+              className={DS_PRIMARY_BTN}
             >
               New tier
             </button>
@@ -418,20 +422,13 @@ export default function AdminMembershipsPage() {
                 const ids = tierServiceIds(tier);
                 const busy = savingTierId === tier.id;
                 return (
-                  <div
-                    key={tier.id}
-                    className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
-                  >
+                  <div key={tier.id} className={DS_CARD}>
                     <div className="flex items-start justify-between gap-2">
                       <h2 className="text-lg font-semibold text-gray-900">
                         {tier.name}
                       </h2>
                       <span
-                        className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
-                          tier.is_active
-                            ? "bg-emerald-50 text-emerald-700"
-                            : "bg-gray-50 text-gray-600"
-                        }`}
+                        className={`shrink-0 ${activeInactiveBadgeClass(tier.is_active)}`}
                       >
                         {tier.is_active ? "Active" : "Inactive"}
                       </span>
@@ -475,7 +472,7 @@ export default function AdminMembershipsPage() {
                         type="button"
                         disabled={busy}
                         onClick={() => openEditTierModal(tier)}
-                        className="rounded-xl border border-gray-100 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:opacity-50"
+                        className={`${DS_SECONDARY_BTN} disabled:opacity-50`}
                       >
                         Edit
                       </button>
@@ -483,7 +480,7 @@ export default function AdminMembershipsPage() {
                         type="button"
                         disabled={busy}
                         onClick={() => void toggleTierActive(tier)}
-                        className="rounded-xl border border-gray-100 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:opacity-50"
+                        className={`${DS_SECONDARY_BTN} disabled:opacity-50`}
                       >
                         {tier.is_active ? "Deactivate" : "Activate"}
                       </button>
@@ -495,39 +492,23 @@ export default function AdminMembershipsPage() {
           )}
         </section>
       ) : (
-        <section>
-          <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <section className="mt-8">
+          <div className={DS_TABLE_WRAP}>
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-gray-100 bg-white">
+                <thead className={DS_TABLE_HEAD}>
                   <tr>
-                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Patient ID
-                    </th>
-                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Tier
-                    </th>
-                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Status
-                    </th>
-                    <th className="px-6 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Visits used
-                    </th>
-                    <th className="px-6 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Visits remaining
-                    </th>
-                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Next billing
-                    </th>
-                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Auto renew
-                    </th>
-                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Actions
-                    </th>
+                    <th className={DS_TH}>Patient ID</th>
+                    <th className={DS_TH}>Tier</th>
+                    <th className={DS_TH}>Status</th>
+                    <th className={`${DS_TH} text-right`}>Visits used</th>
+                    <th className={`${DS_TH} text-right`}>Visits remaining</th>
+                    <th className={DS_TH}>Next billing</th>
+                    <th className={DS_TH}>Auto renew</th>
+                    <th className={DS_TH}>Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody>
                   {loading ? (
                     <tr>
                       <td
@@ -559,42 +540,40 @@ export default function AdminMembershipsPage() {
                           })
                         : "—";
                       return (
-                        <tr
-                          key={row.id}
-                          className="transition-colors hover:bg-gray-100"
-                        >
-                          <td className="max-w-[200px] break-all px-6 py-4 font-mono text-xs text-gray-800">
+                        <tr key={row.id} className={DS_TR}>
+                          <td className={`max-w-[200px] break-all ${DS_TD_PRIMARY} font-mono text-xs`}>
                             {row.patient_id}
                           </td>
-                          <td className="px-6 py-4 font-medium text-gray-900">
+                          <td className={`${DS_TD_PRIMARY} font-medium`}>
                             {nestedTierName(row)}
                           </td>
-                          <td className="px-6 py-4">
+                          <td className={DS_TD_PRIMARY}>
                             <span
-                              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${statusBadgeClass(row.status)}`}
+                              className={`capitalize ${membershipStatusBadgeClass(row.status)}`}
                             >
                               {row.status}
                             </span>
                           </td>
-                          <td className="px-6 py-4 text-right tabular-nums text-gray-800">
+                          <td className={`${DS_TD_PRIMARY} text-right tabular-nums`}>
                             {row.visits_used}
                           </td>
-                          <td className="px-6 py-4 text-right tabular-nums text-gray-800">
+                          <td className={`${DS_TD_PRIMARY} text-right tabular-nums`}>
                             {row.visits_remaining}
                           </td>
-                          <td className="whitespace-nowrap px-6 py-4 text-gray-700">
+                          <td className={`whitespace-nowrap ${DS_TD_PRIMARY}`}>
                             {nb}
                           </td>
-                          <td className="px-6 py-4 text-gray-700">
+                          <td className={DS_TD_PRIMARY}>
                             {row.auto_renew ? "Yes" : "No"}
                           </td>
-                          <td className="px-6 py-4">
+                          <td className={DS_TD_PRIMARY}>
                             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                               <select
-                                className="h-9 min-w-[8rem] rounded-lg border border-gray-100 bg-white px-2 text-sm outline-none focus:border-green-500 focus:ring-1 focus:ring-green-500 disabled:opacity-50"
+                                className={`h-9 min-w-[8rem] ${DS_INPUT} px-2 disabled:opacity-50`}
                                 style={{ boxShadow: `0 0 0 1px transparent` }}
                                 onFocus={(e) => {
-                                  e.target.style.boxShadow = `0 0 0 2px ${BRAND}40`;
+                                  e.target.style.boxShadow =
+                                    "0 0 0 2px rgba(22, 163, 74, 0.25)";
                                 }}
                                 onBlur={(e) => {
                                   e.target.style.boxShadow = "none";
@@ -624,7 +603,7 @@ export default function AdminMembershipsPage() {
                                         ?.id ?? "",
                                   })
                                 }
-                                className="whitespace-nowrap rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                                className={`${DS_PRIMARY_BTN} whitespace-nowrap disabled:opacity-50`}
                               >
                                 Change tier
                               </button>
@@ -662,7 +641,7 @@ export default function AdminMembershipsPage() {
                   type="text"
                   value={formName}
                   onChange={(e) => setFormName(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -671,7 +650,7 @@ export default function AdminMembershipsPage() {
                   value={formDescription}
                   onChange={(e) => setFormDescription(e.target.value)}
                   rows={2}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -682,7 +661,7 @@ export default function AdminMembershipsPage() {
                   step="0.01"
                   value={formPriceDollars}
                   onChange={(e) => setFormPriceDollars(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -709,7 +688,7 @@ export default function AdminMembershipsPage() {
                   step={1}
                   value={formVisitsIncluded}
                   onChange={(e) => setFormVisitsIncluded(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-gray-700">
@@ -718,7 +697,7 @@ export default function AdminMembershipsPage() {
                   checked={formVisitsRollOver}
                   onChange={(e) => setFormVisitsRollOver(e.target.checked)}
                   className="h-4 w-4 rounded border-gray-300"
-                  style={{ accentColor: BRAND }}
+                  style={{ accentColor: "#16A34A" }}
                 />
                 Visits roll over
               </label>
@@ -741,7 +720,7 @@ export default function AdminMembershipsPage() {
                             checked={formTreatmentIds.includes(opt.id)}
                             onChange={() => toggleTreatmentId(opt.id)}
                             className="mt-0.5 h-4 w-4 rounded border-gray-300"
-                            style={{ accentColor: BRAND }}
+                            style={{ accentColor: "#16A34A" }}
                           />
                           <span>
                             <span className="font-medium text-gray-900">
@@ -770,7 +749,7 @@ export default function AdminMembershipsPage() {
                 type="button"
                 disabled={tierSubmitBusy}
                 onClick={() => void submitTierModal()}
-                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
               >
                 {tierSubmitBusy ? "Saving…" : "Save"}
               </button>
@@ -781,7 +760,7 @@ export default function AdminMembershipsPage() {
 
       {changeTierModal ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-md rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+          <div className={`w-full max-w-md ${DS_CARD}`}>
             <h2 className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900">
               Change tier
             </h2>
@@ -798,7 +777,7 @@ export default function AdminMembershipsPage() {
                 <label className="mt-4 block text-sm font-medium text-gray-700">
                   New tier
                   <select
-                    className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                    className={`mt-1 h-9 w-full ${DS_INPUT}`}
                     value={changeTierModal.newTierId}
                     onChange={(e) =>
                       setChangeTierModal((m) =>
@@ -833,7 +812,7 @@ export default function AdminMembershipsPage() {
                   tierOptionsForChange.length === 0
                 }
                 onClick={() => void submitChangeTier()}
-                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
               >
                 {changeTierBusy ? "Saving…" : "Apply"}
               </button>

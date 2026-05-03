@@ -12,12 +12,22 @@ import {
 
 import { addDaysToYmd, getEasternYMD } from "@/components/adminEastern";
 
+import {
+  DS_CARD,
+  DS_PAGE_ROOT,
+  DS_PAGE_SUBTITLE,
+  DS_PAGE_TITLE,
+  DS_TABLE_HEAD,
+  DS_TABLE_WRAP,
+  DS_TD_PRIMARY,
+  DS_TD_SECONDARY,
+  DS_TH,
+  DS_TR,
+} from "@/app/admin/designSystem";
+
 const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 const API_BASE = "https://altheon-platform.onrender.com";
 const NY = "America/New_York";
-
-const STAT_CARD =
-  "rounded-2xl border border-gray-100 bg-white p-6 shadow-sm border-t-4 border-t-[#1a6b3c]";
 
 type VoiceStatus = { status: string; agent_name?: string };
 
@@ -87,12 +97,24 @@ function outcomeBadge(success: string | undefined): {
 } {
   const s = String(success ?? "").toLowerCase();
   if (s === "success") {
-    return { label: "Completed", className: "bg-emerald-50 text-emerald-700" };
+    return {
+      label: "Completed",
+      className:
+        "inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600",
+    };
   }
   if (s === "failure" || s === "failed") {
-    return { label: "Failed", className: "bg-red-50 text-red-700" };
+    return {
+      label: "Failed",
+      className:
+        "inline-flex items-center rounded-full bg-red-50 px-2.5 py-0.5 text-xs font-medium text-red-600",
+    };
   }
-  return { label: "Unknown", className: "bg-gray-100 text-gray-600" };
+  return {
+    label: "Unknown",
+    className:
+      "inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-500",
+  };
 }
 
 function callVolumeLast7Days(convs: VoiceConversation[]): {
@@ -200,20 +222,18 @@ export default function AdminVoiceAgentPage() {
   );
 
   return (
-    <div className="w-full bg-gray-50/50">
-      <h1 className="mb-1 text-2xl font-semibold text-gray-900">Voice Agent</h1>
-      <p className="mb-8 text-sm tracking-wide text-gray-500">
-        Inbound call management and activity
-      </p>
+    <div className={DS_PAGE_ROOT}>
+      <h1 className={DS_PAGE_TITLE}>Voice Agent</h1>
+      <p className={DS_PAGE_SUBTITLE}>Inbound call management and activity</p>
 
       {error ? (
-        <p className="mb-6 rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
+        <p className="mt-8 rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
           {error}
         </p>
       ) : null}
 
-      <div className="mb-8 grid grid-cols-2 gap-4 md:grid-cols-4">
-        <div className={STAT_CARD}>
+      <div className="mt-8 grid grid-cols-2 gap-6 md:grid-cols-4">
+        <div className={DS_CARD}>
           <div className="flex items-center gap-2">
             <span
               className={`h-2.5 w-2.5 shrink-0 rounded-full ${agentOnline ? "bg-green-500" : "bg-red-500"}`}
@@ -227,7 +247,7 @@ export default function AdminVoiceAgentPage() {
             Agent status
           </p>
         </div>
-        <div className={STAT_CARD}>
+        <div className={DS_CARD}>
           <p className="text-lg font-semibold text-gray-900">
             +1 (561) 328-5880
           </p>
@@ -235,7 +255,7 @@ export default function AdminVoiceAgentPage() {
             Inbound number
           </p>
         </div>
-        <div className={STAT_CARD}>
+        <div className={DS_CARD}>
           <p className="text-3xl font-semibold tabular-nums text-gray-900">
             {loading ? "…" : String(callsMonth)}
           </p>
@@ -243,7 +263,7 @@ export default function AdminVoiceAgentPage() {
             Calls this month
           </p>
         </div>
-        <div className={STAT_CARD}>
+        <div className={DS_CARD}>
           <p className="text-xl font-semibold tabular-nums text-gray-900">
             {loading
               ? "…"
@@ -257,34 +277,24 @@ export default function AdminVoiceAgentPage() {
         </div>
       </div>
 
-      <section className="mb-8">
-        <h2 className="mb-1 text-lg font-semibold text-gray-900">Recent Calls</h2>
-        <p className="mb-4 text-sm tracking-wide text-gray-500">
-          Last 20 inbound calls
-        </p>
-        <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+      <section className="mt-8">
+        <h2 className="mb-1 text-sm font-semibold uppercase tracking-wider text-gray-900">
+          Recent Calls
+        </h2>
+        <p className="mb-4 text-sm text-gray-500">Last 20 inbound calls</p>
+        <div className={DS_TABLE_WRAP}>
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
-              <thead className="bg-gray-50">
+              <thead className={DS_TABLE_HEAD}>
                 <tr>
-                  <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Date &amp; Time
-                  </th>
-                  <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Duration
-                  </th>
-                  <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Messages
-                  </th>
-                  <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Outcome
-                  </th>
-                  <th className="px-6 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Summary
-                  </th>
+                  <th className={DS_TH}>Date &amp; Time</th>
+                  <th className={DS_TH}>Duration</th>
+                  <th className={DS_TH}>Messages</th>
+                  <th className={DS_TH}>Outcome</th>
+                  <th className={DS_TH}>Summary</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody>
                 {loading ? (
                   <tr>
                     <td
@@ -314,26 +324,22 @@ export default function AdminVoiceAgentPage() {
                     return (
                       <tr
                         key={row.conversation_id ?? `call-${idx}`}
-                        className="transition-colors hover:bg-gray-50"
+                        className={DS_TR}
                       >
-                        <td className="whitespace-nowrap px-6 py-4 text-gray-900">
+                        <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
                           {dt}
                         </td>
-                        <td className="px-6 py-4 text-gray-700">
+                        <td className={DS_TD_PRIMARY}>
                           {formatDurationSecs(row.call_duration_secs)}
                         </td>
-                        <td className="px-6 py-4 tabular-nums text-gray-700">
+                        <td className={`${DS_TD_PRIMARY} tabular-nums`}>
                           {row.message_count ?? "—"}
                         </td>
-                        <td className="px-6 py-4">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${badge.className}`}
-                          >
-                            {badge.label}
-                          </span>
+                        <td className={DS_TD_PRIMARY}>
+                          <span className={badge.className}>{badge.label}</span>
                         </td>
                         <td
-                          className="max-w-xs truncate px-6 py-4 text-gray-600"
+                          className={`max-w-xs truncate ${DS_TD_SECONDARY}`}
                           title={sum || undefined}
                         >
                           {short}
@@ -348,16 +354,14 @@ export default function AdminVoiceAgentPage() {
         </div>
       </section>
 
-      <section className="mb-10">
+      <section className="mt-8">
         <div className="mb-4">
-          <h2 className="mb-1 text-2xl font-semibold text-gray-900">
+          <h2 className="mb-1 text-sm font-semibold uppercase tracking-wider text-gray-900">
             Call Volume — Last 7 Days
           </h2>
-          <p className="text-sm tracking-wide text-gray-500">
-            Inbound calls by day
-          </p>
+          <p className="text-sm text-gray-500">Inbound calls by day</p>
         </div>
-        <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-md">
+        <div className={DS_CARD}>
           {loading ? (
             <p className="text-sm text-gray-500">Loading…</p>
           ) : (
@@ -402,7 +406,7 @@ export default function AdminVoiceAgentPage() {
                 <Bar
                   dataKey="calls"
                   name="Calls"
-                  fill="#1a6b3c"
+                  fill="#16A34A"
                   radius={[4, 4, 0, 0]}
                   barSize={28}
                 />

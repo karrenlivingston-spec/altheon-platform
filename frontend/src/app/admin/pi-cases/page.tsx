@@ -2,9 +2,27 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import {
+  billingStatusBadgeClass,
+  billingTypePillClass,
+  DS_CARD,
+  DS_FILTER_BAR,
+  DS_INPUT,
+  DS_PAGE_ROOT,
+  DS_PAGE_SUBTITLE,
+  DS_PAGE_TITLE,
+  DS_PRIMARY_BTN,
+  DS_SECONDARY_BTN,
+  DS_TABLE_HEAD,
+  DS_TABLE_WRAP,
+  DS_TD_PRIMARY,
+  DS_TH,
+  DS_TR,
+  piCaseStatusBadgeClass,
+} from "@/app/admin/designSystem";
+
 const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 const API_BASE = "https://altheon-platform.onrender.com";
-const BRAND = "#1F7A47";
 
 type PatientRow = {
   id: string;
@@ -72,34 +90,6 @@ function formatAccidentDate(ymd: string | null | undefined): string {
   if (!m) return ymd;
   const [, y, mo, d] = m;
   return `${mo}/${d}/${y}`;
-}
-
-function piStatusBadgeClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === "open") return "bg-blue-50 text-blue-700";
-  if (s === "in_treatment") return "bg-amber-50 text-amber-800";
-  if (s === "pending_settlement") return "bg-orange-50 text-orange-800";
-  if (s === "settled") return "bg-emerald-50 text-emerald-700";
-  if (s === "closed") return "bg-gray-50 text-gray-600";
-  return "bg-gray-50 text-gray-700";
-}
-
-function billingTypeBadgeClass(t: string): string {
-  const s = t.toLowerCase();
-  if (s === "cash") return "bg-emerald-50 text-emerald-700";
-  if (s === "insurance") return "bg-blue-50 text-blue-700";
-  if (s === "mixed") return "bg-violet-50 text-violet-700";
-  return "bg-gray-50 text-gray-700";
-}
-
-function billingRecordStatusBadgeClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === "draft") return "bg-gray-50 text-gray-700";
-  if (s === "submitted") return "bg-amber-50 text-amber-800";
-  if (s === "paid") return "bg-emerald-50 text-emerald-700";
-  if (s === "denied") return "bg-red-50 text-red-700";
-  if (s === "partial") return "bg-orange-50 text-orange-800";
-  return "bg-gray-50 text-gray-700";
 }
 
 function compareCreatedDesc(a: PiCaseRow, b: PiCaseRow): number {
@@ -382,30 +372,30 @@ export default function AdminPiCasesPage() {
   }
 
   return (
-    <div className="w-full">
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className={DS_PAGE_ROOT}>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="mb-1 text-2xl font-semibold text-gray-900">PI Cases</h1>
-          <p className="text-sm tracking-wide text-gray-500">
+          <h1 className={DS_PAGE_TITLE}>PI Cases</h1>
+          <p className={DS_PAGE_SUBTITLE}>
             Personal injury case management
           </p>
         </div>
         <button
           type="button"
           onClick={openCreate}
-          className="inline-flex shrink-0 items-center justify-center rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90"
+          className={`${DS_PRIMARY_BTN} inline-flex shrink-0 items-center justify-center`}
         >
           + New PI Case
         </button>
       </div>
 
       {error ? (
-        <p className="mb-6 rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
+        <p className="mt-8 rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
           {error}
         </p>
       ) : null}
 
-      <div className="mb-6 flex flex-wrap items-end gap-4 rounded-2xl border border-gray-100 bg-white px-6 py-4 shadow-sm">
+      <div className={`${DS_FILTER_BAR} mt-8 flex flex-wrap items-end gap-4`}>
         <label className="block text-sm font-medium text-gray-700">
           Status
           <select
@@ -427,47 +417,33 @@ export default function AdminPiCasesPage() {
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Patient name or insurance carrier…"
-            className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+            className={`mt-1 h-9 w-full ${DS_INPUT}`}
           />
         </label>
         <button
           type="button"
           onClick={clearFilters}
-          className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+          className={DS_SECONDARY_BTN}
         >
           Clear filters
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+      <div className={`${DS_TABLE_WRAP} mt-8`}>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="border-b border-gray-100 bg-white">
+            <thead className={DS_TABLE_HEAD}>
               <tr>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Patient Name
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Insurance Carrier
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Claim Number
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Attorney
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Date of Accident
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Status
-                </th>
-                <th className="px-6 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Actions
-                </th>
+                <th className={DS_TH}>Patient Name</th>
+                <th className={DS_TH}>Insurance Carrier</th>
+                <th className={DS_TH}>Claim Number</th>
+                <th className={DS_TH}>Attorney</th>
+                <th className={DS_TH}>Date of Accident</th>
+                <th className={DS_TH}>Status</th>
+                <th className={`${DS_TH} text-right`}>Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody>
               {loading ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
@@ -486,35 +462,30 @@ export default function AdminPiCasesPage() {
                   const name = p ? patientDisplayName(p) : "—";
                   const st = (c.status ?? "open").toLowerCase();
                   return (
-                    <tr
-                      key={c.id}
-                      className="transition-colors hover:bg-gray-100"
-                    >
-                      <td className="px-6 py-4 text-gray-800">{name}</td>
-                      <td className="px-6 py-4 text-gray-800">
+                    <tr key={c.id} className={DS_TR}>
+                      <td className={DS_TD_PRIMARY}>{name}</td>
+                      <td className={DS_TD_PRIMARY}>
                         {dash(c.insurance_carrier)}
                       </td>
-                      <td className="px-6 py-4 font-mono text-xs text-gray-800">
+                      <td className={`${DS_TD_PRIMARY} font-mono text-xs`}>
                         {dash(c.claim_number)}
                       </td>
-                      <td className="px-6 py-4 text-gray-800">
+                      <td className={DS_TD_PRIMARY}>
                         {dash(c.attorney_name)}
                       </td>
-                      <td className="px-6 py-4 text-gray-800">
+                      <td className={DS_TD_PRIMARY}>
                         {formatAccidentDate(c.date_of_accident ?? undefined)}
                       </td>
-                      <td className="px-6 py-4">
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${piStatusBadgeClass(st)}`}
-                        >
+                      <td className={DS_TD_PRIMARY}>
+                        <span className={`capitalize ${piCaseStatusBadgeClass(st)}`}>
                           {st.replace(/_/g, " ")}
                         </span>
                       </td>
-                      <td className="px-6 py-4 text-right">
+                      <td className={`${DS_TD_PRIMARY} text-right`}>
                         <button
                           type="button"
                           onClick={() => openDetail(c)}
-                          className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                          className={DS_SECONDARY_BTN}
                         >
                           View
                         </button>
@@ -531,7 +502,7 @@ export default function AdminPiCasesPage() {
       {createOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
+            className={`max-h-[90vh] w-full max-w-lg overflow-y-auto ${DS_CARD}`}
             role="dialog"
             aria-modal
             aria-labelledby="pi-create-title"
@@ -548,7 +519,7 @@ export default function AdminPiCasesPage() {
                 <select
                   value={cPatientId}
                   onChange={(e) => setCPatientId(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 h-9 w-full ${DS_INPUT}`}
                 >
                   <option value="">Select patient…</option>
                   {patients.map((p) => (
@@ -573,7 +544,7 @@ export default function AdminPiCasesPage() {
                   type="text"
                   value={cInsurance}
                   onChange={(e) => setCInsurance(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -582,7 +553,7 @@ export default function AdminPiCasesPage() {
                   type="text"
                   value={cClaim}
                   onChange={(e) => setCClaim(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -591,7 +562,7 @@ export default function AdminPiCasesPage() {
                   type="text"
                   value={cAttorneyName}
                   onChange={(e) => setCAttorneyName(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -600,7 +571,7 @@ export default function AdminPiCasesPage() {
                   type="email"
                   value={cAttorneyEmail}
                   onChange={(e) => setCAttorneyEmail(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -609,7 +580,7 @@ export default function AdminPiCasesPage() {
                   type="text"
                   value={cAttorneyPhone}
                   onChange={(e) => setCAttorneyPhone(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -618,7 +589,7 @@ export default function AdminPiCasesPage() {
                   value={cNotes}
                   onChange={(e) => setCNotes(e.target.value)}
                   rows={3}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
             </div>
@@ -626,7 +597,7 @@ export default function AdminPiCasesPage() {
               <button
                 type="button"
                 onClick={() => setCreateOpen(false)}
-                className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                className={DS_SECONDARY_BTN}
               >
                 Cancel
               </button>
@@ -634,7 +605,7 @@ export default function AdminPiCasesPage() {
                 type="button"
                 disabled={createBusy}
                 onClick={() => void submitCreate()}
-                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
               >
                 {createBusy ? "Saving…" : "Create"}
               </button>
@@ -681,7 +652,7 @@ export default function AdminPiCasesPage() {
               </p>
             ) : null}
 
-            <div className="mt-5 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+            <div className={`mt-5 ${DS_CARD}`}>
               <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
                 Patient
               </p>
@@ -757,7 +728,7 @@ export default function AdminPiCasesPage() {
                           date_of_accident: e.target.value,
                         }))
                       }
-                      className="mt-1 h-9 w-full rounded-lg border border-gray-100 px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                      className={`mt-1 h-9 w-full ${DS_INPUT}`}
                     />
                   </label>
                   <div className="grid gap-4 sm:grid-cols-3">
@@ -772,7 +743,7 @@ export default function AdminPiCasesPage() {
                             insurance_carrier: e.target.value,
                           }))
                         }
-                        className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                        className={`mt-1 ${DS_INPUT}`}
                       />
                     </label>
                     <label className="block text-sm font-medium text-gray-700 sm:col-span-2">
@@ -783,7 +754,7 @@ export default function AdminPiCasesPage() {
                         onChange={(e) =>
                           setEditDraft((d) => ({ ...d, claim_number: e.target.value }))
                         }
-                        className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                        className={`mt-1 ${DS_INPUT}`}
                       />
                     </label>
                   </div>
@@ -799,7 +770,7 @@ export default function AdminPiCasesPage() {
                             attorney_name: e.target.value,
                           }))
                         }
-                        className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                        className={`mt-1 ${DS_INPUT}`}
                       />
                     </label>
                     <label className="block text-sm font-medium text-gray-700">
@@ -813,7 +784,7 @@ export default function AdminPiCasesPage() {
                             attorney_email: e.target.value,
                           }))
                         }
-                        className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                        className={`mt-1 ${DS_INPUT}`}
                       />
                     </label>
                     <label className="block text-sm font-medium text-gray-700">
@@ -827,7 +798,7 @@ export default function AdminPiCasesPage() {
                             attorney_phone: e.target.value,
                           }))
                         }
-                        className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                        className={`mt-1 ${DS_INPUT}`}
                       />
                     </label>
                   </div>
@@ -839,7 +810,7 @@ export default function AdminPiCasesPage() {
                         setEditDraft((d) => ({ ...d, notes: e.target.value }))
                       }
                       rows={3}
-                      className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                      className={`mt-1 ${DS_INPUT}`}
                     />
                   </label>
                 </div>
@@ -851,7 +822,7 @@ export default function AdminPiCasesPage() {
                   <select
                     value={statusDraft}
                     onChange={(e) => setStatusDraft(e.target.value)}
-                    className="ml-2 h-9 rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                    className={`ml-2 h-9 ${DS_INPUT} w-auto min-w-[10rem]`}
                   >
                     {PI_STATUS_OPTIONS.map((s) => (
                       <option key={s} value={s}>
@@ -864,7 +835,7 @@ export default function AdminPiCasesPage() {
                   type="button"
                   disabled={statusBusy}
                   onClick={() => void updateStatus()}
-                  className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                  className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
                 >
                   {statusBusy ? "Updating…" : "Update Status"}
                 </button>
@@ -883,7 +854,7 @@ export default function AdminPiCasesPage() {
                   <button
                     type="button"
                     onClick={cancelEdit}
-                    className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                    className={DS_SECONDARY_BTN}
                   >
                     Cancel
                   </button>
@@ -891,7 +862,7 @@ export default function AdminPiCasesPage() {
                     type="button"
                     disabled={editBusy}
                     onClick={() => void saveEdit()}
-                    className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                    className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
                   >
                     {editBusy ? "Saving…" : "Save"}
                   </button>
@@ -936,26 +907,23 @@ export default function AdminPiCasesPage() {
                         const bt = (r.billing_type ?? "cash").toLowerCase();
                         const st = (r.status ?? "draft").toLowerCase();
                         return (
-                          <tr
-                            key={r.id}
-                            className="transition-colors hover:bg-gray-100"
-                          >
-                            <td className="px-6 py-4 text-gray-800">
+                          <tr key={r.id} className={DS_TR}>
+                            <td className={DS_TD_PRIMARY}>
                               {r.date_of_service ?? "—"}
                             </td>
-                            <td className="px-6 py-4">
+                            <td className={DS_TD_PRIMARY}>
                               <span
-                                className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${billingTypeBadgeClass(bt)}`}
+                                className={`capitalize ${billingTypePillClass(bt)}`}
                               >
                                 {r.billing_type ?? "cash"}
                               </span>
                             </td>
-                            <td className="px-6 py-4 text-gray-800">
+                            <td className={DS_TD_PRIMARY}>
                               {formatUsdFromCents(r.total_billed_cents)}
                             </td>
-                            <td className="px-6 py-4">
+                            <td className={DS_TD_PRIMARY}>
                               <span
-                                className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${billingRecordStatusBadgeClass(st)}`}
+                                className={`capitalize ${billingStatusBadgeClass(st)}`}
                               >
                                 {r.status ?? "draft"}
                               </span>

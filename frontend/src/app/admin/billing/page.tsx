@@ -2,9 +2,26 @@
 
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
+import {
+  billingStatusBadgeClass,
+  billingTypePillClass,
+  DS_CARD,
+  DS_FILTER_BAR,
+  DS_INPUT,
+  DS_PAGE_ROOT,
+  DS_PAGE_SUBTITLE,
+  DS_PAGE_TITLE,
+  DS_PRIMARY_BTN,
+  DS_SECONDARY_BTN,
+  DS_TABLE_HEAD,
+  DS_TABLE_WRAP,
+  DS_TD_PRIMARY,
+  DS_TH,
+  DS_TR,
+} from "@/app/admin/designSystem";
+
 const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 const API_BASE = "https://altheon-platform.onrender.com";
-const BRAND = "#1F7A47";
 
 type PatientRow = {
   id: string;
@@ -116,24 +133,6 @@ function todayYmdLocal(): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
-}
-
-function billingTypeBadgeClass(t: string): string {
-  const s = t.toLowerCase();
-  if (s === "cash") return "bg-emerald-50 text-emerald-700";
-  if (s === "insurance") return "bg-blue-50 text-blue-700";
-  if (s === "mixed") return "bg-violet-50 text-violet-700";
-  return "bg-gray-50 text-gray-700";
-}
-
-function recordStatusBadgeClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === "draft") return "bg-gray-50 text-gray-700";
-  if (s === "submitted") return "bg-amber-50 text-amber-800";
-  if (s === "paid") return "bg-emerald-50 text-emerald-700";
-  if (s === "denied") return "bg-red-50 text-red-700";
-  if (s === "partial") return "bg-orange-50 text-orange-800";
-  return "bg-gray-50 text-gray-700";
 }
 
 function compareDateOfServiceDesc(a: BillingRecordRow, b: BillingRecordRow): number {
@@ -573,36 +572,36 @@ export default function AdminBillingPage() {
   }
 
   return (
-    <div className="w-full">
-      <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+    <div className={DS_PAGE_ROOT}>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="mb-1 text-2xl font-semibold text-gray-900">Billing</h1>
-          <p className="text-sm tracking-wide text-gray-500">
+          <h1 className={DS_PAGE_TITLE}>Billing</h1>
+          <p className={DS_PAGE_SUBTITLE}>
             CPT billing records and line items
           </p>
         </div>
         <button
           type="button"
           onClick={openCreateModal}
-          className="inline-flex shrink-0 items-center justify-center rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90"
+          className={`${DS_PRIMARY_BTN} inline-flex shrink-0 items-center justify-center`}
         >
           + New Billing Record
         </button>
       </div>
 
       {error ? (
-        <p className="mb-6 rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
+        <p className="mt-8 rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
           {error}
         </p>
       ) : null}
 
-      <div className="mb-6 flex flex-wrap items-end gap-4 rounded-2xl border border-gray-100 bg-white px-6 py-4 shadow-sm">
+      <div className={`${DS_FILTER_BAR} mt-8 flex flex-wrap items-end gap-4`}>
         <label className="block text-sm font-medium text-gray-700">
           Status
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            className="mt-1 block h-9 w-40 rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+            className={`mt-1 block h-9 w-40 ${DS_INPUT}`}
           >
             {STATUS_FILTER_OPTIONS.map((o) => (
               <option key={o.label} value={o.value}>
@@ -617,7 +616,7 @@ export default function AdminBillingPage() {
             type="date"
             value={dateFrom}
             onChange={(e) => setDateFrom(e.target.value)}
-            className="mt-1 block h-9 rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+            className={`mt-1 block h-9 ${DS_INPUT}`}
           />
         </label>
         <label className="block text-sm font-medium text-gray-700">
@@ -626,7 +625,7 @@ export default function AdminBillingPage() {
             type="date"
             value={dateTo}
             onChange={(e) => setDateTo(e.target.value)}
-            className="mt-1 block h-9 rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+            className={`mt-1 block h-9 ${DS_INPUT}`}
           />
         </label>
         <label className="block min-w-[12rem] flex-1 text-sm font-medium text-gray-700">
@@ -636,47 +635,33 @@ export default function AdminBillingPage() {
             value={searchName}
             onChange={(e) => setSearchName(e.target.value)}
             placeholder="Filter by name…"
-            className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+            className={`mt-1 h-9 w-full ${DS_INPUT}`}
           />
         </label>
         <button
           type="button"
           onClick={clearFilters}
-          className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+          className={DS_SECONDARY_BTN}
         >
           Clear filters
         </button>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+      <div className={`${DS_TABLE_WRAP} mt-8`}>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="border-b border-gray-100 bg-white">
+            <thead className={DS_TABLE_HEAD}>
               <tr>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Date of Service
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Patient Name
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Billing Type
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Total Billed
-                </th>
-                <th className="min-w-[12rem] px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Balance
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Status
-                </th>
-                <th className="px-6 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Actions
-                </th>
+                <th className={DS_TH}>Date of Service</th>
+                <th className={DS_TH}>Patient Name</th>
+                <th className={DS_TH}>Billing Type</th>
+                <th className={DS_TH}>Total Billed</th>
+                <th className={`min-w-[12rem] ${DS_TH}`}>Balance</th>
+                <th className={DS_TH}>Status</th>
+                <th className={`${DS_TH} text-right`}>Actions</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody>
               {loading ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
@@ -701,47 +686,45 @@ export default function AdminBillingPage() {
                   const payments = paymentsByRecord[r.id] ?? [];
                   return (
                     <Fragment key={r.id}>
-                      <tr className="transition-colors hover:bg-gray-100">
-                        <td className="px-6 py-4 text-gray-800">
+                      <tr className={DS_TR}>
+                        <td className={DS_TD_PRIMARY}>
                           {r.date_of_service ?? "—"}
                         </td>
-                        <td className="px-6 py-4 text-gray-800">{name}</td>
-                        <td className="px-6 py-4">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${billingTypeBadgeClass(bt)}`}
-                          >
+                        <td className={DS_TD_PRIMARY}>{name}</td>
+                        <td className={DS_TD_PRIMARY}>
+                          <span className={`capitalize ${billingTypePillClass(bt)}`}>
                             {r.billing_type ?? "cash"}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-gray-800">
+                        <td className={DS_TD_PRIMARY}>
                           {formatUsdFromCents(r.total_billed_cents)}
                         </td>
-                        <td className="px-6 py-4">
-                          <p className="text-sm text-gray-800">
+                        <td className={DS_TD_PRIMARY}>
+                          <p className="text-sm text-gray-900">
                             Paid {formatUsdFromCents(paid)} of{" "}
                             {formatUsdFromCents(billed)}
                           </p>
                           <div className="mt-2 h-1.5 w-full max-w-[11rem] overflow-hidden rounded-full bg-gray-100">
                             <div
-                              className="h-full rounded-full bg-[#1F7A47] transition-[width]"
+                              className="h-full rounded-full bg-[#16A34A] transition-[width]"
                               style={{ width: `${pct}%` }}
                             />
                           </div>
                         </td>
-                        <td className="px-6 py-4">
+                        <td className={DS_TD_PRIMARY}>
                           <span
-                            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${recordStatusBadgeClass(st)}`}
+                            className={`capitalize ${billingStatusBadgeClass(st)}`}
                           >
                             {r.status ?? "draft"}
                           </span>
                         </td>
-                        <td className="px-6 py-4 text-right">
+                        <td className={`${DS_TD_PRIMARY} text-right`}>
                           <div className="flex flex-wrap justify-end gap-2">
                             {showRecordPaymentButton(r) ? (
                               <button
                                 type="button"
                                 onClick={() => openPaymentModal(r.id)}
-                                className="rounded-xl border border-gray-200 px-3 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-[#1F7A47] hover:text-[#1F7A47]"
+                                className={`${DS_SECONDARY_BTN} px-3 py-2`}
                               >
                                 Record Payment
                               </button>
@@ -749,7 +732,7 @@ export default function AdminBillingPage() {
                             <button
                               type="button"
                               onClick={() => void openDetail(r.id)}
-                              className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                              className={DS_SECONDARY_BTN}
                             >
                               View
                             </button>
@@ -757,7 +740,7 @@ export default function AdminBillingPage() {
                         </td>
                       </tr>
                       {payments.length > 0 ? (
-                        <tr className="bg-gray-50/90">
+                        <tr className="border-b border-gray-100 bg-gray-50 last:border-0">
                           <td colSpan={7} className="px-6 py-3">
                             <p className="mb-2 text-xs font-medium uppercase tracking-wider text-gray-500">
                               Payment history
@@ -810,7 +793,7 @@ export default function AdminBillingPage() {
       {createOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
+            className={`max-h-[90vh] w-full max-w-lg overflow-y-auto ${DS_CARD}`}
             role="dialog"
             aria-modal
             aria-labelledby="billing-create-title"
@@ -827,7 +810,7 @@ export default function AdminBillingPage() {
                 <select
                   value={createPatientId}
                   onChange={(e) => setCreatePatientId(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 h-9 w-full ${DS_INPUT}`}
                 >
                   <option value="">Select patient…</option>
                   {patients.map((p) => (
@@ -843,7 +826,7 @@ export default function AdminBillingPage() {
                   type="date"
                   value={createDateOfService}
                   onChange={(e) => setCreateDateOfService(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 h-9 w-full ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -851,7 +834,7 @@ export default function AdminBillingPage() {
                 <select
                   value={createBillingType}
                   onChange={(e) => setCreateBillingType(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 h-9 w-full ${DS_INPUT}`}
                 >
                   <option value="cash">Cash</option>
                   <option value="insurance">Insurance</option>
@@ -864,7 +847,7 @@ export default function AdminBillingPage() {
                   type="text"
                   value={createAppointmentId}
                   onChange={(e) => setCreateAppointmentId(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -873,7 +856,7 @@ export default function AdminBillingPage() {
                   type="text"
                   value={createPiCaseId}
                   onChange={(e) => setCreatePiCaseId(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -882,7 +865,7 @@ export default function AdminBillingPage() {
                   type="text"
                   value={createProviderId}
                   onChange={(e) => setCreateProviderId(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -891,7 +874,7 @@ export default function AdminBillingPage() {
                   type="text"
                   value={createInsurance}
                   onChange={(e) => setCreateInsurance(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -900,7 +883,7 @@ export default function AdminBillingPage() {
                   type="text"
                   value={createClaimNumber}
                   onChange={(e) => setCreateClaimNumber(e.target.value)}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -909,7 +892,7 @@ export default function AdminBillingPage() {
                   value={createNotes}
                   onChange={(e) => setCreateNotes(e.target.value)}
                   rows={2}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
             </div>
@@ -917,7 +900,7 @@ export default function AdminBillingPage() {
               <button
                 type="button"
                 onClick={() => setCreateOpen(false)}
-                className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                className={DS_SECONDARY_BTN}
               >
                 Cancel
               </button>
@@ -925,7 +908,7 @@ export default function AdminBillingPage() {
                 type="button"
                 disabled={createBusy}
                 onClick={() => void submitCreate()}
-                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
               >
                 {createBusy ? "Saving…" : "Create"}
               </button>
@@ -937,7 +920,7 @@ export default function AdminBillingPage() {
       {paymentModalRecordId ? (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
           <div
-            className="w-full max-w-lg rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
+            className={`w-full max-w-lg ${DS_CARD}`}
             role="dialog"
             aria-modal
             aria-labelledby="billing-payment-title"
@@ -957,7 +940,7 @@ export default function AdminBillingPage() {
                   step="0.01"
                   value={paymentAmountDollars}
                   onChange={(e) => setPaymentAmountDollars(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 h-9 w-full ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -966,7 +949,7 @@ export default function AdminBillingPage() {
                   type="date"
                   value={paymentDate}
                   onChange={(e) => setPaymentDate(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 h-9 w-full ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
@@ -974,7 +957,7 @@ export default function AdminBillingPage() {
                 <select
                   value={paymentMethod}
                   onChange={(e) => setPaymentMethod(e.target.value)}
-                  className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 h-9 w-full ${DS_INPUT}`}
                 >
                   {PAYMENT_METHOD_OPTIONS.map((o) => (
                     <option key={o.value} value={o.value}>
@@ -989,7 +972,7 @@ export default function AdminBillingPage() {
                   value={paymentNote}
                   onChange={(e) => setPaymentNote(e.target.value)}
                   rows={2}
-                  className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
             </div>
@@ -997,7 +980,7 @@ export default function AdminBillingPage() {
               <button
                 type="button"
                 onClick={closePaymentModal}
-                className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                className={DS_SECONDARY_BTN}
               >
                 Cancel
               </button>
@@ -1005,7 +988,7 @@ export default function AdminBillingPage() {
                 type="button"
                 disabled={paymentBusy}
                 onClick={() => void submitPayment()}
-                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
               >
                 {paymentBusy ? "Saving…" : "Submit"}
               </button>
@@ -1023,7 +1006,7 @@ export default function AdminBillingPage() {
           role="presentation"
         >
           <div
-            className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-sm"
+            className={`max-h-[90vh] w-full max-w-3xl overflow-y-auto ${DS_CARD}`}
             role="dialog"
             aria-modal
             aria-labelledby="billing-detail-title"
@@ -1056,7 +1039,7 @@ export default function AdminBillingPage() {
               <p className="pt-5 text-sm text-gray-500">Loading…</p>
             ) : detail ? (
               <div className="space-y-6 pt-5">
-                <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+                <div className={DS_CARD}>
                   <div className="flex flex-wrap gap-6">
                     <div>
                       <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
@@ -1085,7 +1068,7 @@ export default function AdminBillingPage() {
                         Billing type
                       </p>
                       <span
-                        className={`mt-1 inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${billingTypeBadgeClass(
+                        className={`mt-1 capitalize ${billingTypePillClass(
                           (detail.billing_type ?? "cash").toLowerCase(),
                         )}`}
                       >
@@ -1097,7 +1080,7 @@ export default function AdminBillingPage() {
                         Status
                       </p>
                       <span
-                        className={`mt-1 inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${recordStatusBadgeClass(
+                        className={`mt-1 capitalize ${billingStatusBadgeClass(
                           (detail.status ?? "draft").toLowerCase(),
                         )}`}
                       >
@@ -1126,7 +1109,7 @@ export default function AdminBillingPage() {
                     </p>
                     <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
                       <div
-                        className="h-full rounded-full bg-[#1F7A47]"
+                        className="h-full rounded-full bg-[#16A34A]"
                         style={{
                           width: `${paymentProgressPct(detail)}%`,
                         }}
@@ -1138,7 +1121,7 @@ export default function AdminBillingPage() {
                       <button
                         type="button"
                         onClick={() => openPaymentModal(detail.id)}
-                        className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-[#1F7A47] hover:text-[#1F7A47]"
+                        className={DS_SECONDARY_BTN}
                       >
                         Record Payment
                       </button>
@@ -1152,35 +1135,27 @@ export default function AdminBillingPage() {
                       <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
                         <div className="overflow-x-auto">
                           <table className="min-w-full text-left text-sm">
-                            <thead className="border-b border-gray-100 bg-white">
+                            <thead className={DS_TABLE_HEAD}>
                               <tr>
-                                <th className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
-                                  Date
-                                </th>
-                                <th className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
-                                  Method
-                                </th>
-                                <th className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
-                                  Amount
-                                </th>
-                                <th className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
-                                  Note
-                                </th>
+                                <th className={`${DS_TH} px-4`}>Date</th>
+                                <th className={`${DS_TH} px-4`}>Method</th>
+                                <th className={`${DS_TH} px-4`}>Amount</th>
+                                <th className={`${DS_TH} px-4`}>Note</th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-100">
+                            <tbody>
                               {detailPayments.map((pay) => (
-                                <tr key={pay.id}>
-                                  <td className="px-4 py-3 text-gray-800">
+                                <tr key={pay.id} className={DS_TR}>
+                                  <td className="px-4 py-3 text-sm text-gray-900">
                                     {pay.payment_date ?? "—"}
                                   </td>
-                                  <td className="px-4 py-3 capitalize text-gray-800">
+                                  <td className="px-4 py-3 text-sm capitalize text-gray-900">
                                     {pay.payment_method ?? "—"}
                                   </td>
-                                  <td className="px-4 py-3 font-medium text-gray-900">
+                                  <td className="px-4 py-3 text-sm font-medium text-gray-900">
                                     {formatUsdFromCents(pay.amount_cents)}
                                   </td>
-                                  <td className="max-w-[14rem] truncate px-4 py-3 text-gray-600">
+                                  <td className="max-w-[14rem] truncate px-4 py-3 text-sm text-gray-400">
                                     {(pay.note ?? "").trim() || "—"}
                                   </td>
                                 </tr>
@@ -1197,7 +1172,7 @@ export default function AdminBillingPage() {
                       <select
                         value={statusDraft}
                         onChange={(e) => setStatusDraft(e.target.value)}
-                        className="ml-2 h-9 rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                        className={`ml-2 h-9 ${DS_INPUT} w-auto min-w-[8rem]`}
                       >
                         {RECORD_STATUS_OPTIONS.map((s) => (
                           <option key={s} value={s}>
@@ -1210,7 +1185,7 @@ export default function AdminBillingPage() {
                       type="button"
                       disabled={statusBusy}
                       onClick={() => void updateRecordStatus()}
-                      className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                      className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
                     >
                       {statusBusy ? "Updating…" : "Update Status"}
                     </button>
@@ -1224,35 +1199,19 @@ export default function AdminBillingPage() {
                   <div className="mt-3 overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
                     <div className="overflow-x-auto">
                       <table className="min-w-full text-left text-sm">
-                        <thead className="border-b border-gray-100 bg-white">
+                        <thead className={DS_TABLE_HEAD}>
                           <tr>
-                            <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                              CPT
-                            </th>
-                            <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                              Description
-                            </th>
-                            <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                              Units
-                            </th>
-                            <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                              Rate
-                            </th>
-                            <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                              Total
-                            </th>
-                            <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                              Payment
-                            </th>
-                            <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                              Modifiers
-                            </th>
-                            <th className="px-6 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
-                              Delete
-                            </th>
+                            <th className={DS_TH}>CPT</th>
+                            <th className={DS_TH}>Description</th>
+                            <th className={DS_TH}>Units</th>
+                            <th className={DS_TH}>Rate</th>
+                            <th className={DS_TH}>Total</th>
+                            <th className={DS_TH}>Payment</th>
+                            <th className={DS_TH}>Modifiers</th>
+                            <th className={`${DS_TH} text-right`}>Delete</th>
                           </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
+                        <tbody>
                           {(detail.line_items ?? []).length === 0 ? (
                             <tr>
                               <td
@@ -1270,30 +1229,27 @@ export default function AdminBillingPage() {
                                   ? mods.join(", ")
                                   : "—";
                               return (
-                                <tr
-                                  key={li.id}
-                                  className="transition-colors hover:bg-gray-100"
-                                >
-                                  <td className="px-6 py-4 font-mono text-xs">
+                                <tr key={li.id} className={DS_TR}>
+                                  <td className={`${DS_TD_PRIMARY} font-mono text-xs`}>
                                     {li.cpt_code ?? "—"}
                                   </td>
-                                  <td className="max-w-[10rem] truncate px-6 py-4 text-gray-800">
+                                  <td className={`max-w-[10rem] truncate ${DS_TD_PRIMARY}`}>
                                     {li.description ?? "—"}
                                   </td>
-                                  <td className="px-6 py-4">{li.units ?? "—"}</td>
-                                  <td className="px-6 py-4">
+                                  <td className={DS_TD_PRIMARY}>{li.units ?? "—"}</td>
+                                  <td className={DS_TD_PRIMARY}>
                                     {formatUsdFromCents(li.rate_cents)}
                                   </td>
-                                  <td className="px-6 py-4 font-medium">
+                                  <td className={`${DS_TD_PRIMARY} font-medium`}>
                                     {formatUsdFromCents(li.total_cents)}
                                   </td>
-                                  <td className="px-6 py-4 capitalize">
+                                  <td className={`${DS_TD_PRIMARY} capitalize`}>
                                     {li.payment_type ?? "—"}
                                   </td>
-                                  <td className="px-6 py-4 text-xs text-gray-600">
+                                  <td className={`${DS_TD_PRIMARY} text-xs text-gray-400`}>
                                     {modStr}
                                   </td>
-                                  <td className="px-6 py-4 text-right">
+                                  <td className={`${DS_TD_PRIMARY} text-right`}>
                                     <button
                                       type="button"
                                       disabled={deleteBusyId === li.id}
@@ -1317,12 +1273,12 @@ export default function AdminBillingPage() {
                   <button
                     type="button"
                     onClick={() => setLineFormOpen(true)}
-                    className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                    className={DS_SECONDARY_BTN}
                   >
                     Add Line Item
                   </button>
                 ) : (
-                  <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+                  <div className={DS_CARD}>
                     <p className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900">
                       New line item
                     </p>
@@ -1333,7 +1289,7 @@ export default function AdminBillingPage() {
                           type="text"
                           value={lineCpt}
                           onChange={(e) => setLineCpt(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                          className={`mt-1 ${DS_INPUT}`}
                         />
                       </label>
                       <label className="block text-sm font-medium text-gray-700">
@@ -1342,7 +1298,7 @@ export default function AdminBillingPage() {
                           type="text"
                           value={lineDescription}
                           onChange={(e) => setLineDescription(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                          className={`mt-1 ${DS_INPUT}`}
                         />
                       </label>
                       <label className="block text-sm font-medium text-gray-700">
@@ -1353,7 +1309,7 @@ export default function AdminBillingPage() {
                           step={1}
                           value={lineUnits}
                           onChange={(e) => setLineUnits(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                          className={`mt-1 ${DS_INPUT}`}
                         />
                       </label>
                       <label className="block text-sm font-medium text-gray-700">
@@ -1364,7 +1320,7 @@ export default function AdminBillingPage() {
                           step="0.01"
                           value={lineRateDollars}
                           onChange={(e) => setLineRateDollars(e.target.value)}
-                          className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                          className={`mt-1 ${DS_INPUT}`}
                         />
                       </label>
                       <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
@@ -1373,7 +1329,7 @@ export default function AdminBillingPage() {
                           checked={lineTimed}
                           onChange={(e) => setLineTimed(e.target.checked)}
                           className="h-4 w-4 rounded border-gray-300"
-                          style={{ accentColor: BRAND }}
+                          style={{ accentColor: "#16A34A" }}
                         />
                         Is timed
                       </label>
@@ -1386,7 +1342,7 @@ export default function AdminBillingPage() {
                               e.target.value as "cash" | "insurance",
                             )
                           }
-                          className="mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                          className={`mt-1 h-9 w-full ${DS_INPUT}`}
                         >
                           <option value="cash">Cash</option>
                           <option value="insurance">Insurance</option>
@@ -1399,7 +1355,7 @@ export default function AdminBillingPage() {
                           value={lineModifiers}
                           onChange={(e) => setLineModifiers(e.target.value)}
                           placeholder="e.g. 59, LT"
-                          className="mt-1 w-full rounded-lg border border-gray-100 px-3 py-2 text-sm focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                          className={`mt-1 ${DS_INPUT}`}
                         />
                       </label>
                     </div>
@@ -1407,7 +1363,7 @@ export default function AdminBillingPage() {
                       <button
                         type="button"
                         onClick={() => setLineFormOpen(false)}
-                        className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                        className={DS_SECONDARY_BTN}
                       >
                         Cancel
                       </button>
@@ -1415,7 +1371,7 @@ export default function AdminBillingPage() {
                         type="button"
                         disabled={lineBusy}
                         onClick={() => void submitLineItem()}
-                        className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                        className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
                       >
                         {lineBusy ? "Saving…" : "Submit"}
                       </button>

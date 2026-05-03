@@ -2,13 +2,20 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import {
+  DS_CARD,
+  DS_INPUT,
+  DS_PAGE_ROOT,
+  DS_PAGE_SUBTITLE,
+  DS_PAGE_TITLE,
+  DS_PRIMARY_BTN,
+} from "@/app/admin/designSystem";
+
 const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 const API_BASE = "https://altheon-platform.onrender.com";
 
-const INPUT_CLASS =
-  "mt-1 block h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500";
-const SELECT_CLASS =
-  "mt-1 block h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500";
+const INPUT_CLASS = `mt-1 block h-9 w-full ${DS_INPUT}`;
+const SELECT_CLASS = `mt-1 block h-9 w-full ${DS_INPUT}`;
 
 const TIMEZONE_OPTIONS = [
   { value: "America/New_York", label: "Eastern" },
@@ -515,7 +522,7 @@ export default function AdminSettingsPage() {
     return (
       <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3">
         <div
-          className="h-9 w-9 animate-spin rounded-full border-2 border-gray-200 border-t-[#1F7A47]"
+          className="h-9 w-9 animate-spin rounded-full border-2 border-gray-200 border-t-[#16A34A]"
           aria-hidden
         />
         <p className="text-sm text-gray-500">Loading settings…</p>
@@ -524,9 +531,9 @@ export default function AdminSettingsPage() {
   }
 
   return (
-    <div className="w-full">
-      <h1 className="mb-1 text-2xl font-semibold text-gray-900">Settings</h1>
-      <p className="mb-8 text-sm tracking-wide text-gray-500">
+    <div className={DS_PAGE_ROOT}>
+      <h1 className={DS_PAGE_TITLE}>Settings</h1>
+      <p className={DS_PAGE_SUBTITLE}>
         Clinic configuration and preferences
       </p>
 
@@ -543,7 +550,7 @@ export default function AdminSettingsPage() {
       ) : null}
 
       {/* Section 1 — Clinic Information */}
-      <section className="mb-8 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <section className={`${DS_CARD} mb-8`}>
         <h2 className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900">
           Clinic Information
         </h2>
@@ -660,7 +667,7 @@ export default function AdminSettingsPage() {
             type="button"
             disabled={!clinicInfoBaseline || savingClinic || !clinicInfoDirty}
             onClick={() => void handleSaveClinicInfo()}
-            className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
           >
             {savingClinic ? "Saving…" : "Save Clinic Info"}
           </button>
@@ -671,7 +678,7 @@ export default function AdminSettingsPage() {
       </section>
 
       {/* Section 2 — Business Hours */}
-      <section className="mb-8 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <section className={`${DS_CARD} mb-8`}>
         <h2 className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900">
           Business Hours
         </h2>
@@ -695,7 +702,7 @@ export default function AdminSettingsPage() {
                       }))
                     }
                     disabled={!hoursBaseline}
-                    className="h-4 w-4 rounded border-gray-300 text-[#1F7A47] focus:ring-green-500"
+                    className="h-4 w-4 rounded border-gray-300 text-[#16A34A] focus:ring-green-500"
                   />
                   <label
                     htmlFor={`day-${key}`}
@@ -744,7 +751,7 @@ export default function AdminSettingsPage() {
             type="button"
             disabled={!hoursBaseline || savingHours || !hoursDirty}
             onClick={() => void handleSaveHours()}
-            className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
           >
             {savingHours ? "Saving…" : "Save Hours"}
           </button>
@@ -755,7 +762,7 @@ export default function AdminSettingsPage() {
       </section>
 
       {/* Section 3 — Billing Model */}
-      <section className="mb-8 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <section className={`${DS_CARD} mb-8`}>
         <h2 className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900">
           Billing Model
         </h2>
@@ -771,12 +778,12 @@ export default function AdminSettingsPage() {
                 className={[
                   "relative rounded-xl border p-4 text-left transition-colors",
                   active
-                    ? "border-[#1F7A47] bg-green-50/40 ring-1 ring-[#1F7A47]/30"
+                    ? "border-[#16A34A] bg-green-50/40 ring-1 ring-[#16A34A]/30"
                     : "border-gray-100 bg-white hover:border-gray-200",
                 ].join(" ")}
               >
                 {active ? (
-                  <span className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[#1F7A47] text-white">
+                  <span className="absolute right-3 top-3 flex h-6 w-6 items-center justify-center rounded-full bg-[#16A34A] text-white">
                     <svg
                       className="h-3.5 w-3.5"
                       fill="none"
@@ -804,7 +811,7 @@ export default function AdminSettingsPage() {
             type="button"
             disabled={!billingBaseline || savingBilling || !billingDirty}
             onClick={() => void handleSaveBilling()}
-            className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
           >
             {savingBilling ? "Saving…" : "Save Billing Model"}
           </button>
@@ -815,7 +822,7 @@ export default function AdminSettingsPage() {
       </section>
 
       {/* Section 4 — Providers */}
-      <section className="mb-8 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <section className={`${DS_CARD} mb-8`}>
         <h2 className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900">
           Providers
         </h2>
@@ -974,7 +981,7 @@ export default function AdminSettingsPage() {
                 type="button"
                 disabled={savingProviders}
                 onClick={() => void saveProviderEditor()}
-                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+                className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
               >
                 {savingProviders ? "Saving…" : "Save"}
               </button>
@@ -992,7 +999,7 @@ export default function AdminSettingsPage() {
       ) : null}
 
       {/* Section 5 — Timezone */}
-      <section className="mb-8 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <section className={`${DS_CARD} mb-8`}>
         <h2 className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900">
           Timezone
         </h2>
@@ -1018,7 +1025,7 @@ export default function AdminSettingsPage() {
             type="button"
             disabled={!timezoneBaseline || savingTz || !tzDirty}
             onClick={() => void handleSaveTimezone()}
-            className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+            className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
           >
             {savingTz ? "Saving…" : "Save Timezone"}
           </button>

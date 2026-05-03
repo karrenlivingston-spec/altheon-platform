@@ -10,6 +10,19 @@ import {
   isYmdInInclusiveRange,
 } from "@/components/adminEastern";
 
+import {
+  DS_CARD,
+  DS_CARD_HOVER,
+  DS_FILTER_BAR,
+  DS_INPUT,
+  DS_PAGE_ROOT,
+  DS_PAGE_SUBTITLE,
+  DS_PAGE_TITLE,
+  DS_PRIMARY_BTN,
+  DS_SECONDARY_BTN,
+  DS_SECTION_HEADER,
+} from "@/app/admin/designSystem";
+
 const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -52,10 +65,7 @@ type QuickBillLineItem = {
   payment_type: string;
 };
 
-const BILL_MODAL_INPUT =
-  "mt-1 h-9 w-full rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500";
-const BILL_BTN_CLASS =
-  "text-xs font-medium rounded-lg border border-gray-200 px-3 py-1.5 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900";
+const BILL_MODAL_INPUT = `mt-1 h-9 ${DS_INPUT}`;
 
 function clinicianLabel(id: string): string {
   if (id === CLINICIAN_WEST_ID) return "Dr. West";
@@ -485,7 +495,7 @@ export default function AdminAppointmentsPage() {
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <button
               type="button"
-              className={BILL_BTN_CLASS}
+              className={`${DS_SECONDARY_BTN} px-3 py-1.5 text-xs`}
               onClick={() => openBillingForAppointment(row)}
             >
               + Bill
@@ -511,11 +521,11 @@ export default function AdminAppointmentsPage() {
         </div>
         {column === "completed" ? (
           <>
-            <p className="mt-1 text-xs text-green-600">✓ Completed</p>
+            <p className="mt-1 text-xs font-medium text-gray-600">✓ Completed</p>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <button
                 type="button"
-                className={BILL_BTN_CLASS}
+                className={`${DS_SECONDARY_BTN} px-3 py-1.5 text-xs`}
                 onClick={() => openBillingForAppointment(row)}
               >
                 + Bill
@@ -529,7 +539,7 @@ export default function AdminAppointmentsPage() {
                 type="button"
                 disabled={busy}
                 onClick={() => void patchStatus(row.id, "checked_in")}
-                className="rounded-md bg-green-600/90 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-60"
+                className={`${DS_PRIMARY_BTN} px-3 py-1.5 text-xs disabled:opacity-60`}
               >
                 Check In
               </button>
@@ -538,7 +548,7 @@ export default function AdminAppointmentsPage() {
                 type="button"
                 disabled={busy}
                 onClick={() => void patchStatus(row.id, "completed")}
-                className="rounded-md bg-green-600/90 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-green-700 disabled:opacity-60"
+                className={`${DS_PRIMARY_BTN} px-3 py-1.5 text-xs disabled:opacity-60`}
               >
                 Complete
               </button>
@@ -555,7 +565,7 @@ export default function AdminAppointmentsPage() {
             ) : null}
             <button
               type="button"
-              className={BILL_BTN_CLASS}
+              className={`${DS_SECONDARY_BTN} px-3 py-1.5 text-xs`}
               onClick={() => openBillingForAppointment(row)}
             >
               + Bill
@@ -567,13 +577,11 @@ export default function AdminAppointmentsPage() {
   }
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-6 py-6">
-      <h1 className="mb-1 text-2xl font-semibold text-gray-900">Appointments</h1>
-      <p className="mb-8 text-sm tracking-wide text-gray-500">
-        Today&apos;s flow and week view
-      </p>
+    <div className={`${DS_PAGE_ROOT} mx-auto max-w-7xl`}>
+      <h1 className={DS_PAGE_TITLE}>Appointments</h1>
+      <p className={DS_PAGE_SUBTITLE}>Today&apos;s flow and week view</p>
 
-      <div className="mb-6 flex flex-wrap items-center gap-2">
+      <div className={`${DS_FILTER_BAR} mt-8 flex flex-wrap items-center gap-2`}>
         <button
           type="button"
           className={filterPillClass(clinicianFilter === "all")}
@@ -597,11 +605,9 @@ export default function AdminAppointmentsPage() {
         </button>
       </div>
 
-      <section className="mb-8">
-        <h2 className="mb-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-          Patient Flow Board
-        </h2>
-        <div className="mt-4 rounded-2xl bg-white p-6 shadow-md">
+      <section className="mt-8">
+        <h2 className={DS_SECTION_HEADER}>Patient Flow Board</h2>
+        <div>
           {loading ? (
             <p className="text-sm text-gray-500">Loading…</p>
           ) : (
@@ -629,11 +635,9 @@ export default function AdminAppointmentsPage() {
         </div>
       </section>
 
-      <section className="mb-8">
-        <h2 className="mb-4 text-xs font-semibold uppercase tracking-wider text-gray-500">
-          Week Calendar
-        </h2>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-7">
+      <section className="mt-8">
+        <h2 className={DS_SECTION_HEADER}>Week Calendar</h2>
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-7">
           {weekDays.map((ymd) => {
             const dayRows = weekAppointments
               .filter((a) => getEasternYMD(new Date(a.start_time)) === ymd)
@@ -647,9 +651,11 @@ export default function AdminAppointmentsPage() {
               <div
                 key={ymd}
                 className={[
-                  "rounded-2xl border border-gray-100 p-5 shadow-sm",
-                  isToday ? "bg-emerald-50/40" : "bg-white",
-                ].join(" ")}
+                  `${DS_CARD} p-5`,
+                  isToday ? "ring-2 ring-green-500/25" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
               >
                 <p className="mb-3 text-sm font-semibold text-gray-900">{dayLabel(ymd)}</p>
                 <div className="space-y-2">
@@ -670,10 +676,10 @@ export default function AdminAppointmentsPage() {
                         fullName.trim().split(/\s+/).filter(Boolean)[0] ??
                         fullName;
                       const cellAccent = west
-                        ? "border-l-2 border-l-[#1A6B8A] bg-blue-50"
+                        ? "border-l-2 border-l-[#0EA5A4] bg-gray-50"
                         : sharpe
-                          ? "border-l-2 border-l-[#7C3AED] bg-purple-50"
-                          : "border-l-2 border-l-gray-300 bg-gray-50/60";
+                          ? "border-l-2 border-l-[#7C3AED] bg-gray-50"
+                          : "border-l-2 border-l-gray-300 bg-gray-50";
 
                       return (
                         <div
@@ -690,11 +696,11 @@ export default function AdminAppointmentsPage() {
                               {formatTimeEastern(row.start_time)}
                             </span>
                             {checkedInBlock ? (
-                              <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-medium leading-tight text-amber-800">
+                              <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium leading-tight text-amber-700">
                                 Checked In
                               </span>
                             ) : completedBlock ? (
-                              <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-medium leading-tight text-emerald-800">
+                              <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium leading-tight text-gray-600">
                                 ✓ Done
                               </span>
                             ) : null}
@@ -722,7 +728,7 @@ export default function AdminAppointmentsPage() {
           role="presentation"
         >
           <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-xl"
+            className={`max-h-[90vh] w-full max-w-lg overflow-y-auto ${DS_CARD} shadow-xl`}
             role="dialog"
             aria-modal
             aria-labelledby="quick-bill-title"
@@ -780,7 +786,7 @@ export default function AdminAppointmentsPage() {
                 Notes (optional)
                 <textarea
                   rows={2}
-                  className="mt-1 w-full rounded-lg border border-gray-100 bg-white px-3 py-2 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+                  className={`mt-1 min-h-[72px] ${DS_INPUT}`}
                   value={billNotes}
                   onChange={(e) => setBillNotes(e.target.value)}
                 />
@@ -835,7 +841,7 @@ export default function AdminAppointmentsPage() {
                     type="checkbox"
                     checked={draftTimed}
                     onChange={(e) => setDraftTimed(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-[#1F7A47] focus:ring-green-500"
+                    className="h-4 w-4 rounded border-gray-300 text-[#16A34A] focus:ring-green-500"
                   />
                   Is Timed
                 </label>
@@ -854,7 +860,7 @@ export default function AdminAppointmentsPage() {
                   <button
                     type="button"
                     onClick={() => appendQuickBillLineItem()}
-                    className="rounded-xl border border-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-gray-400 hover:text-gray-900"
+                    className={DS_SECONDARY_BTN}
                   >
                     Add
                   </button>
@@ -898,7 +904,7 @@ export default function AdminAppointmentsPage() {
               <button
                 type="button"
                 onClick={() => closeBillingModal()}
-                className="rounded-xl border border-gray-100 px-4 py-2 text-sm text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900"
+                className={DS_SECONDARY_BTN}
               >
                 Cancel
               </button>
@@ -906,7 +912,7 @@ export default function AdminAppointmentsPage() {
                 type="button"
                 disabled={billSubmitBusy}
                 onClick={() => void submitQuickBill()}
-                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
               >
                 {billSubmitBusy ? "Saving…" : "Create Billing Record"}
               </button>
@@ -917,7 +923,7 @@ export default function AdminAppointmentsPage() {
 
       {toastVisible && toastMessage ? (
         <div
-          className="fixed bottom-6 right-6 z-50 rounded-xl bg-green-600 px-4 py-3 text-sm text-white shadow-lg"
+          className="fixed bottom-6 right-6 z-50 rounded-lg bg-[#16A34A] px-4 py-3 text-sm font-medium text-white shadow-lg"
           role="status"
         >
           {toastMessage}
@@ -942,9 +948,11 @@ function FlowColumn({
     count === 1 ? "1 patient" : `${count} patients`;
 
   return (
-    <div className="flex min-h-[400px] flex-col rounded-xl bg-gray-50/50 p-4">
+    <div className={`flex min-h-[400px] flex-col ${DS_CARD}`}>
       <div className="mb-4 border-b border-gray-100 pb-2">
-        <p className="text-xs uppercase tracking-wide text-gray-500">{label}</p>
+        <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
+          {label}
+        </p>
         <p className="text-sm text-gray-600">{countLine}</p>
       </div>
       {items.length === 0 ? (

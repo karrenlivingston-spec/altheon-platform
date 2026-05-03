@@ -4,6 +4,21 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ChevronRight } from "lucide-react";
 
+import {
+  activeInactiveBadgeClass,
+  DS_FILTER_BAR,
+  DS_INPUT,
+  DS_PAGE_ROOT,
+  DS_PAGE_SUBTITLE,
+  DS_PAGE_TITLE,
+  DS_TABLE_HEAD,
+  DS_TABLE_WRAP,
+  DS_TD_PRIMARY,
+  DS_TD_SECONDARY,
+  DS_TH,
+  DS_TR,
+} from "@/app/admin/designSystem";
+
 const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -58,6 +73,13 @@ function patientDisplayName(p: PatientRow): string {
 
 function normalizePhone(s: string): string {
   return s.replace(/\D/g, "");
+}
+
+function patientInitials(p: PatientRow): string {
+  const a = (p.first_name ?? "").trim().charAt(0);
+  const b = (p.last_name ?? "").trim().charAt(0);
+  const s = `${a}${b}`.toUpperCase();
+  return s || "?";
 }
 
 export default function AdminPatientsPage() {
@@ -169,63 +191,47 @@ export default function AdminPatientsPage() {
   const total = patients.length;
 
   return (
-    <div className="w-full">
-      <h1 className="mb-1 text-2xl font-semibold text-gray-900">Patients</h1>
-      <div className="mb-8 flex flex-wrap items-center gap-3">
-        <p className="text-sm tracking-wide text-gray-500">
-          Directory and visit history
-        </p>
-        <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-800">
+    <div className={DS_PAGE_ROOT}>
+      <h1 className={DS_PAGE_TITLE}>Patients</h1>
+      <p className={DS_PAGE_SUBTITLE}>Directory and visit history</p>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-500">
           {loading ? "…" : `${total} patient${total === 1 ? "" : "s"}`}
         </span>
       </div>
 
-      <div className="mb-6 rounded-2xl border border-gray-100 bg-white px-6 py-4 shadow-sm">
+      <div className={`${DS_FILTER_BAR} mt-8`}>
         <input
           type="search"
           placeholder="Search by name or phone…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-9 w-full max-w-md rounded-lg border border-gray-100 bg-white px-3 text-sm text-gray-900 focus:border-green-500 focus:outline-none focus:ring-1 focus:ring-green-500"
+          className={`${DS_INPUT} max-w-md`}
           aria-label="Search patients"
         />
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+      <div className={`${DS_TABLE_WRAP} mt-8`}>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
-            <thead className="border-b border-gray-100 bg-white">
+            <thead className={DS_TABLE_HEAD}>
               <tr>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Name
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Phone
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Email
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  First Seen
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Last Seen
-                </th>
-                <th className="px-6 py-4 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Total Visits
-                </th>
-                <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                  Status
-                </th>
-                <th className="w-10 px-2 py-4" aria-hidden />
+                <th className={DS_TH}>Name</th>
+                <th className={DS_TH}>Phone</th>
+                <th className={DS_TH}>Email</th>
+                <th className={DS_TH}>First Seen</th>
+                <th className={DS_TH}>Last Seen</th>
+                <th className={`${DS_TH} text-right`}>Total Visits</th>
+                <th className={DS_TH}>Status</th>
+                <th className="w-10 px-2 py-3" aria-hidden />
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody>
               {loading ? (
                 <tr>
                   <td
                     colSpan={8}
-                    className="px-6 py-10 text-center text-gray-500"
+                    className="px-6 py-10 text-center text-sm text-gray-500"
                   >
                     Loading…
                   </td>
@@ -234,7 +240,7 @@ export default function AdminPatientsPage() {
                 <tr>
                   <td
                     colSpan={8}
-                    className="px-6 py-10 text-center text-gray-500"
+                    className="px-6 py-10 text-center text-sm text-gray-500"
                   >
                     No patients match your search.
                   </td>
@@ -245,7 +251,7 @@ export default function AdminPatientsPage() {
                     key={row.patient.id}
                     role="button"
                     tabIndex={0}
-                    className="cursor-pointer transition-colors hover:bg-gray-100"
+                    className={`${DS_TR} cursor-pointer`}
                     onClick={() =>
                       router.push(
                         `/admin/patients/${encodeURIComponent(row.patient.id)}`,
@@ -260,34 +266,35 @@ export default function AdminPatientsPage() {
                       }
                     }}
                   >
-                    <td className="px-6 py-4 font-semibold text-gray-900">
-                      {patientDisplayName(row.patient)}
+                    <td className={DS_TD_PRIMARY}>
+                      <div className="flex items-center gap-3">
+                        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-green-50 text-sm font-medium text-green-700">
+                          {patientInitials(row.patient)}
+                        </span>
+                        <span className="font-medium">
+                          {patientDisplayName(row.patient)}
+                        </span>
+                      </div>
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-gray-800">
+                    <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
                       {row.patient.phone ?? "—"}
                     </td>
-                    <td className="px-6 py-4 text-gray-700">
+                    <td className={DS_TD_PRIMARY}>
                       {row.patient.email?.trim() ? row.patient.email : "—"}
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-gray-700">
+                    <td className={`${DS_TD_SECONDARY} whitespace-nowrap`}>
                       {row.firstSeen}
                     </td>
-                    <td className="whitespace-nowrap px-6 py-4 text-gray-700">
+                    <td className={`${DS_TD_SECONDARY} whitespace-nowrap`}>
                       {row.lastSeen}
                     </td>
-                    <td className="px-6 py-4 text-right tabular-nums text-gray-800">
+                    <td className={`${DS_TD_PRIMARY} text-right tabular-nums`}>
                       {row.totalVisits}
                     </td>
-                    <td className="px-6 py-4">
-                      {row.active ? (
-                        <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
-                          Active
-                        </span>
-                      ) : (
-                        <span className="inline-flex rounded-full bg-gray-50 px-2.5 py-0.5 text-xs font-medium text-gray-600">
-                          Inactive
-                        </span>
-                      )}
+                    <td className={DS_TD_PRIMARY}>
+                      <span className={activeInactiveBadgeClass(row.active)}>
+                        {row.active ? "Active" : "Inactive"}
+                      </span>
                     </td>
                     <td className="px-2 py-4 text-gray-400" aria-hidden>
                       <ChevronRight className="h-5 w-5 shrink-0" />

@@ -4,9 +4,27 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 
+import {
+  appointmentStatusBadgeClass,
+  billingStatusBadgeClass,
+  DS_CARD,
+  DS_INPUT,
+  DS_PAGE_ROOT,
+  DS_PAGE_TITLE,
+  DS_PRIMARY_BTN,
+  DS_SECONDARY_BTN,
+  DS_TABLE_HEAD,
+  DS_TABLE_WRAP,
+  DS_TD_PRIMARY,
+  DS_SECTION_HEADER,
+  DS_TH,
+  DS_TR,
+  membershipStatusBadgeClass,
+  piCaseStatusBadgeClass,
+} from "@/app/admin/designSystem";
+
 const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 const API_BASE = "https://altheon-platform.onrender.com";
-const BRAND = "#1F7A47";
 
 const NY = "America/New_York";
 
@@ -110,45 +128,6 @@ function formatUsdFromCents(cents: number | null | undefined): string {
   }).format((Number(cents) || 0) / 100);
 }
 
-function appointmentStatusBadgeClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === "scheduled") return "bg-sky-50 text-sky-800";
-  if (s === "confirmed") return "bg-violet-50 text-violet-800";
-  if (s === "completed") return "bg-emerald-50 text-emerald-800";
-  if (s === "cancelled") return "bg-gray-100 text-gray-600";
-  if (s === "no_show") return "bg-amber-50 text-amber-900";
-  if (s === "checked_in") return "bg-blue-50 text-blue-800";
-  return "bg-gray-50 text-gray-700";
-}
-
-function billingStatusBadgeClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === "draft") return "bg-gray-50 text-gray-700";
-  if (s === "submitted") return "bg-amber-50 text-amber-800";
-  if (s === "paid") return "bg-emerald-50 text-emerald-700";
-  if (s === "denied") return "bg-red-50 text-red-700";
-  if (s === "partial") return "bg-orange-50 text-orange-800";
-  return "bg-gray-50 text-gray-700";
-}
-
-function piStatusBadgeClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === "open") return "bg-blue-50 text-blue-700";
-  if (s === "in_treatment") return "bg-amber-50 text-amber-800";
-  if (s === "pending_settlement") return "bg-orange-50 text-orange-800";
-  if (s === "settled") return "bg-emerald-50 text-emerald-700";
-  if (s === "closed") return "bg-gray-50 text-gray-600";
-  return "bg-gray-50 text-gray-700";
-}
-
-function membershipStatusBadgeClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === "active") return "bg-emerald-50 text-emerald-800";
-  if (s === "paused") return "bg-amber-50 text-amber-900";
-  if (s === "cancelled" || s === "expired") return "bg-gray-100 text-gray-600";
-  return "bg-gray-50 text-gray-700";
-}
-
 function tierNameFromRow(row: MembershipRow): string {
   const t = row.membership_tiers;
   if (Array.isArray(t)) {
@@ -161,8 +140,7 @@ function tierNameFromRow(row: MembershipRow): string {
   return "—";
 }
 
-const INPUT_CLASS =
-  "mt-1 w-full rounded-lg border border-gray-100 bg-white px-3 py-2 text-sm text-gray-900 focus:border-green-600 focus:outline-none focus:ring-1 focus:ring-green-600";
+const FIELD_INPUT = `mt-1 w-full ${DS_INPUT}`;
 
 const LABEL_CLASS = "block text-xs font-medium uppercase tracking-wide text-gray-500";
 
@@ -377,8 +355,7 @@ export default function PatientDetailPage() {
         </p>
         <Link
           href="/admin/patients"
-          className="text-sm font-medium text-green-700 hover:underline"
-          style={{ color: BRAND }}
+          className="text-sm font-medium text-[#16A34A] hover:underline"
         >
           ← Back to patients
         </Link>
@@ -400,7 +377,7 @@ export default function PatientDetailPage() {
   ];
 
   return (
-    <div className="w-full">
+    <div className={DS_PAGE_ROOT}>
       <div className="mb-4">
         <button
           type="button"
@@ -414,14 +391,11 @@ export default function PatientDetailPage() {
       <div className="mb-8 overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
         <div className="flex flex-col gap-6 px-6 py-6 md:flex-row md:items-start md:justify-between">
           <div className="flex min-w-0 gap-4">
-            <div
-              className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full text-lg font-semibold text-white"
-              style={{ backgroundColor: BRAND }}
-            >
+            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-green-50 text-lg font-medium text-green-700">
               {initials(patient)}
             </div>
             <div className="min-w-0">
-              <h1 className="text-2xl font-semibold text-gray-900">
+              <h1 className={DS_PAGE_TITLE}>
                 {patientDisplayName(patient)}
               </h1>
               <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-gray-500">
@@ -442,8 +416,7 @@ export default function PatientDetailPage() {
                   type="button"
                   disabled={saveBusy}
                   onClick={() => void saveEdit()}
-                  className="rounded-xl px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity disabled:opacity-50"
-                  style={{ backgroundColor: BRAND }}
+                  className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
                 >
                   {saveBusy ? "Saving…" : "Save"}
                 </button>
@@ -451,7 +424,7 @@ export default function PatientDetailPage() {
                   type="button"
                   disabled={saveBusy}
                   onClick={cancelEdit}
-                  className="rounded-xl border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-gray-400"
+                  className={DS_SECONDARY_BTN}
                 >
                   Cancel
                 </button>
@@ -460,8 +433,7 @@ export default function PatientDetailPage() {
               <button
                 type="button"
                 onClick={beginEdit}
-                className="rounded-xl px-4 py-2 text-sm font-medium text-white shadow-sm"
-                style={{ backgroundColor: BRAND }}
+                className={DS_PRIMARY_BTN}
               >
                 Edit Profile
               </button>
@@ -485,10 +457,9 @@ export default function PatientDetailPage() {
             className={[
               "rounded-t-lg px-4 py-2 text-sm font-medium transition-colors",
               tab === t.id
-                ? "border-b-2 text-gray-900"
+                ? "border-b-2 border-[#16A34A] text-[#16A34A]"
                 : "text-gray-500 hover:text-gray-800",
             ].join(" ")}
-            style={tab === t.id ? { borderBottomColor: BRAND, color: BRAND } : {}}
           >
             {t.label}
           </button>
@@ -504,7 +475,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>Line 1</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={draft.address_line1 ?? ""}
                     onChange={(e) =>
                       setDraftField("address_line1", e.target.value)
@@ -520,7 +491,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>Line 2</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={draft.address_line2 ?? ""}
                     onChange={(e) =>
                       setDraftField("address_line2", e.target.value)
@@ -537,7 +508,7 @@ export default function PatientDetailPage() {
                   <span className={LABEL_CLASS}>City</span>
                   {editMode ? (
                     <input
-                      className={INPUT_CLASS}
+                      className={FIELD_INPUT}
                       value={draft.city ?? ""}
                       onChange={(e) => setDraftField("city", e.target.value)}
                     />
@@ -551,7 +522,7 @@ export default function PatientDetailPage() {
                   <span className={LABEL_CLASS}>State</span>
                   {editMode ? (
                     <input
-                      className={INPUT_CLASS}
+                      className={FIELD_INPUT}
                       value={draft.state ?? ""}
                       onChange={(e) => setDraftField("state", e.target.value)}
                     />
@@ -566,7 +537,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>ZIP</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={draft.zip ?? ""}
                     onChange={(e) => setDraftField("zip", e.target.value)}
                   />
@@ -577,7 +548,7 @@ export default function PatientDetailPage() {
                 )}
               </div>
             </div>
-            <h2 className="mb-4 mt-8 text-sm font-semibold text-gray-900">
+            <h2 className={`${DS_SECTION_HEADER} mt-8`}>
               Emergency contact
             </h2>
             <div className="space-y-4">
@@ -585,7 +556,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>Name</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={draft.emergency_contact_name ?? ""}
                     onChange={(e) =>
                       setDraftField("emergency_contact_name", e.target.value)
@@ -601,7 +572,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>Phone</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={draft.emergency_contact_phone ?? ""}
                     onChange={(e) =>
                       setDraftField("emergency_contact_phone", e.target.value)
@@ -617,7 +588,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>Relationship</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={draft.emergency_contact_relationship ?? ""}
                     onChange={(e) =>
                       setDraftField(
@@ -635,14 +606,14 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-            <h2 className="mb-4 text-sm font-semibold text-gray-900">Insurance</h2>
+          <div className={DS_CARD}>
+            <h2 className={DS_SECTION_HEADER}>Insurance</h2>
             <div className="space-y-4">
               <div>
                 <span className={LABEL_CLASS}>Carrier</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={draft.insurance_carrier ?? ""}
                     onChange={(e) =>
                       setDraftField("insurance_carrier", e.target.value)
@@ -658,7 +629,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>Policy number</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={draft.insurance_policy_number ?? ""}
                     onChange={(e) =>
                       setDraftField("insurance_policy_number", e.target.value)
@@ -674,7 +645,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>Group number</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={draft.insurance_group_number ?? ""}
                     onChange={(e) =>
                       setDraftField("insurance_group_number", e.target.value)
@@ -693,7 +664,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>Primary complaint</span>
                 {editMode ? (
                   <textarea
-                    className={`${INPUT_CLASS} min-h-[72px]`}
+                    className={`${FIELD_INPUT} min-h-[72px]`}
                     value={draft.primary_complaint ?? ""}
                     onChange={(e) =>
                       setDraftField("primary_complaint", e.target.value)
@@ -709,7 +680,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>Referring provider</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={draft.referring_provider ?? ""}
                     onChange={(e) =>
                       setDraftField("referring_provider", e.target.value)
@@ -725,7 +696,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>Notes</span>
                 {editMode ? (
                   <textarea
-                    className={`${INPUT_CLASS} min-h-[96px]`}
+                    className={`${FIELD_INPUT} min-h-[96px]`}
                     value={draft.notes ?? ""}
                     onChange={(e) => setDraftField("notes", e.target.value)}
                   />
@@ -738,14 +709,14 @@ export default function PatientDetailPage() {
             </div>
           </div>
 
-          <div className="md:col-span-2 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-            <h2 className="mb-4 text-sm font-semibold text-gray-900">Profile</h2>
+          <div className={`md:col-span-2 ${DS_CARD}`}>
+            <h2 className={DS_SECTION_HEADER}>Profile</h2>
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div>
                 <span className={LABEL_CLASS}>First name</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={draft.first_name ?? ""}
                     onChange={(e) => setDraftField("first_name", e.target.value)}
                   />
@@ -759,7 +730,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>Last name</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={draft.last_name ?? ""}
                     onChange={(e) => setDraftField("last_name", e.target.value)}
                   />
@@ -773,7 +744,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>Phone</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={draft.phone ?? ""}
                     onChange={(e) => setDraftField("phone", e.target.value)}
                   />
@@ -787,7 +758,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>Email</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     type="email"
                     value={draft.email ?? ""}
                     onChange={(e) => setDraftField("email", e.target.value)}
@@ -803,7 +774,7 @@ export default function PatientDetailPage() {
                 {editMode ? (
                   <input
                     type="date"
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={(draft.date_of_birth ?? "").slice(0, 10)}
                     onChange={(e) =>
                       setDraftField("date_of_birth", e.target.value || null)
@@ -819,7 +790,7 @@ export default function PatientDetailPage() {
                 <span className={LABEL_CLASS}>Gender</span>
                 {editMode ? (
                   <input
-                    className={INPUT_CLASS}
+                    className={FIELD_INPUT}
                     value={draft.gender ?? ""}
                     onChange={(e) => setDraftField("gender", e.target.value)}
                   />
@@ -835,26 +806,18 @@ export default function PatientDetailPage() {
       ) : null}
 
       {tab === "appointments" ? (
-        <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <div className={`${DS_TABLE_WRAP} mt-8`}>
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
-              <thead className="border-b border-gray-100 bg-white">
+              <thead className={DS_TABLE_HEAD}>
                 <tr>
-                  <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Date
-                  </th>
-                  <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Clinician
-                  </th>
-                  <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Service
-                  </th>
-                  <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Status
-                  </th>
+                  <th className={DS_TH}>Date</th>
+                  <th className={DS_TH}>Clinician</th>
+                  <th className={DS_TH}>Service</th>
+                  <th className={DS_TH}>Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody>
                 {appointmentTableRows.length === 0 ? (
                   <tr>
                     <td
@@ -866,21 +829,22 @@ export default function PatientDetailPage() {
                   </tr>
                 ) : (
                   appointmentTableRows.map((row) => {
-                    const st = (row.status ?? "").toLowerCase();
                     return (
-                      <tr key={row.id}>
-                        <td className="whitespace-nowrap px-6 py-4 text-gray-800">
+                      <tr key={row.id} className={DS_TR}>
+                        <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
                           {formatAppointmentDate(row.start_time)}
                         </td>
-                        <td className="px-6 py-4 text-gray-800">
+                        <td className={DS_TD_PRIMARY}>
                           {clinicianLabel(row.clinician_id)}
                         </td>
-                        <td className="px-6 py-4 text-gray-800">
+                        <td className={DS_TD_PRIMARY}>
                           {row.treatment_types?.name ?? "—"}
                         </td>
-                        <td className="px-6 py-4">
+                        <td className={DS_TD_PRIMARY}>
                           <span
-                            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${appointmentStatusBadgeClass(st)}`}
+                            className={appointmentStatusBadgeClass(
+                              row.status ?? "",
+                            )}
                           >
                             {row.status ?? "—"}
                           </span>
@@ -896,23 +860,17 @@ export default function PatientDetailPage() {
       ) : null}
 
       {tab === "billing" ? (
-        <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+        <div className={`${DS_TABLE_WRAP} mt-8`}>
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
-              <thead className="border-b border-gray-100 bg-white">
+              <thead className={DS_TABLE_HEAD}>
                 <tr>
-                  <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Date
-                  </th>
-                  <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Total billed
-                  </th>
-                  <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Status
-                  </th>
+                  <th className={DS_TH}>Date</th>
+                  <th className={DS_TH}>Total billed</th>
+                  <th className={DS_TH}>Status</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-gray-100">
+              <tbody>
                 {billingRows.length === 0 ? (
                   <tr>
                     <td
@@ -927,19 +885,17 @@ export default function PatientDetailPage() {
                     const id = `${row.date_of_service}-${idx}`;
                     const st = (row.status ?? "").toLowerCase();
                     return (
-                      <tr key={id}>
-                        <td className="whitespace-nowrap px-6 py-4 text-gray-800">
+                      <tr key={id} className={DS_TR}>
+                        <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
                           {row.date_of_service
                             ? formatDob(String(row.date_of_service))
                             : "—"}
                         </td>
-                        <td className="px-6 py-4 tabular-nums text-gray-800">
+                        <td className={`${DS_TD_PRIMARY} tabular-nums`}>
                           {formatUsdFromCents(row.total_billed_cents)}
                         </td>
-                        <td className="px-6 py-4">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${billingStatusBadgeClass(st)}`}
-                          >
+                        <td className={DS_TD_PRIMARY}>
+                          <span className={billingStatusBadgeClass(st)}>
                             {row.status ?? "—"}
                           </span>
                         </td>
@@ -954,11 +910,9 @@ export default function PatientDetailPage() {
       ) : null}
 
       {tab === "membership" ? (
-        <div className="space-y-8">
-          <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-            <h2 className="mb-4 text-sm font-semibold text-gray-900">
-              Active membership
-            </h2>
+        <div className="mt-8 space-y-8">
+          <div className={DS_CARD}>
+            <h2 className={DS_SECTION_HEADER}>Active membership</h2>
             {!activeMembership ? (
               <p className="text-sm text-gray-500">No active enrollment.</p>
             ) : (
@@ -979,7 +933,9 @@ export default function PatientDetailPage() {
                   <span className={LABEL_CLASS}>Status</span>
                   <p className="mt-1">
                     <span
-                      className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${membershipStatusBadgeClass(activeMembership.status ?? "")}`}
+                      className={membershipStatusBadgeClass(
+                        activeMembership.status ?? "",
+                      )}
                     >
                       {activeMembership.status ?? "—"}
                     </span>
@@ -989,29 +945,23 @@ export default function PatientDetailPage() {
             )}
           </div>
 
-          <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-            <div className="border-b border-gray-100 px-6 py-4">
-              <h2 className="text-sm font-semibold text-gray-900">PI cases</h2>
+          <div className={DS_TABLE_WRAP}>
+            <div className="border-b border-gray-100 bg-gray-50 px-6 py-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-900">
+                PI cases
+              </h2>
             </div>
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
-                <thead className="border-b border-gray-100 bg-white">
+                <thead className={DS_TABLE_HEAD}>
                   <tr>
-                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Case #
-                    </th>
-                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Date of accident
-                    </th>
-                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Attorney
-                    </th>
-                    <th className="px-6 py-4 text-xs font-medium uppercase tracking-wider text-gray-500">
-                      Status
-                    </th>
+                    <th className={DS_TH}>Case #</th>
+                    <th className={DS_TH}>Date of accident</th>
+                    <th className={DS_TH}>Attorney</th>
+                    <th className={DS_TH}>Status</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody>
                   {piRows.length === 0 ? (
                     <tr>
                       <td
@@ -1026,22 +976,23 @@ export default function PatientDetailPage() {
                       const st = (row.status ?? "").toLowerCase();
                       const caseNum = (row.claim_number ?? "").trim() || "—";
                       return (
-                        <tr key={row.id ?? `${caseNum}-${row.date_of_accident}`}>
-                          <td className="px-6 py-4 font-medium text-gray-900">
+                        <tr
+                          key={row.id ?? `${caseNum}-${row.date_of_accident}`}
+                          className={DS_TR}
+                        >
+                          <td className={`${DS_TD_PRIMARY} font-medium`}>
                             {caseNum}
                           </td>
-                          <td className="whitespace-nowrap px-6 py-4 text-gray-800">
+                          <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
                             {row.date_of_accident
                               ? formatDob(String(row.date_of_accident))
                               : "—"}
                           </td>
-                          <td className="px-6 py-4 text-gray-800">
+                          <td className={DS_TD_PRIMARY}>
                             {(row.attorney_name ?? "").trim() || "—"}
                           </td>
-                          <td className="px-6 py-4">
-                            <span
-                              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ${piStatusBadgeClass(st)}`}
-                            >
+                          <td className={DS_TD_PRIMARY}>
+                            <span className={piCaseStatusBadgeClass(st)}>
                               {row.status ?? "—"}
                             </span>
                           </td>
