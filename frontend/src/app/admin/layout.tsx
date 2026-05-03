@@ -92,10 +92,10 @@ function AdminAuthenticatedShell({
   function navLinkClass(href: string) {
     const active = isNavLinkActive(href);
     return [
-      "block rounded-lg px-4 py-3 text-sm font-medium transition-colors duration-150",
+      "block rounded-lg border-l-2 py-3 pl-3 pr-4 text-sm font-medium transition-colors duration-150",
       active
-        ? "bg-[rgba(255,255,255,0.08)] text-white"
-        : "text-[#94A3B8] hover:bg-[rgba(255,255,255,0.05)]",
+        ? "border-green-500 bg-white/5 text-white"
+        : "border-transparent text-[#94A3B8] hover:bg-[rgba(255,255,255,0.05)]",
     ].join(" ");
   }
 

@@ -141,6 +141,25 @@ function appointmentStatusBadgeClass(status: string): string {
   return "bg-gray-100 text-gray-600";
 }
 
+const FOCUS_NEXT_FALLBACK = "Next: Brandon West · Mon 10:30 AM";
+
+function formatNextAppointmentLine(row: AppointmentRow | null): string {
+  if (!row) return FOCUS_NEXT_FALLBACK;
+  const d = new Date(row.start_time);
+  if (Number.isNaN(d.getTime())) return FOCUS_NEXT_FALLBACK;
+  const wk = new Intl.DateTimeFormat("en-US", {
+    timeZone: NY,
+    weekday: "short",
+  }).format(d);
+  const tm = new Intl.DateTimeFormat("en-US", {
+    timeZone: NY,
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  }).format(d);
+  return `Next: ${patientName(row)} · ${wk} ${tm}`;
+}
+
 export default function AdminOverviewPage() {
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [patients, setPatients] = useState<PatientRow[]>([]);
@@ -382,6 +401,11 @@ export default function AdminOverviewPage() {
       .slice(0, 14);
   }, [appointments]);
 
+  const focusLine2 = useMemo(
+    () => formatNextAppointmentLine(upcomingAppointments[0] ?? null),
+    [upcomingAppointments],
+  );
+
   const appointmentsLast7DaysChart = useMemo(() => {
     const todayY = getEasternYMD(new Date());
     const rows: { day: string; total: number; ymd: string }[] = [];
@@ -451,38 +475,28 @@ export default function AdminOverviewPage() {
             </p>
             <p className="mt-1 text-sm text-gray-500">Please wait.</p>
           </div>
-        ) : nextFocusAppointment ? (
+        ) : (
           <div className="rounded-xl border border-gray-200 border-l-4 border-l-[#16A34A] bg-gray-50 p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium text-gray-900">
-                  Next up: check in your next patient when they arrive.
+                  No appointments remaining today
                 </p>
-                <p className="mt-1 text-sm text-gray-500">
-                  {formatTimeEastern(nextFocusAppointment.start_time)} ·{" "}
-                  {patientName(nextFocusAppointment)} ·{" "}
-                  {serviceName(nextFocusAppointment)} ·{" "}
-                  {clinicianLabel(nextFocusAppointment.clinician_id)}
-                </p>
+                <p className="mt-1 text-sm text-gray-500">{focusLine2}</p>
               </div>
-              <button
-                type="button"
-                disabled={focusCheckInBusy}
-                onClick={() => void handleFocusCheckIn(nextFocusAppointment.id)}
-                className="shrink-0 text-sm font-medium text-[#16A34A] hover:text-[#15803D] disabled:opacity-50"
-              >
-                {focusCheckInBusy ? "Checking in…" : "Check in"}
-              </button>
+              {nextFocusAppointment ? (
+                <button
+                  type="button"
+                  disabled={focusCheckInBusy}
+                  onClick={() =>
+                    void handleFocusCheckIn(nextFocusAppointment.id)
+                  }
+                  className="shrink-0 text-sm font-medium text-[#16A34A] hover:text-[#15803D] disabled:opacity-50"
+                >
+                  {focusCheckInBusy ? "Checking in…" : "Check in"}
+                </button>
+              ) : null}
             </div>
-          </div>
-        ) : (
-          <div className="rounded-xl border border-gray-200 border-l-4 border-l-[#16A34A] bg-gray-50 p-5">
-            <p className="text-sm font-medium text-gray-900">
-              You&apos;re caught up for now.
-            </p>
-            <p className="mt-1 text-sm text-gray-500">
-              No further scheduled appointments today.
-            </p>
           </div>
         )}
       </section>
@@ -532,25 +546,25 @@ export default function AdminOverviewPage() {
               {upcomingAppointments.map((row) => (
                 <li
                   key={row.id}
-                  className={`flex items-start gap-4 border-b border-gray-100 py-4 pl-3 last:border-b-0 ${clinicianRowAccentClass(row.clinician_id)}`}
+                  className={`flex gap-4 border-b border-gray-100 py-5 pl-3 last:border-b-0 ${clinicianRowAccentClass(row.clinician_id)}`}
                 >
-                  <div className="w-16 shrink-0 text-sm font-semibold text-gray-900">
+                  <div className="w-16 shrink-0 text-sm font-bold text-gray-900">
                     {formatTimeEastern(row.start_time)}
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-gray-900">
-                      {patientName(row)}
-                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="text-sm font-medium text-gray-900">
+                        {patientName(row)}
+                      </p>
+                      <span
+                        className={`rounded-md px-2 py-0.5 text-xs font-medium ${appointmentStatusBadgeClass(row.status)}`}
+                      >
+                        {row.status || "—"}
+                      </span>
+                    </div>
                     <p className="mt-0.5 text-xs text-gray-400">
                       {serviceName(row)} · {clinicianLabel(row.clinician_id)}
                     </p>
-                  </div>
-                  <div className="shrink-0 self-center">
-                    <span
-                      className={`rounded-md px-2 py-0.5 text-xs font-medium ${appointmentStatusBadgeClass(row.status)}`}
-                    >
-                      {row.status || "—"}
-                    </span>
                   </div>
                 </li>
               ))}
@@ -597,11 +611,11 @@ export default function AdminOverviewPage() {
         </section>
       </div>
 
-      <section className="mt-8">
+      <section className="mt-6">
         <h2 className="text-sm font-semibold text-gray-900">
           Appointments — last 7 days
         </h2>
-        <p className="mt-1 text-sm text-gray-500">Daily volume</p>
+        <p className="mt-0.5 text-sm text-gray-500">Daily volume</p>
         <AppointmentsLast7DaysChart
           data={appointmentsLast7DaysChart}
           loading={loading}
@@ -613,9 +627,11 @@ export default function AdminOverviewPage() {
 
 function PrimaryMetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-      <p className="text-4xl font-bold tabular-nums text-gray-900">{value}</p>
-      <p className="mt-2 text-sm text-gray-500">{label}</p>
+    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm transition-shadow duration-150 hover:shadow-md">
+      <p className="text-4xl font-bold tracking-tight tabular-nums text-gray-900">
+        {value}
+      </p>
+      <p className="mt-2 text-xs text-gray-400">{label}</p>
     </div>
   );
 }
@@ -628,11 +644,11 @@ function SecondaryMetricCard({
   value: string;
 }) {
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-      <p className="text-2xl font-semibold tabular-nums text-gray-900">
+    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm transition-shadow duration-150 hover:shadow-md">
+      <p className="text-2xl font-semibold tracking-tight tabular-nums text-gray-900">
         {value}
       </p>
-      <p className="mt-2 text-sm text-gray-500">{label}</p>
+      <p className="mt-2 text-xs text-gray-400">{label}</p>
     </div>
   );
 }
@@ -650,11 +666,19 @@ function BillingRow({
 }) {
   return (
     <div
-      className={`flex items-center justify-between gap-4 border-b border-gray-100 py-2 ${last ? "border-b-0" : ""}`}
+      className={`flex items-center justify-between gap-4 border-b border-gray-100 py-2.5 ${last ? "border-b-0" : ""}`}
     >
-      <span className="text-sm text-gray-500">{label}</span>
       <span
-        className={`shrink-0 text-right font-semibold tabular-nums ${emphasize ? "text-base text-gray-900" : "text-sm text-gray-900"}`}
+        className={
+          emphasize
+            ? "text-sm font-semibold text-gray-900"
+            : "text-sm font-medium text-gray-500"
+        }
+      >
+        {label}
+      </span>
+      <span
+        className={`shrink-0 text-right tabular-nums text-gray-900 ${emphasize ? "text-base font-semibold" : "text-sm font-medium"}`}
       >
         {value}
       </span>
@@ -670,11 +694,11 @@ function AppointmentsLast7DaysChart({
   loading: boolean;
 }) {
   return (
-    <div className="mt-4 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+    <div className="mt-2 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
       {loading ? (
         <p className="text-sm text-gray-500">Loading…</p>
       ) : (
-        <ResponsiveContainer width="100%" height={260}>
+        <ResponsiveContainer width="100%" height={208}>
           <BarChart
             data={data}
             margin={{ top: 8, right: 8, left: 0, bottom: 8 }}
