@@ -291,9 +291,9 @@ export default function AdminLegalRequestsPage() {
                           ) : null}
                           {st === "completed" ? (
                             <span
-                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${statusPillClass("completed")}`}
+                              className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${statusPillClass(st)}`}
                             >
-                              Completed
+                              {st.replace(/_/g, " ")}
                             </span>
                           ) : null}
                         </div>
