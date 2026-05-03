@@ -195,7 +195,10 @@ def _related_membership(patient_id: str, clinic_id: str) -> Optional[dict[str, A
     try:
         resp = (
             supabase.table("patient_memberships")
-            .select("status,visits_remaining,membership_tiers(name)")
+            .select(
+                "status,visits_remaining,"
+                "membership_tiers!patient_memberships_tier_id_fkey(name)"
+            )
             .eq("patient_id", patient_id)
             .eq("clinic_id", clinic_id)
             .eq("status", "active")
