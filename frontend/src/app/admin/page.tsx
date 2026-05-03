@@ -1,6 +1,8 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { Clock, Phone } from "lucide-react";
 import {
   Bar,
   BarChart,
@@ -50,6 +52,17 @@ type BillingRecordRow = {
   total_paid_cents?: number | null;
 };
 
+/** Shape from GET /voice-agent/conversations (see backend/app/main.py). */
+type VoiceConversationRow = {
+  conversation_id?: string;
+  start_time_unix_secs?: number;
+  call_duration_secs?: number;
+  message_count?: number;
+  call_successful?: string;
+  transcript_summary?: string | null;
+  direction?: string | null;
+};
+
 function clinicianLabel(id: string): string {
   if (id === CLINICIAN_WEST_ID) return "Dr. West";
   if (id === CLINICIAN_SHARPE_ID) return "Dr. Sharpe";
@@ -76,6 +89,36 @@ function formatUsdFromCents(cents: number): string {
   }).format(cents / 100);
 }
 
+const VOICE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
+
+function countCallsLast7Days(convs: VoiceConversationRow[]): number {
+  const cutoff = Date.now() - VOICE_LOOKBACK_MS;
+  let n = 0;
+  for (const c of convs) {
+    const u = Number(c.start_time_unix_secs);
+    if (!Number.isFinite(u)) continue;
+    const ms = u * 1000;
+    if (ms >= cutoff && ms <= Date.now()) n += 1;
+  }
+  return n;
+}
+
+function avgDurationSecondsAllCalls(convs: VoiceConversationRow[]): number | null {
+  const nums = convs
+    .map((c) => Number(c.call_duration_secs))
+    .filter((n) => Number.isFinite(n) && n >= 0);
+  if (nums.length === 0) return null;
+  return nums.reduce((a, b) => a + b, 0) / nums.length;
+}
+
+function formatAvgMinsSecs(avgSecs: number | null): string {
+  if (avgSecs === null || !Number.isFinite(avgSecs)) return "—";
+  const total = Math.max(0, Math.round(avgSecs));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}m ${s}s`;
+}
+
 export default function AdminOverviewPage() {
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [patients, setPatients] = useState<PatientRow[]>([]);
@@ -83,6 +126,9 @@ export default function AdminOverviewPage() {
   const [openPiCasesCount, setOpenPiCasesCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [focusCheckInBusy, setFocusCheckInBusy] = useState(false);
+  const [ariaOnline, setAriaOnline] = useState<boolean | null>(null);
+  const [voiceCalls7dDisplay, setVoiceCalls7dDisplay] = useState("—");
+  const [voiceAvgDurationDisplay, setVoiceAvgDurationDisplay] = useState("—");
 
   const refetchAppointments = useCallback(async () => {
     try {
@@ -98,7 +144,44 @@ export default function AdminOverviewPage() {
 
   useEffect(() => {
     let cancelled = false;
+    async function fetchVoiceAgentData() {
+      try {
+        const [vsRes, vcRes] = await Promise.all([
+          fetch(
+            `${API_BASE}/voice-agent/status?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+          ),
+          fetch(
+            `${API_BASE}/voice-agent/conversations?clinic_id=${encodeURIComponent(CLINIC_ID)}&page_size=50`,
+          ),
+        ]);
+        const statusJson = vsRes.ok
+          ? ((await vsRes.json()) as { status?: string })
+          : null;
+        const convPayload = vcRes.ok
+          ? ((await vcRes.json()) as { conversations?: VoiceConversationRow[] })
+          : null;
+        const convs = Array.isArray(convPayload?.conversations)
+          ? convPayload.conversations
+          : [];
+        if (cancelled) return;
+        const st = (statusJson?.status ?? "").toLowerCase();
+        setAriaOnline(st === "online" ? true : st === "offline" ? false : null);
+        const n7 = countCallsLast7Days(convs);
+        setVoiceCalls7dDisplay(String(n7));
+        const avg = avgDurationSecondsAllCalls(convs);
+        setVoiceAvgDurationDisplay(formatAvgMinsSecs(avg));
+      } catch {
+        if (!cancelled) {
+          setAriaOnline(null);
+          setVoiceCalls7dDisplay("—");
+          setVoiceAvgDurationDisplay("—");
+        }
+      }
+    }
+
     async function fetchData(silent = false) {
+      void fetchVoiceAgentData();
+
       if (!silent) {
         setLoading(true);
       }
@@ -320,16 +403,22 @@ export default function AdminOverviewPage() {
       <section className="mb-10">
         {loading ? (
           <div className="rounded-2xl border-l-4 border-l-[#1a6b3c] bg-green-50 p-5 shadow-none">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#1a6b3c]">
-              {"Today's Focus"}
-            </p>
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[#1a6b3c]">
+                {"Today's Focus"}
+              </p>
+              <FocusAriaStatus ariaOnline={ariaOnline} />
+            </div>
             <p className="text-sm text-gray-500">Loading…</p>
           </div>
         ) : nextFocusAppointment ? (
           <div className="rounded-2xl border-l-4 border-l-[#1a6b3c] bg-green-50 p-5 shadow-none">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#1a6b3c]">
-              {"Today's Focus"}
-            </p>
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[#1a6b3c]">
+                {"Today's Focus"}
+              </p>
+              <FocusAriaStatus ariaOnline={ariaOnline} />
+            </div>
             <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <p className="text-lg font-medium text-gray-900">
@@ -355,9 +444,12 @@ export default function AdminOverviewPage() {
           </div>
         ) : (
           <div className="rounded-2xl border-l-4 border-l-[#1a6b3c] bg-green-50 p-5 shadow-none">
-            <p className="mb-1 text-xs font-semibold uppercase tracking-wider text-[#1a6b3c]">
-              {"Today's Focus"}
-            </p>
+            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wider text-[#1a6b3c]">
+                {"Today's Focus"}
+              </p>
+              <FocusAriaStatus ariaOnline={ariaOnline} />
+            </div>
             <p className="mt-2 text-sm text-gray-500">
               All caught up — no more appointments today.
             </p>
@@ -398,6 +490,18 @@ export default function AdminOverviewPage() {
           value={loading ? "…" : String(openPiCasesCount)}
           topBorderClass="border-t-4 border-t-orange-400"
         />
+        <StatCard
+          label="Total Calls (7 days)"
+          value={voiceCalls7dDisplay}
+          topBorderClass="border-t-4 border-t-teal-500"
+          icon={<Phone className="h-5 w-5 text-gray-400" aria-hidden />}
+        />
+        <StatCard
+          label="Avg Call Duration"
+          value={voiceAvgDurationDisplay}
+          topBorderClass="border-t-4 border-t-teal-600"
+          icon={<Clock className="h-5 w-5 text-gray-400" aria-hidden />}
+        />
       </div>
 
       <div className="mb-6 rounded-2xl bg-gray-50 p-6">
@@ -435,19 +539,47 @@ export default function AdminOverviewPage() {
   );
 }
 
+function FocusAriaStatus({ ariaOnline }: { ariaOnline: boolean | null }) {
+  const dotClass =
+    ariaOnline === true
+      ? "bg-green-500"
+      : ariaOnline === false
+        ? "bg-red-500"
+        : "bg-gray-300";
+  const statusText =
+    ariaOnline === true ? "Online" : ariaOnline === false ? "Offline" : "—";
+
+  return (
+    <div className="flex items-center gap-2 text-xs text-gray-600">
+      <span
+        className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`}
+        title={statusText}
+        aria-label={`Aria voice agent ${statusText}`}
+      />
+      <span className="font-medium text-gray-700">Aria</span>
+      <span className="text-gray-500">{statusText}</span>
+    </div>
+  );
+}
+
 function StatCard({
   label,
   value,
   topBorderClass,
+  icon,
 }: {
   label: string;
   value: string;
   topBorderClass: string;
+  icon?: ReactNode;
 }) {
   return (
     <div
       className={`rounded-2xl border border-gray-100 bg-white p-6 shadow-sm ${topBorderClass}`}
     >
+      {icon ? (
+        <div className="mb-1 flex justify-end">{icon}</div>
+      ) : null}
       <p className="text-3xl font-semibold tabular-nums text-gray-900">
         {value}
       </p>
