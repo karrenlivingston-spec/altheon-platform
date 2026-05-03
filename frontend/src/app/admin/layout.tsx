@@ -156,9 +156,12 @@ function AdminAuthenticatedShell({
       <div className="flex min-h-screen">
         <aside
           className={[
-            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-800/80 bg-[#0F172A] text-white transition-transform duration-200 md:static md:translate-x-0",
+            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-800/80 text-white transition-transform duration-200 md:static md:translate-x-0",
             sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           ].join(" ")}
+          style={{
+            background: "linear-gradient(180deg, #0F172A 0%, #020617 100%)",
+          }}
         >
           <div className="flex items-center gap-2 px-4 py-5">
             <span className="text-xl font-semibold tracking-wide text-white">

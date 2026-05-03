@@ -24,7 +24,7 @@ const NY = "America/New_York";
 const CLINICIAN_WEST_ID = "fb6fa0fc-78f3-48c0-818b-511ad7a8ee93";
 const CLINICIAN_SHARPE_ID = "ee6eaa90-1f90-4af7-85a5-4ae78aea3df7";
 
-const MUTED_BAR = "#BBF7D0";
+const MUTED_BAR = "#86EFAC";
 
 type PatientRow = {
   id?: string;
@@ -489,19 +489,16 @@ export default function AdminOverviewPage() {
 
       <div className="mt-8 grid grid-cols-2 gap-6 lg:grid-cols-4">
         <PrimaryMetricCard
-          label={"Today's appointments"}
+          label="Today"
           value={loading ? "…" : String(todayCount)}
         />
         <PrimaryMetricCard
-          label="Total patients"
+          label="Patients"
           value={loading ? "…" : String(patientCount)}
         />
+        <PrimaryMetricCard label="Calls (7d)" value={voiceCalls7dDisplay} />
         <PrimaryMetricCard
-          label="Calls (7 days)"
-          value={voiceCalls7dDisplay}
-        />
-        <PrimaryMetricCard
-          label="Revenue (this month)"
+          label="Revenue"
           value={
             loading ? "…" : formatUsdFromCents(totalBilledThisMonthCents)
           }
@@ -520,40 +517,40 @@ export default function AdminOverviewPage() {
       </div>
 
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[3fr_2fr]">
-        <section className="min-w-0 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-gray-900">
+        <section className="min-w-0">
+          <h2 className="mb-4 text-sm font-semibold text-gray-900">
             Upcoming appointments
           </h2>
           {loading ? (
-            <p className="mt-6 text-sm text-gray-500">Loading…</p>
+            <p className="text-sm text-gray-500">Loading…</p>
           ) : upcomingAppointments.length === 0 ? (
-            <p className="mt-6 text-sm text-gray-500">
+            <p className="text-sm text-gray-500">
               No upcoming appointments on the calendar.
             </p>
           ) : (
-            <ul className="mt-4">
+            <ul>
               {upcomingAppointments.map((row) => (
                 <li
                   key={row.id}
-                  className={`flex gap-4 border-b border-gray-100 py-4 pl-3 last:border-b-0 ${clinicianRowAccentClass(row.clinician_id)}`}
+                  className={`flex items-start gap-4 border-b border-gray-100 py-4 pl-3 last:border-b-0 ${clinicianRowAccentClass(row.clinician_id)}`}
                 >
+                  <div className="w-16 shrink-0 text-sm font-semibold text-gray-900">
+                    {formatTimeEastern(row.start_time)}
+                  </div>
                   <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm text-gray-500">
-                        {formatTimeEastern(row.start_time)}
-                      </span>
-                      <span className="text-sm font-medium text-gray-900">
-                        {patientName(row)}
-                      </span>
-                      <span
-                        className={`rounded-md px-2 py-0.5 text-xs font-medium ${appointmentStatusBadgeClass(row.status)}`}
-                      >
-                        {row.status || "—"}
-                      </span>
-                    </div>
-                    <p className="mt-1 text-xs text-gray-400">
-                      {serviceName(row)}
+                    <p className="text-sm font-medium text-gray-900">
+                      {patientName(row)}
                     </p>
+                    <p className="mt-0.5 text-xs text-gray-400">
+                      {serviceName(row)} · {clinicianLabel(row.clinician_id)}
+                    </p>
+                  </div>
+                  <div className="shrink-0 self-center">
+                    <span
+                      className={`rounded-md px-2 py-0.5 text-xs font-medium ${appointmentStatusBadgeClass(row.status)}`}
+                    >
+                      {row.status || "—"}
+                    </span>
                   </div>
                 </li>
               ))}
@@ -561,14 +558,14 @@ export default function AdminOverviewPage() {
           )}
         </section>
 
-        <section className="min-w-0 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-          <h2 className="text-sm font-medium uppercase tracking-wide text-gray-900">
+        <section className="min-w-0">
+          <h2 className="mb-4 text-sm font-semibold text-gray-900">
             Billing summary
           </h2>
           {loading ? (
-            <p className="mt-6 text-sm text-gray-500">Loading…</p>
+            <p className="text-sm text-gray-500">Loading…</p>
           ) : (
-            <div className="mt-4 space-y-0">
+            <div>
               <BillingRow
                 label="Total billed"
                 value={formatUsdFromCents(totalBilledThisMonthCents)}
@@ -601,7 +598,7 @@ export default function AdminOverviewPage() {
       </div>
 
       <section className="mt-8">
-        <h2 className="text-sm font-medium uppercase tracking-wide text-gray-900">
+        <h2 className="text-sm font-semibold text-gray-900">
           Appointments — last 7 days
         </h2>
         <p className="mt-1 text-sm text-gray-500">Daily volume</p>
@@ -617,10 +614,8 @@ export default function AdminOverviewPage() {
 function PrimaryMetricCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-      <p className="text-3xl font-bold tabular-nums text-gray-900">{value}</p>
-      <p className="mt-2 text-xs font-medium uppercase tracking-wide text-gray-500">
-        {label}
-      </p>
+      <p className="text-4xl font-bold tabular-nums text-gray-900">{value}</p>
+      <p className="mt-2 text-sm text-gray-500">{label}</p>
     </div>
   );
 }
@@ -637,9 +632,7 @@ function SecondaryMetricCard({
       <p className="text-2xl font-semibold tabular-nums text-gray-900">
         {value}
       </p>
-      <p className="mt-2 text-xs font-medium uppercase tracking-wide text-gray-500">
-        {label}
-      </p>
+      <p className="mt-2 text-sm text-gray-500">{label}</p>
     </div>
   );
 }
@@ -657,11 +650,11 @@ function BillingRow({
 }) {
   return (
     <div
-      className={`flex items-center justify-between gap-4 border-b border-gray-100 py-4 ${last ? "border-b-0" : ""}`}
+      className={`flex items-center justify-between gap-4 border-b border-gray-100 py-2 ${last ? "border-b-0" : ""}`}
     >
       <span className="text-sm text-gray-500">{label}</span>
       <span
-        className={`shrink-0 text-right font-semibold tabular-nums text-gray-900 ${emphasize ? "text-base" : "text-sm"}`}
+        className={`shrink-0 text-right font-semibold tabular-nums ${emphasize ? "text-base text-gray-900" : "text-sm text-gray-900"}`}
       >
         {value}
       </span>
@@ -690,7 +683,7 @@ function AppointmentsLast7DaysChart({
             <CartesianGrid
               strokeDasharray="3 3"
               vertical={false}
-              stroke="#E5E7EB"
+              stroke="#F1F5F9"
             />
             <XAxis
               dataKey="day"
