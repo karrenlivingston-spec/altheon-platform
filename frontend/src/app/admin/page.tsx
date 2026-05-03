@@ -1,12 +1,10 @@
 "use client";
 
-import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Clock, Phone } from "lucide-react";
 import {
   Bar,
   BarChart,
-  Legend,
+  CartesianGrid,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -17,8 +15,6 @@ import {
   addDaysToYmd,
   formatTimeEastern,
   getEasternYMD,
-  getThisWeekRangeEasternYmd,
-  isYmdInInclusiveRange,
 } from "@/components/adminEastern";
 
 const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
@@ -27,6 +23,8 @@ const NY = "America/New_York";
 
 const CLINICIAN_WEST_ID = "fb6fa0fc-78f3-48c0-818b-511ad7a8ee93";
 const CLINICIAN_SHARPE_ID = "ee6eaa90-1f90-4af7-85a5-4ae78aea3df7";
+
+const MUTED_BAR = "#BBF7D0";
 
 type PatientRow = {
   id?: string;
@@ -53,7 +51,6 @@ type BillingRecordRow = {
   amount_paid_cents?: number | null;
 };
 
-/** Shape from GET /voice-agent/conversations (see backend/app/main.py). */
 type VoiceConversationRow = {
   conversation_id?: string;
   start_time_unix_secs?: number;
@@ -68,6 +65,12 @@ function clinicianLabel(id: string): string {
   if (id === CLINICIAN_WEST_ID) return "Dr. West";
   if (id === CLINICIAN_SHARPE_ID) return "Dr. Sharpe";
   return id;
+}
+
+function clinicianRowAccentClass(id: string): string {
+  if (id === CLINICIAN_WEST_ID) return "border-l-2 border-l-[#0EA5A4]";
+  if (id === CLINICIAN_SHARPE_ID) return "border-l-2 border-l-[#7C3AED]";
+  return "border-l-2 border-l-gray-300";
 }
 
 function patientName(row: AppointmentRow): string {
@@ -118,6 +121,24 @@ function formatAvgMinsSecs(avgSecs: number | null): string {
   const m = Math.floor(total / 60);
   const s = total % 60;
   return `${m}m ${s}s`;
+}
+
+function headerSubtitleEastern(now: Date): string {
+  const line = new Intl.DateTimeFormat("en-US", {
+    timeZone: NY,
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+  }).format(now);
+  return `West Palm Beach · ${line}`;
+}
+
+function appointmentStatusBadgeClass(status: string): string {
+  const s = status.toLowerCase();
+  if (s === "scheduled" || s === "confirmed" || s === "checked_in") {
+    return "bg-green-50 text-green-700";
+  }
+  return "bg-gray-100 text-gray-600";
 }
 
 export default function AdminOverviewPage() {
@@ -238,7 +259,7 @@ export default function AdminOverviewPage() {
   const todayEasternYmd = useMemo(() => getEasternYMD(new Date()), []);
 
   const nextFocusAppointment = useMemo(() => {
-    /* eslint-disable react-hooks/purity -- "next upcoming" requires wall-clock comparison */
+    /* eslint-disable react-hooks/purity -- wall-clock comparison */
     const nowMs = Date.now();
     /* eslint-enable react-hooks/purity */
     const candidates = appointments.filter((a) => {
@@ -278,29 +299,6 @@ export default function AdminOverviewPage() {
       return ymd === todayEasternYmd;
     });
   }, [appointments, todayEasternYmd]);
-
-  const weekAppointmentCount = useMemo(() => {
-    const { mon, sun } = getThisWeekRangeEasternYmd(new Date());
-    return appointments.filter((a) => {
-      const ymd = getEasternYMD(new Date(a.start_time));
-      return isYmdInInclusiveRange(ymd, mon, sun);
-    }).length;
-  }, [appointments]);
-
-  const monthAppointmentCount = useMemo(() => {
-    const ymd = getEasternYMD(new Date());
-    const [yStr, mStr] = ymd.split("-");
-    const y = Number(yStr);
-    const m = Number(mStr);
-    const mi = m - 1;
-    const lastDay = new Date(y, mi + 1, 0).getDate();
-    const start = `${yStr}-${mStr}-01`;
-    const end = `${yStr}-${mStr}-${String(lastDay).padStart(2, "0")}`;
-    return appointments.filter((a) => {
-      const d = getEasternYMD(new Date(a.start_time));
-      return d >= start && d <= end;
-    }).length;
-  }, [appointments]);
 
   const todayCount = todayAppointments.length;
   const patientCount = patients.length;
@@ -364,10 +362,29 @@ export default function AdminOverviewPage() {
     [billingRecordsThisMonth],
   );
 
+  const upcomingAppointments = useMemo(() => {
+    /* eslint-disable react-hooks/purity */
+    const nowMs = Date.now();
+    /* eslint-enable react-hooks/purity */
+    const cancelledLike = new Set(["cancelled", "canceled"]);
+    return [...appointments]
+      .filter((a) => {
+        const t = new Date(a.start_time).getTime();
+        if (!Number.isFinite(t) || t < nowMs) return false;
+        const st = String(a.status ?? "").toLowerCase();
+        if (cancelledLike.has(st)) return false;
+        return true;
+      })
+      .sort(
+        (a, b) =>
+          new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
+      )
+      .slice(0, 14);
+  }, [appointments]);
+
   const appointmentsLast7DaysChart = useMemo(() => {
     const todayY = getEasternYMD(new Date());
-    const rows: { day: string; west: number; sharpe: number; ymd: string }[] =
-      [];
+    const rows: { day: string; total: number; ymd: string }[] = [];
     for (let i = -6; i <= 0; i++) {
       const ymd = addDaysToYmd(todayY, i);
       const dayShort = new Intl.DateTimeFormat("en-US", {
@@ -385,55 +402,66 @@ export default function AdminOverviewPage() {
           ),
         ),
       );
-      let west = 0;
-      let sharpe = 0;
+      let total = 0;
       for (const a of appointments) {
         if (getEasternYMD(new Date(a.start_time)) !== ymd) continue;
-        const name = clinicianLabel(a.clinician_id);
-        if (name.includes("West")) west += 1;
-        else if (name.includes("Sharpe")) sharpe += 1;
+        total += 1;
       }
-      rows.push({ day: dayShort, west, sharpe, ymd });
+      rows.push({ day: dayShort, total, ymd });
     }
     return rows;
   }, [appointments]);
 
-  return (
-    <div className="w-full bg-gray-50/50">
-      <h1 className="mb-1 text-2xl font-semibold text-gray-900">Overview</h1>
-      <p className="mb-10 text-sm tracking-wide text-gray-500">
-        Snapshot for clinic operations. Data loads from the live API.
-      </p>
+  const ariaLine =
+    ariaOnline === true
+      ? "Aria · Online"
+      : ariaOnline === false
+        ? "Aria · Offline"
+        : "Aria · —";
 
-      <section className="mb-10">
+  return (
+    <div className="w-full bg-[#F8FAFC] pb-10">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-gray-900">Overview</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            {headerSubtitleEastern(new Date())}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2 text-sm text-gray-500 sm:pt-1">
+          <span
+            className={`h-2 w-2 shrink-0 rounded-full ${
+              ariaOnline === true
+                ? "bg-[#16A34A]"
+                : ariaOnline === false
+                  ? "bg-gray-300"
+                  : "bg-gray-300"
+            }`}
+            aria-hidden
+          />
+          <span>{ariaLine}</span>
+        </div>
+      </div>
+
+      <section className="mt-8">
         {loading ? (
-          <div className="rounded-2xl border-l-4 border-l-[#1a6b3c] bg-green-50 p-5 shadow-none">
-            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wider text-[#1a6b3c]">
-                {"Today's Focus"}
-              </p>
-              <FocusAriaStatus ariaOnline={ariaOnline} />
-            </div>
-            <p className="text-sm text-gray-500">Loading…</p>
+          <div className="rounded-xl border border-gray-200 border-l-4 border-l-[#16A34A] bg-gray-50 p-5">
+            <p className="text-sm font-medium text-gray-900">
+              Loading today&apos;s schedule…
+            </p>
+            <p className="mt-1 text-sm text-gray-500">Please wait.</p>
           </div>
         ) : nextFocusAppointment ? (
-          <div className="rounded-2xl border-l-4 border-l-[#1a6b3c] bg-green-50 p-5 shadow-none">
-            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wider text-[#1a6b3c]">
-                {"Today's Focus"}
-              </p>
-              <FocusAriaStatus ariaOnline={ariaOnline} />
-            </div>
-            <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
+          <div className="rounded-xl border border-gray-200 border-l-4 border-l-[#16A34A] bg-gray-50 p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <p className="text-lg font-medium text-gray-900">
-                  {formatTimeEastern(nextFocusAppointment.start_time)} ·{" "}
-                  {patientName(nextFocusAppointment)}
-                </p>
-                <p className="mt-0.5 text-xs text-gray-400">
-                  {serviceName(nextFocusAppointment)}
+                <p className="text-sm font-medium text-gray-900">
+                  Next up: check in your next patient when they arrive.
                 </p>
                 <p className="mt-1 text-sm text-gray-500">
+                  {formatTimeEastern(nextFocusAppointment.start_time)} ·{" "}
+                  {patientName(nextFocusAppointment)} ·{" "}
+                  {serviceName(nextFocusAppointment)} ·{" "}
                   {clinicianLabel(nextFocusAppointment.clinician_id)}
                 </p>
               </div>
@@ -441,100 +469,142 @@ export default function AdminOverviewPage() {
                 type="button"
                 disabled={focusCheckInBusy}
                 onClick={() => void handleFocusCheckIn(nextFocusAppointment.id)}
-                className="shrink-0 rounded-lg bg-[#1F7A47] px-4 py-1.5 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-60"
+                className="shrink-0 text-sm font-medium text-[#16A34A] hover:text-[#15803D] disabled:opacity-50"
               >
-                {focusCheckInBusy ? "Checking in…" : "Check In"}
+                {focusCheckInBusy ? "Checking in…" : "Check in"}
               </button>
             </div>
           </div>
         ) : (
-          <div className="rounded-2xl border-l-4 border-l-[#1a6b3c] bg-green-50 p-5 shadow-none">
-            <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-wider text-[#1a6b3c]">
-                {"Today's Focus"}
-              </p>
-              <FocusAriaStatus ariaOnline={ariaOnline} />
-            </div>
-            <p className="mt-2 text-sm text-gray-500">
-              All caught up — no more appointments today.
+          <div className="rounded-xl border border-gray-200 border-l-4 border-l-[#16A34A] bg-gray-50 p-5">
+            <p className="text-sm font-medium text-gray-900">
+              You&apos;re caught up for now.
+            </p>
+            <p className="mt-1 text-sm text-gray-500">
+              No further scheduled appointments today.
             </p>
           </div>
         )}
       </section>
 
-      <div className="mb-10 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-4">
-        <StatCard
-          label={"Today's Appointments"}
+      <div className="mt-8 grid grid-cols-2 gap-6 lg:grid-cols-4">
+        <PrimaryMetricCard
+          label={"Today's appointments"}
           value={loading ? "…" : String(todayCount)}
-          topBorderClass="border-t-4 border-t-[#1a6b3c]"
         />
-        <StatCard
-          label={"This Week's Appointments"}
-          value={loading ? "…" : String(weekAppointmentCount)}
-          topBorderClass="border-t-4 border-t-[#1a6b3c]"
-        />
-        <StatCard
-          label="Total Patients"
+        <PrimaryMetricCard
+          label="Total patients"
           value={loading ? "…" : String(patientCount)}
-          topBorderClass="border-t-4 border-t-[#1A6B8A]"
         />
-        <StatCard
-          label={"This Month's Appointments"}
-          value={loading ? "…" : String(monthAppointmentCount)}
-          topBorderClass="border-t-4 border-t-[#1A6B8A]"
+        <PrimaryMetricCard
+          label="Calls (7 days)"
+          value={voiceCalls7dDisplay}
         />
-        <StatCard
-          label="Billed This Month"
+        <PrimaryMetricCard
+          label="Revenue (this month)"
           value={
             loading ? "…" : formatUsdFromCents(totalBilledThisMonthCents)
           }
-          topBorderClass="border-t-4 border-t-[#7C3AED]"
         />
-        <StatCard
-          label="Open PI Cases"
+      </div>
+
+      <div className="mt-8 grid grid-cols-2 gap-6">
+        <SecondaryMetricCard
+          label="Open PI cases"
           value={loading ? "…" : String(openPiCasesCount)}
-          topBorderClass="border-t-4 border-t-orange-400"
         />
-        <StatCard
-          label="Total Calls (7 days)"
-          value={voiceCalls7dDisplay}
-          topBorderClass="border-t-4 border-t-teal-500"
-          icon={<Phone className="h-5 w-5 text-gray-400" aria-hidden />}
-        />
-        <StatCard
-          label="Avg Call Duration"
+        <SecondaryMetricCard
+          label="Avg call duration"
           value={voiceAvgDurationDisplay}
-          topBorderClass="border-t-4 border-t-teal-600"
-          icon={<Clock className="h-5 w-5 text-gray-400" aria-hidden />}
         />
       </div>
 
-      <div className="mb-6 rounded-2xl bg-gray-50 p-6">
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <section>
-            <h2 className="mb-4 text-xs text-gray-500 uppercase tracking-wide">
-              Next 3 Days
-            </h2>
-            <MiniCalendarStrip appointments={appointments} loading={loading} />
-          </section>
-          <BillingSummaryCard
-            loading={loading}
-            draft={billingSummaryCounts.draft}
-            submitted={billingSummaryCounts.submitted}
-            paid={billingSummaryCounts.paid}
-            deniedPartial={billingSummaryCounts.deniedPartial}
-            outstandingCents={totalOutstandingThisMonthCents}
-          />
-        </div>
+      <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[3fr_2fr]">
+        <section className="min-w-0 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-gray-900">
+            Upcoming appointments
+          </h2>
+          {loading ? (
+            <p className="mt-6 text-sm text-gray-500">Loading…</p>
+          ) : upcomingAppointments.length === 0 ? (
+            <p className="mt-6 text-sm text-gray-500">
+              No upcoming appointments on the calendar.
+            </p>
+          ) : (
+            <ul className="mt-4">
+              {upcomingAppointments.map((row) => (
+                <li
+                  key={row.id}
+                  className={`flex gap-4 border-b border-gray-100 py-4 pl-3 last:border-b-0 ${clinicianRowAccentClass(row.clinician_id)}`}
+                >
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-sm text-gray-500">
+                        {formatTimeEastern(row.start_time)}
+                      </span>
+                      <span className="text-sm font-medium text-gray-900">
+                        {patientName(row)}
+                      </span>
+                      <span
+                        className={`rounded-md px-2 py-0.5 text-xs font-medium ${appointmentStatusBadgeClass(row.status)}`}
+                      >
+                        {row.status || "—"}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-gray-400">
+                      {serviceName(row)}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+
+        <section className="min-w-0 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+          <h2 className="text-sm font-medium uppercase tracking-wide text-gray-900">
+            Billing summary
+          </h2>
+          {loading ? (
+            <p className="mt-6 text-sm text-gray-500">Loading…</p>
+          ) : (
+            <div className="mt-4 space-y-0">
+              <BillingRow
+                label="Total billed"
+                value={formatUsdFromCents(totalBilledThisMonthCents)}
+                emphasize
+              />
+              <BillingRow
+                label="Draft"
+                value={String(billingSummaryCounts.draft)}
+              />
+              <BillingRow
+                label="Submitted"
+                value={String(billingSummaryCounts.submitted)}
+              />
+              <BillingRow
+                label="Paid"
+                value={String(billingSummaryCounts.paid)}
+              />
+              <BillingRow
+                label="Denied / partial"
+                value={String(billingSummaryCounts.deniedPartial)}
+              />
+              <BillingRow
+                label="Outstanding"
+                value={formatUsdFromCents(totalOutstandingThisMonthCents)}
+                last
+              />
+            </div>
+          )}
+        </section>
       </div>
 
-      <section className="mb-10">
-        <div className="mb-4">
-          <h2 className="mb-1 text-2xl font-semibold text-gray-900">
-            Appointments — Last 7 Days
-          </h2>
-          <p className="text-sm tracking-wide text-gray-500">By clinician</p>
-        </div>
+      <section className="mt-8">
+        <h2 className="text-sm font-medium uppercase tracking-wide text-gray-900">
+          Appointments — last 7 days
+        </h2>
+        <p className="mt-1 text-sm text-gray-500">Daily volume</p>
         <AppointmentsLast7DaysChart
           data={appointmentsLast7DaysChart}
           loading={loading}
@@ -544,130 +614,58 @@ export default function AdminOverviewPage() {
   );
 }
 
-function FocusAriaStatus({ ariaOnline }: { ariaOnline: boolean | null }) {
-  const dotClass =
-    ariaOnline === true
-      ? "bg-green-500"
-      : ariaOnline === false
-        ? "bg-red-500"
-        : "bg-gray-300";
-  const statusText =
-    ariaOnline === true ? "Online" : ariaOnline === false ? "Offline" : "—";
-
+function PrimaryMetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center gap-2 text-xs text-gray-600">
-      <span
-        className={`h-2 w-2 shrink-0 rounded-full ${dotClass}`}
-        title={statusText}
-        aria-label={`Aria voice agent ${statusText}`}
-      />
-      <span className="font-medium text-gray-700">Aria</span>
-      <span className="text-gray-500">{statusText}</span>
-    </div>
-  );
-}
-
-function StatCard({
-  label,
-  value,
-  topBorderClass,
-  icon,
-}: {
-  label: string;
-  value: string;
-  topBorderClass: string;
-  icon?: ReactNode;
-}) {
-  return (
-    <div
-      className={`rounded-2xl border border-gray-100 bg-white p-6 shadow-sm ${topBorderClass}`}
-    >
-      {icon ? (
-        <div className="mb-1 flex justify-end">{icon}</div>
-      ) : null}
-      <p className="text-3xl font-semibold tabular-nums text-gray-900">
-        {value}
-      </p>
-      <p className="mt-2 text-xs text-gray-500 uppercase tracking-wide">
+    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <p className="text-3xl font-bold tabular-nums text-gray-900">{value}</p>
+      <p className="mt-2 text-xs font-medium uppercase tracking-wide text-gray-500">
         {label}
       </p>
     </div>
   );
 }
 
-function BillingSummaryCard({
-  loading,
-  draft,
-  submitted,
-  paid,
-  deniedPartial,
-  outstandingCents,
+function SecondaryMetricCard({
+  label,
+  value,
 }: {
-  loading: boolean;
-  draft: number;
-  submitted: number;
-  paid: number;
-  deniedPartial: number;
-  outstandingCents: number;
+  label: string;
+  value: string;
 }) {
-  const summaryRows: { key: string; label: string; badge: string }[] = [
-    { key: "draft", label: "Draft", badge: "bg-gray-100 text-gray-600" },
-    {
-      key: "submitted",
-      label: "Submitted",
-      badge: "bg-yellow-50 text-yellow-700",
-    },
-    { key: "paid", label: "Paid", badge: "bg-green-50 text-green-700" },
-    {
-      key: "denied",
-      label: "Denied / Partial",
-      badge: "bg-red-50 text-red-700",
-    },
-  ];
-
   return (
-    <section>
-      <h2 className="mb-1 text-2xl font-semibold text-gray-900">
-        Billing Summary
-      </h2>
-      <p className="mb-4 text-sm tracking-wide text-gray-500">This month</p>
-      <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-        {loading ? (
-          <p className="text-sm text-gray-500">Loading…</p>
-        ) : (
-          <>
-            <div className="space-y-3">
-              {summaryRows.map((r) => (
-                <div
-                  key={r.key}
-                  className="flex items-center justify-between gap-3 text-sm text-gray-700"
-                >
-                  <span>{r.label}</span>
-                  <span
-                    className={`inline-flex min-w-[2rem] justify-center rounded-full px-2.5 py-0.5 text-xs font-medium tabular-nums ${r.badge}`}
-                  >
-                    {r.key === "draft"
-                      ? draft
-                      : r.key === "submitted"
-                        ? submitted
-                        : r.key === "paid"
-                          ? paid
-                          : deniedPartial}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <div className="my-4 border-t border-gray-100" />
-            <div className="flex items-center justify-between gap-3">
-              <span className="text-sm text-gray-600">Total outstanding</span>
-              <span className="text-lg font-semibold tabular-nums text-gray-900">
-                {formatUsdFromCents(outstandingCents)}
-              </span>
-            </div>
-          </>
-        )}
-      </div>
-    </section>
+    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+      <p className="text-2xl font-semibold tabular-nums text-gray-900">
+        {value}
+      </p>
+      <p className="mt-2 text-xs font-medium uppercase tracking-wide text-gray-500">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+function BillingRow({
+  label,
+  value,
+  emphasize,
+  last,
+}: {
+  label: string;
+  value: string;
+  emphasize?: boolean;
+  last?: boolean;
+}) {
+  return (
+    <div
+      className={`flex items-center justify-between gap-4 border-b border-gray-100 py-4 ${last ? "border-b-0" : ""}`}
+    >
+      <span className="text-sm text-gray-500">{label}</span>
+      <span
+        className={`shrink-0 text-right font-semibold tabular-nums text-gray-900 ${emphasize ? "text-base" : "text-sm"}`}
+      >
+        {value}
+      </span>
+    </div>
   );
 }
 
@@ -675,11 +673,11 @@ function AppointmentsLast7DaysChart({
   data,
   loading,
 }: {
-  data: { day: string; west: number; sharpe: number; ymd: string }[];
+  data: { day: string; total: number; ymd: string }[];
   loading: boolean;
 }) {
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-md">
+    <div className="mt-4 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
       {loading ? (
         <p className="text-sm text-gray-500">Loading…</p>
       ) : (
@@ -687,9 +685,13 @@ function AppointmentsLast7DaysChart({
           <BarChart
             data={data}
             margin={{ top: 8, right: 8, left: 0, bottom: 8 }}
-            barCategoryGap="30%"
-            barGap={4}
+            barCategoryGap="28%"
           >
+            <CartesianGrid
+              strokeDasharray="3 3"
+              vertical={false}
+              stroke="#E5E7EB"
+            />
             <XAxis
               dataKey="day"
               axisLine={false}
@@ -701,138 +703,41 @@ function AppointmentsLast7DaysChart({
               axisLine={false}
               tickLine={false}
               tick={{ fill: "#9CA3AF", fontSize: 12 }}
-              width={24}
+              width={28}
             />
             <Tooltip
-              cursor={{ fill: "transparent" }}
+              cursor={{ fill: "rgba(243, 244, 246, 0.6)" }}
               content={({ active, payload }) => {
                 if (!active || !payload?.length) return null;
                 const row = payload[0]?.payload as {
                   day: string;
-                  west: number;
-                  sharpe: number;
+                  total: number;
                   ymd: string;
                 };
                 if (!row) return null;
                 return (
-                  <div className="rounded-xl border border-gray-100 bg-white px-3 py-2 text-sm shadow-md">
+                  <div className="rounded-lg border border-gray-100 bg-white px-3 py-2 text-sm shadow-sm">
                     <p className="font-medium text-gray-900">{row.day}</p>
                     <p className="mt-1 text-gray-600">
-                      Dr. West:{" "}
-                      <span className="font-medium tabular-nums text-gray-900">
-                        {row.west}
-                      </span>
-                    </p>
-                    <p className="text-gray-600">
-                      Dr. Sharpe:{" "}
-                      <span className="font-medium tabular-nums text-gray-900">
-                        {row.sharpe}
+                      Appointments:{" "}
+                      <span className="font-semibold tabular-nums text-gray-900">
+                        {row.total}
                       </span>
                     </p>
                   </div>
                 );
               }}
             />
-            <Legend
-              verticalAlign="bottom"
-              align="center"
-              wrapperStyle={{ paddingTop: 12 }}
-              iconType="circle"
-              iconSize={8}
-              formatter={(value) => (
-                <span className="text-sm text-gray-500">{value}</span>
-              )}
-            />
             <Bar
-              dataKey="west"
-              name="Dr. West"
-              fill="#1A6B8A"
+              dataKey="total"
+              name="Appointments"
+              fill={MUTED_BAR}
               radius={[4, 4, 0, 0]}
-              barSize={28}
-            />
-            <Bar
-              dataKey="sharpe"
-              name="Dr. Sharpe"
-              fill="#7C3AED"
-              radius={[4, 4, 0, 0]}
-              barSize={28}
+              maxBarSize={40}
             />
           </BarChart>
         </ResponsiveContainer>
       )}
-    </div>
-  );
-}
-
-function MiniCalendarStrip({
-  appointments,
-  loading,
-}: {
-  appointments: AppointmentRow[];
-  loading: boolean;
-}) {
-  const todayYmd = getEasternYMD(new Date());
-  const dayKeys = [todayYmd, 1, 2].map((d) =>
-    typeof d === "string" ? d : addDaysToYmd(todayYmd, d),
-  );
-
-  return (
-    <div className="grid grid-cols-1 gap-8 md:grid-cols-3">
-      {dayKeys.map((ymd) => {
-        const rows = appointments
-          .filter((a) => getEasternYMD(new Date(a.start_time)) === ymd)
-          .sort(
-            (a, b) =>
-              new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
-          );
-        const label = new Intl.DateTimeFormat("en-US", {
-          timeZone: "America/New_York",
-          weekday: "short",
-          month: "numeric",
-          day: "numeric",
-        }).format(
-          new Date(
-            Date.UTC(
-              Number(ymd.slice(0, 4)),
-              Number(ymd.slice(5, 7)) - 1,
-              Number(ymd.slice(8, 10)),
-              15,
-              0,
-              0,
-            ),
-          ),
-        );
-
-        return (
-          <div
-            key={ymd}
-            className="rounded-2xl border border-gray-100 bg-white p-5 shadow-sm"
-          >
-            <p className="mb-4 text-sm font-semibold text-gray-900">{label}</p>
-            {loading ? (
-              <p className="text-xs text-gray-500">Loading…</p>
-            ) : rows.length === 0 ? (
-              <p className="text-xs text-gray-400">
-                No appointments scheduled
-              </p>
-            ) : (
-              <div className="space-y-4">
-                {rows.map((row) => (
-                  <div
-                    key={row.id}
-                    className="rounded-xl bg-gray-50 px-3 py-2 text-xs transition-colors hover:bg-gray-100"
-                  >
-                    <p className="font-medium text-gray-900">
-                      {formatTimeEastern(row.start_time)}
-                    </p>
-                    <p className="text-gray-700">{patientName(row)}</p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })}
     </div>
   );
 }
