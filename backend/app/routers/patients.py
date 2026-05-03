@@ -258,6 +258,28 @@ def _related_pi_cases(patient_id: str, clinic_id: str) -> list[dict[str, Any]]:
     return out
 
 
+@router.get("/{patient_id}/surveys")
+def list_patient_surveys(patient_id: str, clinic_id: str = Query(...)):
+    """Return survey_responses for a patient (newest first)."""
+    if not _has_clinic_access(clinic_id, patient_id):
+        raise HTTPException(status_code=404, detail="Patient not found")
+    try:
+        resp = (
+            supabase.table("survey_responses")
+            .select("*")
+            .eq("patient_id", patient_id)
+            .eq("clinic_id", clinic_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return resp.data or []
+
+
 @router.get("")
 def list_patients(clinic_id: str = Query(...)):
     """Return all patients linked to a clinic via patient_clinic_access."""

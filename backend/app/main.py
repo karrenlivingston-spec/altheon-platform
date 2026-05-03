@@ -22,6 +22,7 @@ from app.routers import (
     legal_requests,
     memberships,
     billing as billing_router,
+    surveys,
 )
 from app.routes.legal import router as legal_router
 
@@ -54,6 +55,7 @@ app.include_router(
     billing_router.router, prefix="/billing-records", tags=["billing-payments"]
 )
 app.include_router(legal_router)
+app.include_router(surveys.router)
 
 
 @app.get("/")

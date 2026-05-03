@@ -83,6 +83,19 @@ type MembershipRow = {
   membership_tiers?: { name?: string } | { name?: string }[] | null;
 };
 
+type SurveyResponseRow = {
+  id: string;
+  appointment_id?: string | null;
+  q1_overall?: number | null;
+  q2_pain_relief?: number | null;
+  q3_provider?: number | null;
+  q4_recommend?: number | null;
+  avg_score?: number | null;
+  completed?: boolean | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 const CLINICIAN_WEST_ID = "fb6fa0fc-78f3-48c0-818b-511ad7a8ee93";
 const CLINICIAN_SHARPE_ID = "ee6eaa90-1f90-4af7-85a5-4ae78aea3df7";
 
@@ -128,6 +141,27 @@ function formatUsdFromCents(cents: number | null | undefined): string {
   }).format((Number(cents) || 0) / 100);
 }
 
+function avgScoreColorClass(avg: number): string {
+  if (avg >= 4) return "text-green-600";
+  if (avg >= 3) return "text-amber-600";
+  return "text-red-600";
+}
+
+function formatSurveyDate(row: SurveyResponseRow): string {
+  const raw = row.updated_at || row.created_at;
+  if (!raw) return "—";
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: NY,
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(new Date(raw));
+  } catch {
+    return "—";
+  }
+}
+
 function tierNameFromRow(row: MembershipRow): string {
   const t = row.membership_tiers;
   if (Array.isArray(t)) {
@@ -155,6 +189,7 @@ export default function PatientDetailPage() {
   const [billingRows, setBillingRows] = useState<BillingRow[]>([]);
   const [membershipRows, setMembershipRows] = useState<MembershipRow[]>([]);
   const [piRows, setPiRows] = useState<PiCaseRow[]>([]);
+  const [surveyRows, setSurveyRows] = useState<SurveyResponseRow[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -177,6 +212,7 @@ export default function PatientDetailPage() {
         brRes,
         memRes,
         piRes,
+        surveyRes,
       ] = await Promise.all([
         fetch(
           `${API_BASE}/patients/${encodeURIComponent(patientId)}?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
@@ -192,6 +228,9 @@ export default function PatientDetailPage() {
         ),
         fetch(
           `${API_BASE}/pi-cases?clinic_id=${encodeURIComponent(CLINIC_ID)}&patient_id=${encodeURIComponent(patientId)}`,
+        ),
+        fetch(
+          `${API_BASE}/patients/${encodeURIComponent(patientId)}/surveys?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
         ),
       ]);
 
@@ -225,6 +264,9 @@ export default function PatientDetailPage() {
 
       const piJson = piRes.ok ? await piRes.json() : [];
       setPiRows(Array.isArray(piJson) ? piJson : []);
+
+      const surveyJson = surveyRes.ok ? await surveyRes.json() : [];
+      setSurveyRows(Array.isArray(surveyJson) ? surveyJson : []);
     } catch {
       if (!silent) {
         setError("Could not load patient.");
@@ -253,6 +295,14 @@ export default function PatientDetailPage() {
         new Date(b.start_time).getTime() - new Date(a.start_time).getTime(),
     );
   }, [appointments]);
+
+  const completedSurveys = useMemo(
+    () =>
+      surveyRows.filter(
+        (s) => s.completed === true || String(s.completed).toLowerCase() === "true",
+      ),
+    [surveyRows],
+  );
 
   function setDraftField<K extends keyof PatientRecord>(
     key: K,
@@ -1003,6 +1053,66 @@ export default function PatientDetailPage() {
                 </tbody>
               </table>
             </div>
+          </div>
+
+          <div className="mt-8">
+            <h2 className={DS_SECTION_HEADER}>Surveys</h2>
+            {completedSurveys.length === 0 ? (
+              <p className="mt-2 text-sm text-gray-500">
+                No survey responses yet.
+              </p>
+            ) : (
+              <div className="mt-4 grid gap-6 sm:grid-cols-2">
+                {completedSurveys.map((s) => {
+                  const avg = Number(s.avg_score);
+                  const avgOk = Number.isFinite(avg);
+                  return (
+                    <div key={s.id} className={DS_CARD}>
+                      <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
+                        Date
+                      </p>
+                      <p className="text-sm font-semibold text-gray-900">
+                        {formatSurveyDate(s)}
+                      </p>
+                      <dl className="mt-4 space-y-2 text-sm">
+                        <div className="flex justify-between gap-4">
+                          <dt className="text-gray-500">Overall</dt>
+                          <dd className="font-medium text-gray-900">
+                            {s.q1_overall ?? "—"}/5
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <dt className="text-gray-500">Pain relief</dt>
+                          <dd className="font-medium text-gray-900">
+                            {s.q2_pain_relief ?? "—"}/5
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <dt className="text-gray-500">Provider</dt>
+                          <dd className="font-medium text-gray-900">
+                            {s.q3_provider ?? "—"}/5
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4">
+                          <dt className="text-gray-500">Recommend</dt>
+                          <dd className="font-medium text-gray-900">
+                            {s.q4_recommend ?? "—"}/5
+                          </dd>
+                        </div>
+                        <div className="flex justify-between gap-4 border-t border-gray-100 pt-3">
+                          <dt className="text-gray-700">Avg score</dt>
+                          <dd
+                            className={`font-semibold tabular-nums ${avgOk ? avgScoreColorClass(avg) : "text-gray-900"}`}
+                          >
+                            {avgOk ? `${avg.toFixed(1)}/5` : "—"}
+                          </dd>
+                        </div>
+                      </dl>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
         </div>
       ) : null}

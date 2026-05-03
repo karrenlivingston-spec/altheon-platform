@@ -1,10 +1,13 @@
 import logging
+from datetime import datetime, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.db import supabase
+from app.sms import send_sms
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -111,6 +114,37 @@ def _handle_supabase_error(response: Any) -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
+def _format_confirmation_sms(start_time_iso: str, first_name: str) -> str:
+    s = str(start_time_iso).strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        dt = datetime.now(timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    dt_e = dt.astimezone(ZoneInfo("America/New_York"))
+    day_name = dt_e.strftime("%A")
+    date_part = f"{dt_e.month}/{dt_e.day}/{dt_e.year}"
+    h12 = dt_e.hour % 12 or 12
+    time_part = f"{h12}:{dt_e.minute:02d} {dt_e.strftime('%p')}"
+    fn = (first_name or "there").strip() or "there"
+    return (
+        f"Hi {fn}! Your appointment at Straight To The Point Dry Needling is "
+        f"confirmed for {day_name}, {date_part} at {time_part}. "
+        f"Questions? Call us at 561-772-5799. Reply STOP to opt out."
+    )
+
+
+def _to_e164_us(phone: str) -> str:
+    d = "".join(c for c in (phone or "") if c.isdigit())
+    if len(d) == 10:
+        return f"+1{d}"
+    if len(d) == 11 and d.startswith("1"):
+        return f"+{d}"
+    p = (phone or "").strip()
+    return p if p.startswith("+") else f"+{d}"
+
+
 @router.post("")
 def create_appointment(payload: CreateAppointmentRequest):
     try:
@@ -212,8 +246,38 @@ def create_appointment(payload: CreateAppointmentRequest):
     if not appointment_rows:
         raise HTTPException(status_code=500, detail="Failed to create appointment")
 
+    appointment_id = str(appointment_rows[0]["id"])
+
+    try:
+        pt_msg = (
+            supabase.table("patients")
+            .select("first_name, phone")
+            .eq("id", patient_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(pt_msg)
+        prow = (pt_msg.data or [{}])[0]
+        phone_out = prow.get("phone") or payload.patient_phone
+        fname = (prow.get("first_name") or payload.patient_first_name or "").strip()
+        if phone_out:
+            body = _format_confirmation_sms(payload.start_time, fname)
+            send_sms(
+                _to_e164_us(str(phone_out)),
+                body,
+                patient_id=str(patient_id),
+                appointment_id=appointment_id,
+                message_type="confirmation",
+            )
+    except Exception:
+        logger.exception(
+            "confirmation SMS failed appointment_id=%s patient_id=%s",
+            appointment_id,
+            patient_id,
+        )
+
     return {
         "success": True,
-        "appointment_id": appointment_rows[0]["id"],
+        "appointment_id": appointment_id,
         "patient_id": patient_id,
     }

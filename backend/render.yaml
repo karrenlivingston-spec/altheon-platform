@@ -1,0 +1,11 @@
+# Render.com — optional Blueprint / reference (see Render docs for your account).
+#
+# --- Cron job: daily survey SMS at 7 PM Eastern team window ---
+# In the Render Dashboard: New → Cron Job (or add to this file per Render cron spec).
+#
+#   Command:  curl -f -X POST https://altheon-platform.onrender.com/send-survey-sms
+#   Schedule: 0 23 * * *
+#   (23:00 UTC — align with your practice’s Eastern-time policy; adjust for DST if needed.)
+#
+# Ensure the web service has env: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN,
+# TWILIO_MESSAGING_SERVICE_SID, SUPABASE_*, etc.
