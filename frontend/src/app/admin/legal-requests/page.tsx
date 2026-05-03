@@ -130,11 +130,24 @@ export default function AdminLegalRequestsPage() {
   async function patchStatus(id: string, status: "in_progress" | "completed") {
     setUpdatingIds((p) => ({ ...p, [id]: true }));
     try {
-      await fetch(`${API_BASE}/legal-requests/${encodeURIComponent(id)}/status`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+      const params = new URLSearchParams({
+        clinic_id: CLINIC_ID,
       });
+      const res = await fetch(
+        `${API_BASE}/legal-requests/${encodeURIComponent(id)}/status?${params.toString()}`,
+        {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status }),
+        },
+      );
+      if (!res.ok) {
+        setFetchNote(
+          `Status update failed (HTTP ${res.status}). ${await res.text().catch(() => "")}`.trim(),
+        );
+        return;
+      }
+      setFetchNote(null);
       await refreshRows();
     } finally {
       setUpdatingIds((p) => {
@@ -277,7 +290,11 @@ export default function AdminLegalRequestsPage() {
                             </button>
                           ) : null}
                           {st === "completed" ? (
-                            <span className="text-xs text-gray-400">—</span>
+                            <span
+                              className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${statusPillClass("completed")}`}
+                            >
+                              Completed
+                            </span>
                           ) : null}
                         </div>
                       </td>
