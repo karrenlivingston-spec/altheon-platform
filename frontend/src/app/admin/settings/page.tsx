@@ -49,11 +49,19 @@ type ClinicSettingsRow = {
   providers?: unknown;
 };
 
-type ProviderDisplay = {
+type ProviderRow = {
+  id: string;
   name: string;
   specialty: string;
   color: string;
 };
+
+const DEFAULT_PROVIDER_COLOR = "#1A6B8A";
+
+type ProviderEditorState =
+  | { open: false }
+  | { open: true; mode: "add"; id: string }
+  | { open: true; mode: "edit"; id: string };
 
 type BillingModelId = "cash_pay" | "insurance" | "hybrid";
 
@@ -149,25 +157,54 @@ function normalizeBillingModel(raw: string | null | undefined): BillingModelId {
   return "cash_pay";
 }
 
-function parseProviders(raw: unknown): ProviderDisplay[] {
+function normalizeHexColor(s: string): string {
+  const t = s.trim();
+  if (/^#[0-9A-Fa-f]{6}$/.test(t)) return t.toUpperCase();
+  if (/^#[0-9A-Fa-f]{3}$/.test(t)) {
+    const r = t[1],
+      g = t[2],
+      b = t[3];
+    return `#${r}${r}${g}${g}${b}${b}`.toUpperCase();
+  }
+  return DEFAULT_PROVIDER_COLOR;
+}
+
+function parseProviders(raw: unknown): ProviderRow[] {
   if (!Array.isArray(raw)) return [];
   return raw.map((p) => {
     if (!p || typeof p !== "object") {
-      return { name: "—", specialty: "—", color: "#9CA3AF" };
+      return {
+        id: crypto.randomUUID(),
+        name: "—",
+        specialty: "—",
+        color: DEFAULT_PROVIDER_COLOR,
+      };
     }
     const o = p as Record<string, unknown>;
+    const rawId = typeof o.id === "string" ? o.id.trim() : "";
+    const id = rawId || crypto.randomUUID();
     const color =
       typeof o.color === "string" && o.color.trim()
-        ? o.color
+        ? normalizeHexColor(o.color)
         : typeof o.hex === "string" && o.hex.trim()
-          ? o.hex
-          : "#1A6B8A";
+          ? normalizeHexColor(o.hex)
+          : DEFAULT_PROVIDER_COLOR;
     return {
+      id,
       name: typeof o.name === "string" ? o.name : "—",
       specialty: typeof o.specialty === "string" ? o.specialty : "—",
       color,
     };
   });
+}
+
+function providersToPayload(list: ProviderRow[]): ProviderRow[] {
+  return list.map((p) => ({
+    id: p.id,
+    name: p.name.trim() || "Untitled",
+    specialty: p.specialty.trim(),
+    color: normalizeHexColor(p.color),
+  }));
 }
 
 function pickChangedClinicFields(
@@ -202,18 +239,27 @@ export default function AdminSettingsPage() {
   const [billingBaseline, setBillingBaseline] = useState<BillingModelId | null>(null);
   const [timezone, setTimezone] = useState<string>("America/New_York");
   const [timezoneBaseline, setTimezoneBaseline] = useState<string | null>(null);
-  const [providers, setProviders] = useState<ProviderDisplay[]>([]);
+  const [providers, setProviders] = useState<ProviderRow[]>([]);
+
+  const [providerEditor, setProviderEditor] = useState<ProviderEditorState>({
+    open: false,
+  });
+  const [editorName, setEditorName] = useState("");
+  const [editorSpecialty, setEditorSpecialty] = useState("");
+  const [editorColor, setEditorColor] = useState(DEFAULT_PROVIDER_COLOR);
 
   const [savingClinic, setSavingClinic] = useState(false);
   const [savingHours, setSavingHours] = useState(false);
   const [savingBilling, setSavingBilling] = useState(false);
   const [savingTz, setSavingTz] = useState(false);
+  const [savingProviders, setSavingProviders] = useState(false);
   const [sectionError, setSectionError] = useState<string | null>(null);
 
   const [clinicSavedMsg, setClinicSavedMsg] = useState(false);
   const [hoursSavedMsg, setHoursSavedMsg] = useState(false);
   const [billingSavedMsg, setBillingSavedMsg] = useState(false);
   const [tzSavedMsg, setTzSavedMsg] = useState(false);
+  const [providersSavedMsg, setProvidersSavedMsg] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -281,7 +327,9 @@ export default function AdminSettingsPage() {
   const billingDirty = billingBaseline !== null && billingModel !== billingBaseline;
   const tzDirty = timezoneBaseline !== null && timezone !== timezoneBaseline;
 
-  async function patchBody(body: Record<string, unknown>): Promise<boolean> {
+  async function patchBody(
+    body: Record<string, unknown>,
+  ): Promise<ClinicSettingsRow | null> {
     setSectionError(null);
     const res = await fetch(
       `${API_BASE}/clinic-settings/${encodeURIComponent(CLINIC_ID)}`,
@@ -296,10 +344,15 @@ export default function AdminSettingsPage() {
       setSectionError(
         detail ? `Save failed (${res.status}): ${detail.slice(0, 200)}` : `Save failed (${res.status})`,
       );
-      return false;
+      return null;
     }
-    const updated = (await res.json()) as ClinicSettingsRow;
-    return Boolean(updated);
+    return (await res.json()) as ClinicSettingsRow;
+  }
+
+  function syncProvidersFromRow(row: ClinicSettingsRow) {
+    if (row.providers !== undefined) {
+      setProviders(parseProviders(row.providers));
+    }
   }
 
   function flashSaved(setter: (v: boolean) => void) {
@@ -313,9 +366,10 @@ export default function AdminSettingsPage() {
     if (Object.keys(changed).length === 0) return;
     setSavingClinic(true);
     try {
-      const ok = await patchBody(changed);
-      if (ok) {
+      const updated = await patchBody(changed);
+      if (updated) {
         setClinicInfoBaseline({ ...clinicInfo });
+        syncProvidersFromRow(updated);
         flashSaved(setClinicSavedMsg);
       }
     } finally {
@@ -330,9 +384,10 @@ export default function AdminSettingsPage() {
     }
     setSavingHours(true);
     try {
-      const ok = await patchBody({ business_hours: payload });
-      if (ok) {
+      const updated = await patchBody({ business_hours: payload });
+      if (updated) {
         setHoursBaseline(JSON.parse(JSON.stringify(hours)) as Record<DayKey, DayHours>);
+        syncProvidersFromRow(updated);
         flashSaved(setHoursSavedMsg);
       }
     } finally {
@@ -343,9 +398,10 @@ export default function AdminSettingsPage() {
   async function handleSaveBilling() {
     setSavingBilling(true);
     try {
-      const ok = await patchBody({ billing_model: billingModel });
-      if (ok) {
+      const updated = await patchBody({ billing_model: billingModel });
+      if (updated) {
         setBillingBaseline(billingModel);
+        syncProvidersFromRow(updated);
         flashSaved(setBillingSavedMsg);
       }
     } finally {
@@ -356,13 +412,102 @@ export default function AdminSettingsPage() {
   async function handleSaveTimezone() {
     setSavingTz(true);
     try {
-      const ok = await patchBody({ timezone });
-      if (ok) {
+      const updated = await patchBody({ timezone });
+      if (updated) {
         setTimezoneBaseline(timezone);
+        syncProvidersFromRow(updated);
         flashSaved(setTzSavedMsg);
       }
     } finally {
       setSavingTz(false);
+    }
+  }
+
+  function openAddProvider() {
+    setProviderEditor({ open: true, mode: "add", id: crypto.randomUUID() });
+    setEditorName("");
+    setEditorSpecialty("");
+    setEditorColor(DEFAULT_PROVIDER_COLOR);
+    setSectionError(null);
+  }
+
+  function openEditProvider(p: ProviderRow) {
+    setProviderEditor({ open: true, mode: "edit", id: p.id });
+    setEditorName(p.name === "—" ? "" : p.name);
+    setEditorSpecialty(p.specialty === "—" ? "" : p.specialty);
+    setEditorColor(p.color);
+    setSectionError(null);
+  }
+
+  function closeProviderEditor() {
+    setProviderEditor({ open: false });
+  }
+
+  async function saveProviderEditor() {
+    if (!providerEditor.open) return;
+    const nameTrim = editorName.trim();
+    if (!nameTrim) {
+      setSectionError("Provider name is required.");
+      return;
+    }
+    const color = normalizeHexColor(editorColor);
+    const specialty = editorSpecialty.trim();
+    setSavingProviders(true);
+    setSectionError(null);
+    try {
+      let next: ProviderRow[];
+      if (providerEditor.mode === "add") {
+        next = [
+          ...providers,
+          {
+            id: providerEditor.id,
+            name: nameTrim,
+            specialty,
+            color,
+          },
+        ];
+      } else {
+        next = providers.map((p) =>
+          p.id === providerEditor.id
+            ? { ...p, name: nameTrim, specialty, color }
+            : p,
+        );
+      }
+      const updated = await patchBody({
+        providers: providersToPayload(next),
+      });
+      if (updated) {
+        syncProvidersFromRow(updated);
+        closeProviderEditor();
+        flashSaved(setProvidersSavedMsg);
+      }
+    } finally {
+      setSavingProviders(false);
+    }
+  }
+
+  function confirmRemoveProvider(p: ProviderRow) {
+    const ok = window.confirm(
+      "Are you sure you want to remove this provider?",
+    );
+    if (!ok) return;
+    void removeProvider(p.id);
+  }
+
+  async function removeProvider(id: string) {
+    setSavingProviders(true);
+    setSectionError(null);
+    try {
+      const next = providers.filter((p) => p.id !== id);
+      const updated = await patchBody({
+        providers: providersToPayload(next),
+      });
+      if (updated) {
+        syncProvidersFromRow(updated);
+        flashSaved(setProvidersSavedMsg);
+      }
+    } finally {
+      setSavingProviders(false);
     }
   }
 
@@ -678,28 +823,173 @@ export default function AdminSettingsPage() {
           {providers.length === 0 ? (
             <li className="py-4 text-sm text-gray-500">No providers listed.</li>
           ) : (
-            providers.map((p, i) => (
+            providers.map((p) => (
               <li
-                key={`${p.name}-${i}`}
-                className="flex items-center gap-3 py-3 first:pt-0"
+                key={p.id}
+                className="flex flex-col gap-3 py-4 first:pt-0 sm:flex-row sm:items-center sm:justify-between"
               >
-                <span
-                  className="h-3 w-3 shrink-0 rounded-full border border-gray-200"
-                  style={{ backgroundColor: p.color }}
-                  aria-hidden
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-gray-900">{p.name}</p>
-                  <p className="text-xs text-gray-500">{p.specialty}</p>
+                <div className="flex min-w-0 flex-1 items-center gap-3">
+                  <span
+                    className="h-3 w-3 shrink-0 rounded-full border border-gray-200"
+                    style={{ backgroundColor: p.color }}
+                    aria-hidden
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-900">{p.name}</p>
+                    <p className="text-xs text-gray-500">{p.specialty}</p>
+                  </div>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2 sm:justify-end">
+                  <button
+                    type="button"
+                    disabled={!clinicInfoBaseline || savingProviders}
+                    onClick={() => openEditProvider(p)}
+                    className="rounded-xl border border-gray-100 px-3 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:opacity-50"
+                  >
+                    Edit
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!clinicInfoBaseline || savingProviders}
+                    onClick={() => confirmRemoveProvider(p)}
+                    className="rounded-xl border border-red-100 bg-red-50/50 px-3 py-1.5 text-sm font-medium text-red-700 transition-colors hover:border-red-200 hover:bg-red-50 disabled:opacity-50"
+                  >
+                    Remove
+                  </button>
                 </div>
               </li>
             ))
           )}
         </ul>
-        <p className="mt-4 text-sm text-gray-500">
-          To add or modify providers contact your Altheon administrator.
-        </p>
+        <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-gray-100 pt-5">
+          <button
+            type="button"
+            disabled={!clinicInfoBaseline || savingProviders}
+            onClick={() => openAddProvider()}
+            className="rounded-xl border border-gray-100 px-4 py-2 text-sm font-medium text-gray-700 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:opacity-50"
+          >
+            + Add Provider
+          </button>
+          {providersSavedMsg ? (
+            <span className="text-sm font-medium text-green-600">Saved</span>
+          ) : null}
+        </div>
       </section>
+
+      {providerEditor.open ? (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget && !savingProviders) {
+              closeProviderEditor();
+            }
+          }}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-gray-100 bg-white p-6 shadow-lg"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="provider-editor-title"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <h3
+              id="provider-editor-title"
+              className="text-lg font-semibold text-gray-900"
+            >
+              {providerEditor.mode === "add" ? "Add provider" : "Edit provider"}
+            </h3>
+            <div className="mt-5 space-y-4">
+              <div>
+                <label
+                  htmlFor="provider-name"
+                  className="text-xs font-medium uppercase tracking-wide text-gray-500"
+                >
+                  Name
+                </label>
+                <input
+                  id="provider-name"
+                  type="text"
+                  className={INPUT_CLASS}
+                  value={editorName}
+                  onChange={(e) => setEditorName(e.target.value)}
+                  disabled={savingProviders}
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="provider-specialty"
+                  className="text-xs font-medium uppercase tracking-wide text-gray-500"
+                >
+                  Specialty
+                </label>
+                <input
+                  id="provider-specialty"
+                  type="text"
+                  className={INPUT_CLASS}
+                  value={editorSpecialty}
+                  onChange={(e) => setEditorSpecialty(e.target.value)}
+                  disabled={savingProviders}
+                  autoComplete="off"
+                />
+              </div>
+              <div>
+                <span className="text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Color
+                </span>
+                <div className="mt-2 flex flex-wrap items-center gap-3">
+                  <span
+                    className="h-10 w-10 shrink-0 rounded-lg border border-gray-200 shadow-inner"
+                    style={{
+                      backgroundColor: normalizeHexColor(editorColor),
+                    }}
+                    aria-hidden
+                  />
+                  <input
+                    type="color"
+                    className="h-10 w-14 cursor-pointer rounded-lg border border-gray-100 bg-white p-0.5"
+                    value={normalizeHexColor(editorColor)}
+                    onChange={(e) => setEditorColor(e.target.value.toUpperCase())}
+                    disabled={savingProviders}
+                    aria-label="Pick color"
+                  />
+                  <input
+                    type="text"
+                    className={`${INPUT_CLASS} mt-0 max-w-[9rem]`}
+                    value={editorColor}
+                    onChange={(e) => setEditorColor(e.target.value)}
+                    onBlur={() =>
+                      setEditorColor(normalizeHexColor(editorColor))
+                    }
+                    disabled={savingProviders}
+                    placeholder="#1A6B8A"
+                    spellCheck={false}
+                  />
+                </div>
+              </div>
+            </div>
+            <div className="mt-6 flex flex-wrap gap-3 border-t border-gray-100 pt-5">
+              <button
+                type="button"
+                disabled={savingProviders}
+                onClick={() => void saveProviderEditor()}
+                className="rounded-xl bg-[#1F7A47] px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+              >
+                {savingProviders ? "Saving…" : "Save"}
+              </button>
+              <button
+                type="button"
+                disabled={savingProviders}
+                onClick={closeProviderEditor}
+                className="rounded-xl border border-gray-100 px-4 py-2 text-sm font-medium text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-900 disabled:opacity-50"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {/* Section 5 — Timezone */}
       <section className="mb-8 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
