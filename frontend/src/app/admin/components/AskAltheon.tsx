@@ -83,11 +83,11 @@ export default function AskAltheon() {
         aria-label="Ask Altheon"
         onClick={() => setIsOpen((o) => !o)}
         className={[
-          "fixed bottom-6 right-6 z-50 flex h-14 w-14 items-center justify-center rounded-full bg-[#1a6b3c] text-white shadow-lg transition-shadow hover:shadow-xl",
+          "fixed bottom-6 right-6 z-50 flex h-10 w-10 items-center justify-center rounded-full bg-[#1a6b3c] text-white opacity-80 shadow-lg transition-opacity duration-200 hover:opacity-100",
           !isOpen && messages.length === 0 ? "animate-pulse" : "",
         ].join(" ")}
       >
-        <Sparkles className="h-6 w-6 shrink-0" aria-hidden />
+        <Sparkles className="h-5 w-5 shrink-0" aria-hidden />
       </button>
 
       {isOpen ? (

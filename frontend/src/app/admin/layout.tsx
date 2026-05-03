@@ -92,9 +92,9 @@ function AdminAuthenticatedShell({
   function navLinkClass(href: string) {
     const active = isNavLinkActive(href);
     return [
-      "block rounded-lg border-l-2 py-3 pl-3 pr-4 text-sm font-medium transition-colors duration-150",
+      "block rounded-lg border-l-2 py-3 pl-3 pr-4 text-sm font-medium transition-all duration-200",
       active
-        ? "border-green-500 bg-white/5 text-white"
+        ? "border-green-400 bg-white/5 text-white"
         : "border-transparent text-[#94A3B8] hover:bg-[rgba(255,255,255,0.05)]",
     ].join(" ");
   }
@@ -156,11 +156,11 @@ function AdminAuthenticatedShell({
       <div className="flex min-h-screen">
         <aside
           className={[
-            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-slate-800/80 text-white transition-transform duration-200 md:static md:translate-x-0",
+            "fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-white/5 text-white transition-transform duration-200 md:static md:translate-x-0",
             sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           ].join(" ")}
           style={{
-            background: "linear-gradient(180deg, #0F172A 0%, #020617 100%)",
+            background: "linear-gradient(180deg, #0B1A2B 0%, #0E2238 100%)",
           }}
         >
           <div className="flex items-center gap-2 px-4 py-5">

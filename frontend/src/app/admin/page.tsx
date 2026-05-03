@@ -133,14 +133,6 @@ function headerSubtitleEastern(now: Date): string {
   return `West Palm Beach · ${line}`;
 }
 
-function appointmentStatusBadgeClass(status: string): string {
-  const s = status.toLowerCase();
-  if (s === "scheduled" || s === "confirmed" || s === "checked_in") {
-    return "bg-green-50 text-green-700";
-  }
-  return "bg-gray-100 text-gray-600";
-}
-
 const FOCUS_NEXT_FALLBACK = "Next: Brandon West · Mon 10:30 AM";
 
 function formatNextAppointmentLine(row: AppointmentRow | null): string {
@@ -436,6 +428,21 @@ export default function AdminOverviewPage() {
     return rows;
   }, [appointments]);
 
+  const chartWeekInsight = useMemo(() => {
+    const rows = appointmentsLast7DaysChart;
+    if (rows.length === 0) return "";
+    let max = -1;
+    let day = "";
+    for (const r of rows) {
+      if (r.total > max) {
+        max = r.total;
+        day = r.day;
+      }
+    }
+    if (max <= 0) return "No appointments in the last 7 days.";
+    return `${day} had the highest volume this week`;
+  }, [appointmentsLast7DaysChart]);
+
   const ariaLine =
     ariaOnline === true
       ? "Aria · Online"
@@ -543,31 +550,40 @@ export default function AdminOverviewPage() {
             </p>
           ) : (
             <ul>
-              {upcomingAppointments.map((row) => (
-                <li
-                  key={row.id}
-                  className={`flex gap-4 border-b border-gray-100 py-5 pl-3 last:border-b-0 ${clinicianRowAccentClass(row.clinician_id)}`}
-                >
-                  <div className="w-16 shrink-0 text-sm font-bold text-gray-900">
-                    {formatTimeEastern(row.start_time)}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
+              {upcomingAppointments.map((row) => {
+                const st = String(row.status ?? "").toLowerCase();
+                const statusPositive =
+                  st === "scheduled" ||
+                  st === "confirmed" ||
+                  st === "checked_in";
+                return (
+                  <li
+                    key={row.id}
+                    className={`flex items-center gap-4 border-b border-gray-100 py-4 pl-3 last:border-b-0 ${clinicianRowAccentClass(row.clinician_id)}`}
+                  >
+                    <div className="w-16 shrink-0 text-sm font-semibold text-gray-900">
+                      {formatTimeEastern(row.start_time)}
+                    </div>
+                    <div className="min-w-0 flex-1">
                       <p className="text-sm font-medium text-gray-900">
                         {patientName(row)}
                       </p>
-                      <span
-                        className={`rounded-md px-2 py-0.5 text-xs font-medium ${appointmentStatusBadgeClass(row.status)}`}
-                      >
-                        {row.status || "—"}
-                      </span>
+                      <p className="mt-0.5 text-xs text-gray-400">
+                        {serviceName(row)} · {clinicianLabel(row.clinician_id)}
+                      </p>
                     </div>
-                    <p className="mt-0.5 text-xs text-gray-400">
-                      {serviceName(row)} · {clinicianLabel(row.clinician_id)}
-                    </p>
-                  </div>
-                </li>
-              ))}
+                    <span
+                      className={
+                        statusPositive
+                          ? "shrink-0 rounded-full bg-green-50 px-2.5 py-0.5 text-xs font-medium text-green-700"
+                          : "shrink-0 rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-600"
+                      }
+                    >
+                      {row.status || "—"}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </section>
@@ -604,18 +620,20 @@ export default function AdminOverviewPage() {
               <BillingRow
                 label="Outstanding"
                 value={formatUsdFromCents(totalOutstandingThisMonthCents)}
-                last
               />
             </div>
           )}
         </section>
       </div>
 
-      <section className="mt-6">
+      <section className="mt-4">
         <h2 className="text-sm font-semibold text-gray-900">
           Appointments — last 7 days
         </h2>
         <p className="mt-0.5 text-sm text-gray-500">Daily volume</p>
+        {!loading && chartWeekInsight ? (
+          <p className="mt-0.5 text-xs text-gray-400">{chartWeekInsight}</p>
+        ) : null}
         <AppointmentsLast7DaysChart
           data={appointmentsLast7DaysChart}
           loading={loading}
@@ -627,11 +645,13 @@ export default function AdminOverviewPage() {
 
 function PrimaryMetricCard({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm transition-shadow duration-150 hover:shadow-md">
+    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
       <p className="text-4xl font-bold tracking-tight tabular-nums text-gray-900">
         {value}
       </p>
-      <p className="mt-2 text-xs text-gray-400">{label}</p>
+      <p className="mt-2 text-xs font-normal uppercase tracking-widest text-gray-400">
+        {label}
+      </p>
     </div>
   );
 }
@@ -644,11 +664,13 @@ function SecondaryMetricCard({
   value: string;
 }) {
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm transition-shadow duration-150 hover:shadow-md">
-      <p className="text-2xl font-semibold tracking-tight tabular-nums text-gray-900">
+    <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
+      <p className="text-4xl font-bold tracking-tight tabular-nums text-gray-900">
         {value}
       </p>
-      <p className="mt-2 text-xs text-gray-400">{label}</p>
+      <p className="mt-2 text-xs font-normal uppercase tracking-widest text-gray-400">
+        {label}
+      </p>
     </div>
   );
 }
@@ -657,28 +679,24 @@ function BillingRow({
   label,
   value,
   emphasize,
-  last,
 }: {
   label: string;
   value: string;
   emphasize?: boolean;
-  last?: boolean;
 }) {
   return (
-    <div
-      className={`flex items-center justify-between gap-4 border-b border-gray-100 py-2.5 ${last ? "border-b-0" : ""}`}
-    >
+    <div className="flex items-center justify-between gap-4 py-2.5">
       <span
         className={
           emphasize
-            ? "text-sm font-semibold text-gray-900"
+            ? "text-sm font-bold text-gray-900"
             : "text-sm font-medium text-gray-500"
         }
       >
         {label}
       </span>
       <span
-        className={`shrink-0 text-right tabular-nums text-gray-900 ${emphasize ? "text-base font-semibold" : "text-sm font-medium"}`}
+        className={`shrink-0 text-right tabular-nums text-gray-900 ${emphasize ? "text-sm font-bold" : "text-sm font-semibold"}`}
       >
         {value}
       </span>
@@ -694,11 +712,11 @@ function AppointmentsLast7DaysChart({
   loading: boolean;
 }) {
   return (
-    <div className="mt-2 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+    <div className="mt-2 rounded-2xl border border-gray-100 bg-white p-6 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:shadow-md">
       {loading ? (
         <p className="text-sm text-gray-500">Loading…</p>
       ) : (
-        <ResponsiveContainer width="100%" height={208}>
+        <ResponsiveContainer width="100%" height={176}>
           <BarChart
             data={data}
             margin={{ top: 8, right: 8, left: 0, bottom: 8 }}
