@@ -8,8 +8,6 @@ import { supabase } from "@/lib/supabase";
 const INPUT_CLASS =
   "w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm text-gray-900 transition-all duration-150 placeholder:text-gray-400 focus:border-[#16A34A] focus:outline-none focus:ring-2 focus:ring-green-500/20";
 
-const CARD_SHADOW = "0 4px 24px rgba(0,0,0,0.06)";
-
 export default function AdminLoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
@@ -50,7 +48,7 @@ export default function AdminLoginPage() {
           className="pointer-events-none absolute inset-0 z-0"
           style={{
             background:
-              "radial-gradient(circle at 50% 40%, rgba(34,197,94,0.18) 0%, rgba(34,197,94,0.08) 30%, transparent 65%)",
+              "radial-gradient(circle at 50% 42%, rgba(34,197,94,0.12) 0%, rgba(34,197,94,0.05) 35%, transparent 65%)",
           }}
           aria-hidden
         />
@@ -70,12 +68,8 @@ export default function AdminLoginPage() {
         >
           {leftBrandAsset === "text" ? (
             <p
-              className="text-center text-white"
-              style={{
-                fontSize: 48,
-                fontWeight: 800,
-                letterSpacing: "-1.5px",
-              }}
+              className="text-center text-5xl font-bold text-white"
+              style={{ letterSpacing: "-1.5px" }}
             >
               Altheon
             </p>
@@ -87,9 +81,9 @@ export default function AdminLoginPage() {
                   : "/altheon-logo-white.svg"
               }
               alt="Altheon"
-              width={220}
-              height={73}
-              className="mx-auto w-[220px] max-w-full object-contain opacity-100"
+              width={308}
+              height={102}
+              className="mx-auto w-[308px] max-w-full object-contain opacity-100"
               onError={() =>
                 setLeftBrandAsset((s) => (s === "png" ? "svg" : "text"))
               }
@@ -106,10 +100,7 @@ export default function AdminLoginPage() {
 
       {/* Right — auth */}
       <div className="flex min-h-screen flex-1 flex-col items-center justify-center bg-[#F8FAFC] px-6 py-12 md:py-8">
-        <div
-          className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-10"
-          style={{ boxShadow: CARD_SHADOW }}
-        >
+        <div className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-10 shadow-lg">
           <div
             style={{
               display: "flex",
@@ -119,14 +110,11 @@ export default function AdminLoginPage() {
               marginBottom: 24,
             }}
           >
-            <span
-              className="text-2xl font-bold tracking-tight"
-              style={{ color: "#0F172A" }}
-            >
+            <span className="text-center text-sm font-semibold uppercase tracking-widest text-gray-400">
               Altheon
             </span>
           </div>
-          <h1 className="text-center text-xl font-semibold text-gray-900">
+          <h1 className="mt-2 text-center text-2xl font-bold text-gray-900">
             Sign in to your dashboard
           </h1>
           <p className="mb-8 mt-1 text-center text-sm text-gray-500">
@@ -181,7 +169,7 @@ export default function AdminLoginPage() {
             <button
               type="submit"
               disabled={submitting}
-              className="mt-6 w-full rounded-lg bg-[#16A34A] py-2.5 text-sm font-medium text-white shadow-sm transition-all duration-150 hover:bg-[#15803D] hover:shadow-md active:bg-[#14532D] disabled:opacity-60"
+              className="mt-6 w-full rounded-lg bg-[#16A34A] py-2.5 text-sm font-medium text-white shadow-sm transition-all duration-150 hover:bg-[#15803D] hover:shadow-md active:scale-[0.98] active:bg-[#14532D] disabled:opacity-60"
             >
               {submitting ? "Signing in…" : "Sign In"}
             </button>
