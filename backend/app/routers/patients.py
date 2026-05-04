@@ -3,6 +3,7 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Query
 
+from app.constants import STTPDN_CLINIC_ID
 from app.db import supabase
 
 router = APIRouter()
@@ -77,15 +78,14 @@ def _has_clinic_access(clinic_id: str, patient_id: str) -> bool:
     return bool(resp.data)
 
 
-def _fetch_patient_row(patient_id: str) -> Optional[dict[str, Any]]:
+def _fetch_patient_row(
+    patient_id: str, *, restrict_clinic_id: Optional[str] = None
+) -> Optional[dict[str, Any]]:
     try:
-        resp = (
-            supabase.table("patients")
-            .select("*")
-            .eq("id", patient_id)
-            .limit(1)
-            .execute()
-        )
+        q = supabase.table("patients").select("*").eq("id", patient_id)
+        if restrict_clinic_id is not None:
+            q = q.eq("clinic_id", restrict_clinic_id)
+        resp = q.limit(1).execute()
         _handle_supabase_error(resp)
     except HTTPException:
         raise
@@ -282,12 +282,14 @@ def list_patient_surveys(patient_id: str, clinic_id: str = Query(...)):
 
 @router.get("")
 def list_patients(clinic_id: str = Query(...)):
-    """Return all patients linked to a clinic via patient_clinic_access."""
+    """Return patients scoped to STTPDN clinic (clinic_id on patient row)."""
+    if clinic_id != STTPDN_CLINIC_ID:
+        return []
     try:
         resp = (
-            supabase.table("patient_clinic_access")
-            .select("patients(*)")
-            .eq("clinic_id", clinic_id)
+            supabase.table("patients")
+            .select("*")
+            .eq("clinic_id", STTPDN_CLINIC_ID)
             .execute()
         )
         _handle_supabase_error(resp)
@@ -296,22 +298,66 @@ def list_patients(clinic_id: str = Query(...)):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    rows = resp.data or []
-    patients = []
-    for row in rows:
-        p = row.get("patients")
-        if isinstance(p, dict):
-            patients.append(p)
-        elif isinstance(p, list):
-            patients.extend(x for x in p if isinstance(x, dict))
-    return patients
+    return resp.data or []
+
+
+@router.post("", status_code=201)
+def create_patient(body: dict = Body(...)):
+    """Create a patient row with clinic_id set to STTPDN and clinic access."""
+    first_name = (body.get("first_name") or "").strip()
+    last_name = (body.get("last_name") or "").strip()
+    if not first_name or not last_name:
+        raise HTTPException(
+            status_code=400, detail="first_name and last_name are required"
+        )
+
+    insert_data: dict[str, Any] = {
+        "first_name": first_name,
+        "last_name": last_name,
+        "clinic_id": STTPDN_CLINIC_ID,
+    }
+    for key in _PATCHABLE_PATIENT_FIELDS:
+        if key in ("first_name", "last_name"):
+            continue
+        if key in body and body[key] is not None:
+            insert_data[key] = body[key]
+
+    try:
+        ins = supabase.table("patients").insert(insert_data).execute()
+        _handle_supabase_error(ins)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    rows = ins.data or []
+    if not rows:
+        raise HTTPException(status_code=500, detail="Failed to create patient")
+    new_row = dict(rows[0])
+    patient_id = str(new_row["id"])
+
+    try:
+        access_ins = (
+            supabase.table("patient_clinic_access")
+            .insert(
+                {"patient_id": patient_id, "clinic_id": STTPDN_CLINIC_ID}
+            )
+            .execute()
+        )
+        _handle_supabase_error(access_ins)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return _normalize_patient_row(new_row)
 
 
 @router.get("/{patient_id}")
 def get_patient(patient_id: str, clinic_id: str = Query(...)):
     if not _has_clinic_access(clinic_id, patient_id):
         raise HTTPException(status_code=404, detail="Patient not found")
-    row = _fetch_patient_row(patient_id)
+    row = _fetch_patient_row(patient_id, restrict_clinic_id=STTPDN_CLINIC_ID)
     if not row:
         raise HTTPException(status_code=404, detail="Patient not found")
     return _normalize_patient_row(row)
@@ -321,12 +367,14 @@ def get_patient(patient_id: str, clinic_id: str = Query(...)):
 def patch_patient(patient_id: str, clinic_id: str = Query(...), body: dict = Body(...)):
     if not _has_clinic_access(clinic_id, patient_id):
         raise HTTPException(status_code=404, detail="Patient not found")
-    existing = _fetch_patient_row(patient_id)
+    existing = _fetch_patient_row(patient_id, restrict_clinic_id=STTPDN_CLINIC_ID)
     if not existing:
         raise HTTPException(status_code=404, detail="Patient not found")
 
     update_data: dict[str, Any] = {}
     for key, val in body.items():
+        if key == "clinic_id":
+            continue
         if key not in _PATCHABLE_PATIENT_FIELDS:
             continue
         update_data[key] = val
@@ -338,6 +386,7 @@ def patch_patient(patient_id: str, clinic_id: str = Query(...), body: dict = Bod
                 supabase.table("patients")
                 .update(update_data)
                 .eq("id", patient_id)
+                .eq("clinic_id", STTPDN_CLINIC_ID)
                 .execute()
             )
             _handle_supabase_error(upd)

@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from app.constants import STTPDN_CLINIC_ID
 from app.db import supabase
 from app.sms import send_sms
 
@@ -174,6 +175,7 @@ def create_appointment(payload: CreateAppointmentRequest):
                         "last_name": payload.patient_last_name,
                         "phone": payload.patient_phone,
                         "email": payload.patient_email,
+                        "clinic_id": STTPDN_CLINIC_ID,
                     }
                 )
                 .execute()

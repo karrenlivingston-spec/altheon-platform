@@ -125,6 +125,7 @@ CREATE TABLE public.patients (
   primary_complaint text,
   referring_provider text,
   notes text,
+  clinic_id uuid REFERENCES public.clinics (id),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -133,6 +134,7 @@ CREATE INDEX patients_email_idx ON public.patients (email) WHERE email IS NOT NU
 CREATE INDEX patients_phone_idx ON public.patients (phone) WHERE phone IS NOT NULL;
 CREATE INDEX patients_last_first_idx ON public.patients (last_name, first_name);
 CREATE INDEX patients_dob_idx ON public.patients (date_of_birth) WHERE date_of_birth IS NOT NULL;
+CREATE INDEX patients_clinic_id_idx ON public.patients (clinic_id);
 
 COMMENT ON TABLE public.patients IS 'Patient demographics; clinic relationships are granted through patient_clinic_access.';
 
