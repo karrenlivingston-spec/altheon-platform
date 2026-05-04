@@ -16,6 +16,9 @@ export default function AdminLoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [leftBrandAsset, setLeftBrandAsset] = useState<"png" | "svg" | "text">(
+    "png",
+  );
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -44,13 +47,26 @@ export default function AdminLoginPage() {
         }}
       >
         <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-10 py-14 text-center md:min-h-screen md:py-16">
-          <img
-            src="/altheon-logo-full.png"
-            alt="Altheon"
-            width={180}
-            height={60}
-            className="mx-auto w-[180px] max-w-full object-contain"
-          />
+          {leftBrandAsset === "text" ? (
+            <p className="text-center text-2xl font-semibold text-white tracking-tight">
+              Altheon
+            </p>
+          ) : (
+            <img
+              src={
+                leftBrandAsset === "png"
+                  ? "/altheon-logo-white.png"
+                  : "/altheon-logo-white.svg"
+              }
+              alt="Altheon"
+              width={160}
+              height={53}
+              className="mx-auto w-[160px] max-w-full object-contain"
+              onError={() =>
+                setLeftBrandAsset((s) => (s === "png" ? "svg" : "text"))
+              }
+            />
+          )}
           <p className="mt-4 text-center text-sm tracking-wide text-slate-400">
             AI-powered clinic operations
           </p>
@@ -63,14 +79,9 @@ export default function AdminLoginPage() {
           className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-10"
           style={{ boxShadow: CARD_SHADOW }}
         >
-          <img
-            src="/altheon-logo.svg"
-            alt=""
-            width={48}
-            height={48}
-            className="mx-auto mb-6 block h-12 w-12"
-            aria-hidden
-          />
+          <p className="text-2xl font-bold text-gray-900 tracking-tight text-center mb-2">
+            Altheon
+          </p>
           <h1 className="text-center text-2xl font-bold text-gray-900">
             Welcome back
           </h1>
