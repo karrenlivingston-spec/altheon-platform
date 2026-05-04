@@ -48,7 +48,7 @@ export default function AdminLoginPage() {
       >
         <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-10 py-14 text-center md:min-h-screen md:py-16">
           {leftBrandAsset === "text" ? (
-            <p className="text-center text-2xl font-semibold text-white tracking-tight">
+            <p className="text-center text-3xl font-bold tracking-tight text-white">
               Altheon
             </p>
           ) : (
@@ -59,15 +59,15 @@ export default function AdminLoginPage() {
                   : "/altheon-logo-white.svg"
               }
               alt="Altheon"
-              width={160}
-              height={53}
-              className="mx-auto w-[160px] max-w-full object-contain"
+              width={200}
+              height={66}
+              className="mx-auto w-[200px] max-w-full object-contain opacity-100"
               onError={() =>
                 setLeftBrandAsset((s) => (s === "png" ? "svg" : "text"))
               }
             />
           )}
-          <p className="mt-4 text-center text-sm tracking-wide text-slate-400">
+          <p className="mt-3 text-center text-sm text-slate-400">
             AI-powered clinic operations
           </p>
         </div>
@@ -79,14 +79,31 @@ export default function AdminLoginPage() {
           className="w-full max-w-md rounded-2xl border border-gray-200 bg-white p-10"
           style={{ boxShadow: CARD_SHADOW }}
         >
-          <p className="text-2xl font-bold text-gray-900 tracking-tight text-center mb-2">
-            Altheon
-          </p>
-          <h1 className="text-center text-2xl font-bold text-gray-900">
-            Welcome back
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+              marginBottom: 24,
+            }}
+          >
+            <span
+              style={{
+                fontSize: 22,
+                fontWeight: 700,
+                color: "#16A34A",
+                letterSpacing: "-0.5px",
+              }}
+            >
+              Altheon
+            </span>
+          </div>
+          <h1 className="text-center text-xl font-semibold text-gray-900">
+            Sign in to your dashboard
           </h1>
           <p className="mb-8 mt-1 text-center text-sm text-gray-500">
-            Sign in to Altheon
+            Access your clinic operations platform
           </p>
 
           <form onSubmit={handleSubmit}>
@@ -122,7 +139,6 @@ export default function AdminLoginPage() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                placeholder="••••••••"
                 className={INPUT_CLASS}
               />
             </div>
