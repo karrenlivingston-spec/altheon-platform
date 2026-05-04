@@ -14,7 +14,6 @@ def get_slots_for_date(
     clinician_id: Optional[str],
     target_date: date,
     duration_minutes: int,
-    now_eastern: Optional[datetime] = None,
 ):
     """
     Shared slot generation logic — same as /slots but callable internally.
@@ -35,8 +34,8 @@ def get_slots_for_date(
     tz_name = loc_resp.data[0].get("timezone", "America/New_York")
     clinic_tz = pytz.timezone(tz_name)
 
-    # Get availability rules for this day of week
-    day_of_week = target_date.weekday()  # 0=Monday .. 6=Sunday
+    # Get availability rules for this day of week (Sun=0 .. Sat=6, matches DB)
+    day_of_week = target_date.isoweekday() % 7
     rules_query = (
         supabase.table("availability_rules")
         .select("*")
@@ -84,7 +83,7 @@ def get_slots_for_date(
             slot_start_utc = slot_start_local.astimezone(pytz.utc)
             slot_end_utc = slot_end_local.astimezone(pytz.utc)
 
-            if now_eastern and slot_start_local <= now_eastern:
+            if slot_start_local <= datetime.now(clinic_tz):
                 current += timedelta(minutes=step)
                 continue
 
@@ -141,7 +140,7 @@ def get_next_available(
 
     for offset in range(days_ahead):
         target_date = scan_start + timedelta(days=offset)
-        day_slots = get_slots_for_date(clinic_id, clinician_id, target_date, duration_minutes, now_eastern)
+        day_slots = get_slots_for_date(clinic_id, clinician_id, target_date, duration_minutes)
         if day_slots:
             return day_slots[:limit]
 
