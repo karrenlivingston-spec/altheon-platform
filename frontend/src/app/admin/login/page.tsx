@@ -46,9 +46,20 @@ export default function AdminLoginPage() {
             "radial-gradient(ellipse 80% 70% at 30% 50%, rgba(22,163,74,0.12) 0%, transparent 60%), linear-gradient(160deg, #0B1A2B 0%, #0D2D1F 60%, #0F3D2A 100%)",
         }}
       >
-        <div className="relative z-10 flex flex-1 flex-col items-center justify-center px-10 py-14 text-center md:min-h-screen md:py-16">
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{
+            background:
+              "radial-gradient(ellipse at 40% 45%, rgba(22,163,74,0.15) 0%, transparent 65%)",
+          }}
+          aria-hidden
+        />
+        <div
+          className="relative z-10 flex flex-1 flex-col items-center justify-center px-10 py-14 text-center md:min-h-screen md:py-16"
+          style={{ paddingBottom: "15%" }}
+        >
           {leftBrandAsset === "text" ? (
-            <p className="text-center text-3xl font-bold tracking-tight text-white">
+            <p className="text-center text-4xl font-bold tracking-tight text-white">
               Altheon
             </p>
           ) : (
@@ -59,15 +70,15 @@ export default function AdminLoginPage() {
                   : "/altheon-logo-white.svg"
               }
               alt="Altheon"
-              width={200}
-              height={66}
-              className="mx-auto w-[200px] max-w-full object-contain opacity-100"
+              width={220}
+              height={73}
+              className="mx-auto w-[220px] max-w-full object-contain opacity-100"
               onError={() =>
                 setLeftBrandAsset((s) => (s === "png" ? "svg" : "text"))
               }
             />
           )}
-          <p className="mt-3 text-center text-sm text-slate-400">
+          <p className="mt-4 text-center text-base tracking-wide text-slate-400/70">
             AI-powered clinic operations
           </p>
         </div>
@@ -89,12 +100,8 @@ export default function AdminLoginPage() {
             }}
           >
             <span
-              style={{
-                fontSize: 22,
-                fontWeight: 700,
-                color: "#16A34A",
-                letterSpacing: "-0.5px",
-              }}
+              className="text-2xl font-bold tracking-tight"
+              style={{ color: "#0F172A" }}
             >
               Altheon
             </span>
