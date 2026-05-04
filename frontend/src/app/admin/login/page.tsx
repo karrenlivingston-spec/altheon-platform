@@ -47,10 +47,20 @@ export default function AdminLoginPage() {
         }}
       >
         <div
-          className="pointer-events-none absolute inset-0"
+          className="pointer-events-none absolute inset-0 z-0"
           style={{
             background:
-              "radial-gradient(ellipse at 40% 45%, rgba(22,163,74,0.15) 0%, transparent 65%)",
+              "radial-gradient(circle at 50% 40%, rgba(34,197,94,0.18) 0%, rgba(34,197,94,0.08) 30%, transparent 65%)",
+          }}
+          aria-hidden
+        />
+        <div
+          className="pointer-events-none absolute inset-0 z-0"
+          style={{
+            opacity: 0.06,
+            backgroundImage:
+              "linear-gradient(rgba(255,255,255,0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.06) 1px, transparent 1px)",
+            backgroundSize: "40px 40px",
           }}
           aria-hidden
         />
@@ -59,7 +69,14 @@ export default function AdminLoginPage() {
           style={{ paddingBottom: "15%" }}
         >
           {leftBrandAsset === "text" ? (
-            <p className="text-center text-4xl font-bold tracking-tight text-white">
+            <p
+              className="text-center text-white"
+              style={{
+                fontSize: 48,
+                fontWeight: 800,
+                letterSpacing: "-1.5px",
+              }}
+            >
               Altheon
             </p>
           ) : (
@@ -78,7 +95,19 @@ export default function AdminLoginPage() {
               }
             />
           )}
-          <p className="mt-4 text-center text-base tracking-wide text-slate-400/70">
+          <p
+            className="mt-3 text-center"
+            style={{ color: "rgba(255,255,255,0.45)" }}
+          >
+            AI FOR HEALTHCARE
+          </p>
+          <p
+            className="mt-4 text-center"
+            style={{
+              color: "rgba(255,255,255,0.55)",
+              fontSize: 14,
+            }}
+          >
             AI-powered clinic operations
           </p>
         </div>
