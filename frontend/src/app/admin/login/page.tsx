@@ -95,20 +95,11 @@ export default function AdminLoginPage() {
               }
             />
           )}
-          <p
-            className="mt-3 text-center"
-            style={{ color: "rgba(255,255,255,0.45)" }}
-          >
-            AI FOR HEALTHCARE
+          <p className="mt-8 text-center text-lg font-semibold text-white">
+            AI for modern clinics
           </p>
-          <p
-            className="mt-4 text-center"
-            style={{
-              color: "rgba(255,255,255,0.55)",
-              fontSize: 14,
-            }}
-          >
-            AI-powered clinic operations
+          <p className="mt-2 max-w-xs text-center text-sm leading-relaxed text-slate-400">
+            Run your entire operation from one intelligent platform
           </p>
         </div>
       </aside>
