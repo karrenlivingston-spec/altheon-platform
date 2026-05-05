@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Send, Sparkles, X } from "lucide-react";
 
+import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+
 const API_BASE = "https://altheon-platform.onrender.com";
-const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 
 type ChatRole = "user" | "assistant";
 
@@ -23,6 +24,7 @@ const cleanText = (text: string) =>
   text.replace(/\*\*(.*?)\*\*/g, "$1").replace(/\*(.*?)\*/g, "$1");
 
 export default function AskAltheon() {
+  const { clinicId } = useAdminClinic();
   const [isOpen, setIsOpen] = useState(false);
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -53,7 +55,7 @@ export default function AskAltheon() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question: trimmed,
-          clinic_id: CLINIC_ID,
+          clinic_id: clinicId,
         }),
       });
       const data = (await res.json().catch(() => null)) as {
@@ -68,7 +70,7 @@ export default function AskAltheon() {
       setLoading(false);
       setMessages((prev) => [...prev, { role: "assistant", content: answer }]);
     }
-  }, [loading]);
+  }, [loading, clinicId]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

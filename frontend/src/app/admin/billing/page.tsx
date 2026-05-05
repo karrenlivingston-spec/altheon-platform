@@ -20,7 +20,8 @@ import {
   DS_TR,
 } from "@/app/admin/designSystem";
 
-const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
+import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+
 const API_BASE = "https://altheon-platform.onrender.com";
 
 type PatientRow = {
@@ -142,6 +143,7 @@ function compareDateOfServiceDesc(a: BillingRecordRow, b: BillingRecordRow): num
 }
 
 export default function AdminBillingPage() {
+  const { clinicId } = useAdminClinic();
   const [records, setRecords] = useState<BillingRecordRow[]>([]);
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -207,19 +209,19 @@ export default function AdminBillingPage() {
   const loadPatients = useCallback(async () => {
     try {
       const res = await fetch(
-        `${API_BASE}/patients?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+        `${API_BASE}/patients?clinic_id=${encodeURIComponent(clinicId)}`,
       );
       const data = res.ok ? await res.json() : [];
       setPatients(Array.isArray(data) ? data : []);
     } catch {
       setPatients([]);
     }
-  }, []);
+  }, [clinicId]);
 
   const loadRecords = useCallback(async () => {
     setError(null);
     try {
-      const params = new URLSearchParams({ clinic_id: CLINIC_ID });
+      const params = new URLSearchParams({ clinic_id: clinicId });
       if (statusFilter) params.set("status", statusFilter);
       if (dateFrom) params.set("date_from", dateFrom);
       if (dateTo) params.set("date_to", dateTo);
@@ -239,7 +241,7 @@ export default function AdminBillingPage() {
         list.map(async (row) => {
           try {
             const pr = await fetch(
-              `${API_BASE}/billing-records/${encodeURIComponent(row.id)}/payments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+              `${API_BASE}/billing-records/${encodeURIComponent(row.id)}/payments?clinic_id=${encodeURIComponent(clinicId)}`,
             );
             const pj = pr.ok ? await pr.json() : [];
             payMap[row.id] = Array.isArray(pj) ? pj : [];
@@ -254,7 +256,7 @@ export default function AdminBillingPage() {
       setRecords([]);
       setPaymentsByRecord({});
     }
-  }, [statusFilter, dateFrom, dateTo]);
+  }, [statusFilter, dateFrom, dateTo, clinicId]);
 
   const loadDetail = useCallback(async (recordId: string) => {
     setDetailLoading(true);
@@ -279,7 +281,7 @@ export default function AdminBillingPage() {
       setStatusDraft((data.status ?? "draft").toLowerCase());
       try {
         const pr = await fetch(
-          `${API_BASE}/billing-records/${encodeURIComponent(recordId)}/payments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+          `${API_BASE}/billing-records/${encodeURIComponent(recordId)}/payments?clinic_id=${encodeURIComponent(clinicId)}`,
         );
         const pj = pr.ok ? await pr.json() : [];
         setDetailPayments(Array.isArray(pj) ? pj : []);
@@ -294,7 +296,7 @@ export default function AdminBillingPage() {
     } finally {
       setDetailLoading(false);
     }
-  }, []);
+  }, [clinicId]);
 
   useEffect(() => {
     void loadPatients();
@@ -344,7 +346,7 @@ export default function AdminBillingPage() {
     setError(null);
     try {
       const body: Record<string, unknown> = {
-        clinic_id: CLINIC_ID,
+        clinic_id: clinicId,
         patient_id: createPatientId,
         date_of_service: createDateOfService,
         billing_type: createBillingType,
@@ -428,7 +430,7 @@ export default function AdminBillingPage() {
     setDetailError(null);
     try {
       const res = await fetch(
-        `${API_BASE}/billing-records/${encodeURIComponent(paymentModalRecordId)}/payments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+        `${API_BASE}/billing-records/${encodeURIComponent(paymentModalRecordId)}/payments?clinic_id=${encodeURIComponent(clinicId)}`,
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },

@@ -11,7 +11,8 @@ import {
   DS_PRIMARY_BTN,
 } from "@/app/admin/designSystem";
 
-const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
+import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+
 const API_BASE = "https://altheon-platform.onrender.com";
 
 const INPUT_CLASS = `mt-1 block h-9 w-full ${DS_INPUT}`;
@@ -228,6 +229,7 @@ function pickChangedClinicFields(
 }
 
 export default function AdminSettingsPage() {
+  const { clinicId } = useAdminClinic();
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [clinicInfo, setClinicInfo] = useState<ClinicInfoForm>(() =>
@@ -273,7 +275,7 @@ export default function AdminSettingsPage() {
     setFetchError(null);
     try {
       const res = await fetch(
-        `${API_BASE}/clinic-settings/${encodeURIComponent(CLINIC_ID)}`,
+        `${API_BASE}/clinic-settings/${encodeURIComponent(clinicId)}`,
       );
       if (res.status === 404) {
         setFetchError("Clinic settings were not found for this clinic.");
@@ -310,7 +312,7 @@ export default function AdminSettingsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [clinicId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial clinic settings fetch
@@ -339,7 +341,7 @@ export default function AdminSettingsPage() {
   ): Promise<ClinicSettingsRow | null> {
     setSectionError(null);
     const res = await fetch(
-      `${API_BASE}/clinic-settings/${encodeURIComponent(CLINIC_ID)}`,
+      `${API_BASE}/clinic-settings/${encodeURIComponent(clinicId)}`,
       {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },

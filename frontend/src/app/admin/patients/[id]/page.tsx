@@ -23,7 +23,8 @@ import {
   piCaseStatusBadgeClass,
 } from "@/app/admin/designSystem";
 
-const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
+import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+
 const API_BASE = "https://altheon-platform.onrender.com";
 
 const NY = "America/New_York";
@@ -179,6 +180,7 @@ const FIELD_INPUT = `mt-1 w-full ${DS_INPUT}`;
 const LABEL_CLASS = "block text-xs font-medium uppercase tracking-wide text-gray-500";
 
 export default function PatientDetailPage() {
+  const { clinicId } = useAdminClinic();
   const params = useParams();
   const router = useRouter();
   const patientId = typeof params.id === "string" ? params.id : "";
@@ -215,22 +217,22 @@ export default function PatientDetailPage() {
         surveyRes,
       ] = await Promise.all([
         fetch(
-          `${API_BASE}/patients/${encodeURIComponent(patientId)}?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+          `${API_BASE}/patients/${encodeURIComponent(patientId)}?clinic_id=${encodeURIComponent(clinicId)}`,
         ),
         fetch(
-          `${API_BASE}/appointments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+          `${API_BASE}/appointments?clinic_id=${encodeURIComponent(clinicId)}`,
         ),
         fetch(
-          `${API_BASE}/billing-records?clinic_id=${encodeURIComponent(CLINIC_ID)}&patient_id=${encodeURIComponent(patientId)}`,
+          `${API_BASE}/billing-records?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
         ),
         fetch(
-          `${API_BASE}/patient-memberships?clinic_id=${encodeURIComponent(CLINIC_ID)}&patient_id=${encodeURIComponent(patientId)}`,
+          `${API_BASE}/patient-memberships?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
         ),
         fetch(
-          `${API_BASE}/pi-cases?clinic_id=${encodeURIComponent(CLINIC_ID)}&patient_id=${encodeURIComponent(patientId)}`,
+          `${API_BASE}/pi-cases?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
         ),
         fetch(
-          `${API_BASE}/patients/${encodeURIComponent(patientId)}/surveys?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+          `${API_BASE}/patients/${encodeURIComponent(patientId)}/surveys?clinic_id=${encodeURIComponent(clinicId)}`,
         ),
       ]);
 
@@ -276,7 +278,7 @@ export default function PatientDetailPage() {
     } finally {
       if (!silent) setLoading(false);
     }
-  }, [patientId]);
+  }, [patientId, clinicId]);
 
   useEffect(() => {
     void load();
@@ -353,7 +355,7 @@ export default function PatientDetailPage() {
         body[k] = draft[k] ?? null;
       }
       const res = await fetch(
-        `${API_BASE}/patients/${encodeURIComponent(patientId)}?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+        `${API_BASE}/patients/${encodeURIComponent(patientId)}?clinic_id=${encodeURIComponent(clinicId)}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },

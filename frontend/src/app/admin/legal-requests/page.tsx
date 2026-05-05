@@ -17,7 +17,8 @@ import {
   legalStatusBadgeClass,
 } from "@/app/admin/designSystem";
 
-const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
+import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+
 const API_BASE = "https://altheon-platform.onrender.com";
 const NY = "America/New_York";
 
@@ -45,6 +46,7 @@ function formatReceived(iso?: string): string {
 }
 
 export default function AdminLegalRequestsPage() {
+  const { clinicId } = useAdminClinic();
   const [rows, setRows] = useState<LegalRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchNote, setFetchNote] = useState<string | null>(null);
@@ -54,7 +56,7 @@ export default function AdminLegalRequestsPage() {
     setFetchNote(null);
     try {
       const res = await fetch(
-        `${API_BASE}/legal-requests?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+        `${API_BASE}/legal-requests?clinic_id=${encodeURIComponent(clinicId)}`,
       );
       if (res.status === 404) {
         setFetchNote(
@@ -82,7 +84,7 @@ export default function AdminLegalRequestsPage() {
       setFetchNote(null);
       try {
         const res = await fetch(
-          `${API_BASE}/legal-requests?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+          `${API_BASE}/legal-requests?clinic_id=${encodeURIComponent(clinicId)}`,
         );
         if (res.status === 404) {
           if (!cancelled) {
@@ -138,7 +140,7 @@ export default function AdminLegalRequestsPage() {
     setUpdatingIds((p) => ({ ...p, [id]: true }));
     try {
       const params = new URLSearchParams({
-        clinic_id: CLINIC_ID,
+        clinic_id: clinicId,
       });
       const res = await fetch(
         `${API_BASE}/legal-requests/${encodeURIComponent(id)}/status?${params.toString()}`,

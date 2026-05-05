@@ -21,7 +21,8 @@ import {
   piCaseStatusBadgeClass,
 } from "@/app/admin/designSystem";
 
-const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
+import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+
 const API_BASE = "https://altheon-platform.onrender.com";
 
 type PatientRow = {
@@ -104,6 +105,7 @@ function dash(s: string | null | undefined): string {
 }
 
 export default function AdminPiCasesPage() {
+  const { clinicId } = useAdminClinic();
   const [cases, setCases] = useState<PiCaseRow[]>([]);
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [billingRecords, setBillingRecords] = useState<BillingRecordRow[]>([]);
@@ -152,9 +154,9 @@ export default function AdminPiCasesPage() {
     let piList: PiCaseRow[] = [];
     try {
       const [piRes, ptRes, brRes] = await Promise.all([
-        fetch(`${API_BASE}/pi-cases?clinic_id=${encodeURIComponent(CLINIC_ID)}`),
-        fetch(`${API_BASE}/patients?clinic_id=${encodeURIComponent(CLINIC_ID)}`),
-        fetch(`${API_BASE}/billing-records?clinic_id=${encodeURIComponent(CLINIC_ID)}`),
+        fetch(`${API_BASE}/pi-cases?clinic_id=${encodeURIComponent(clinicId)}`),
+        fetch(`${API_BASE}/patients?clinic_id=${encodeURIComponent(clinicId)}`),
+        fetch(`${API_BASE}/billing-records?clinic_id=${encodeURIComponent(clinicId)}`),
       ]);
       const piJson = piRes.ok ? await piRes.json() : [];
       const ptJson = ptRes.ok ? await ptRes.json() : [];
@@ -273,7 +275,7 @@ export default function AdminPiCasesPage() {
     setError(null);
     try {
       const body: Record<string, unknown> = {
-        clinic_id: CLINIC_ID,
+        clinic_id: clinicId,
         patient_id: cPatientId,
       };
       if (cDateAccident) body.date_of_accident = cDateAccident;

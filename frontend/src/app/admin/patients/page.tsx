@@ -19,7 +19,8 @@ import {
   DS_TR,
 } from "@/app/admin/designSystem";
 
-const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
+import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+
 const API_BASE = "https://altheon-platform.onrender.com";
 
 const NY = "America/New_York";
@@ -83,6 +84,7 @@ function patientInitials(p: PatientRow): string {
 }
 
 export default function AdminPatientsPage() {
+  const { clinicId } = useAdminClinic();
   const router = useRouter();
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
@@ -94,9 +96,9 @@ export default function AdminPatientsPage() {
     (async () => {
       try {
         const [ptRes, apRes] = await Promise.all([
-          fetch(`${API_BASE}/patients?clinic_id=${encodeURIComponent(CLINIC_ID)}`),
+          fetch(`${API_BASE}/patients?clinic_id=${encodeURIComponent(clinicId)}`),
           fetch(
-            `${API_BASE}/appointments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+            `${API_BASE}/appointments?clinic_id=${encodeURIComponent(clinicId)}`,
           ),
         ]);
         const ptJson = ptRes.ok ? await ptRes.json() : [];
@@ -117,7 +119,7 @@ export default function AdminPatientsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [clinicId]);
 
   const statsByPatient = useMemo(() => {
     const map = new Map<

@@ -25,7 +25,8 @@ import {
   DS_TR,
 } from "@/app/admin/designSystem";
 
-const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
+import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+
 const API_BASE = "https://altheon-platform.onrender.com";
 const NY = "America/New_York";
 
@@ -152,6 +153,7 @@ function callVolumeLast7Days(convs: VoiceConversation[]): {
 }
 
 export default function AdminVoiceAgentPage() {
+  const { clinicId } = useAdminClinic();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<VoiceStatus | null>(null);
@@ -166,10 +168,10 @@ export default function AdminVoiceAgentPage() {
       try {
         const [stRes, convRes] = await Promise.all([
           fetch(
-            `${API_BASE}/voice-agent/status?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+            `${API_BASE}/voice-agent/status?clinic_id=${encodeURIComponent(clinicId)}`,
           ),
           fetch(
-            `${API_BASE}/voice-agent/conversations?clinic_id=${encodeURIComponent(CLINIC_ID)}&page_size=20`,
+            `${API_BASE}/voice-agent/conversations?clinic_id=${encodeURIComponent(clinicId)}&page_size=20`,
           ),
         ]);
         if (!cancelled) {
@@ -203,7 +205,7 @@ export default function AdminVoiceAgentPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [clinicId]);
 
   const agentOnline = Boolean(
     statusFetchOk && status && String(status.status).toLowerCase() === "online",

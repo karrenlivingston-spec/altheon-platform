@@ -18,7 +18,9 @@ import {
 
 import { supabase } from "@/lib/supabase";
 
+import { AdminClinicProvider } from "./AdminClinicContext";
 import AskAltheon from "./components/AskAltheon";
+import ClinicSwitcher from "./components/ClinicSwitcher";
 
 export default function AdminLayout({
   children,
@@ -111,6 +113,7 @@ function AdminAuthenticatedShell({
   }
 
   return (
+    <AdminClinicProvider>
     <div className="min-h-screen bg-[#F8FAFC]">
       <button
         type="button"
@@ -168,7 +171,8 @@ function AdminAuthenticatedShell({
               Altheon
             </span>
           </div>
-          <nav className="flex flex-1 flex-col gap-1 px-3 py-8">
+          <ClinicSwitcher />
+          <nav className="flex flex-1 flex-col gap-1 px-3 pb-8 pt-2">
             <Link
               href="/admin"
               className={navLinkClass("/admin")}
@@ -301,5 +305,6 @@ function AdminAuthenticatedShell({
       </div>
       <AskAltheon />
     </div>
+    </AdminClinicProvider>
   );
 }

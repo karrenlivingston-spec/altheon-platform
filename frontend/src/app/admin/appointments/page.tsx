@@ -23,7 +23,8 @@ import {
   DS_SECTION_HEADER,
 } from "@/app/admin/designSystem";
 
-const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
+import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+
 const API_BASE = "https://altheon-platform.onrender.com";
 
 const CLINICIAN_WEST_ID = "fb6fa0fc-78f3-48c0-818b-511ad7a8ee93";
@@ -133,6 +134,7 @@ function dayLabel(ymd: string): string {
 }
 
 export default function AdminAppointmentsPage() {
+  const { clinicId } = useAdminClinic();
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [patientsList, setPatientsList] = useState<PatientListRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -161,7 +163,7 @@ export default function AdminAppointmentsPage() {
   async function refreshAppointments() {
     try {
       const res = await fetch(
-        `${API_BASE}/appointments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+        `${API_BASE}/appointments?clinic_id=${encodeURIComponent(clinicId)}`,
       );
       const data = res.ok ? await res.json() : [];
       setAppointments(Array.isArray(data) ? data : []);
@@ -175,7 +177,7 @@ export default function AdminAppointmentsPage() {
     async function fetchData() {
       try {
         const res = await fetch(
-          `${API_BASE}/appointments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+          `${API_BASE}/appointments?clinic_id=${encodeURIComponent(clinicId)}`,
         );
         const data = res.ok ? await res.json() : [];
         if (!cancelled) {
@@ -202,14 +204,14 @@ export default function AdminAppointmentsPage() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [clinicId]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch(
-          `${API_BASE}/patients?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+          `${API_BASE}/patients?clinic_id=${encodeURIComponent(clinicId)}`,
         );
         const data = res.ok ? await res.json() : [];
         if (!cancelled) {
@@ -224,7 +226,7 @@ export default function AdminAppointmentsPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [clinicId]);
 
   useEffect(() => {
     if (!toastVisible || !toastMessage) return;
@@ -290,7 +292,7 @@ export default function AdminAppointmentsPage() {
     setUpdatingIds((prev) => ({ ...prev, [appointmentId]: true }));
     try {
       const res = await fetch(
-        `${API_BASE}/appointments/${encodeURIComponent(appointmentId)}/status?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+        `${API_BASE}/appointments/${encodeURIComponent(appointmentId)}/status?clinic_id=${encodeURIComponent(clinicId)}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -395,7 +397,7 @@ export default function AdminAppointmentsPage() {
     setBillModalError(null);
     try {
       const body: Record<string, unknown> = {
-        clinic_id: CLINIC_ID,
+        clinic_id: clinicId,
         patient_id: billingTarget.patient_id,
         appointment_id: billingTarget.id,
         date_of_service: billingTarget.appointment_date,

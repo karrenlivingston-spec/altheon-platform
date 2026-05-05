@@ -20,7 +20,8 @@ import {
   membershipStatusBadgeClass,
 } from "@/app/admin/designSystem";
 
-const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
+import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+
 const API_BASE = "https://altheon-platform.onrender.com";
 const TREATMENT_TYPE_NAMES: Record<string, string> = {
   "92e261f3-1f97-491c-96e1-8fddce8c4aa6": "Dry Needling",
@@ -111,6 +112,7 @@ type TabId = "tiers" | "enrollments";
 const STATUS_OPTIONS = ["active", "paused", "cancelled", "expired"] as const;
 
 export default function AdminMembershipsPage() {
+  const { clinicId } = useAdminClinic();
   const [tab, setTab] = useState<TabId>("tiers");
   const [tiers, setTiers] = useState<MembershipTier[]>([]);
   const [enrollments, setEnrollments] = useState<PatientMembership[]>([]);
@@ -145,10 +147,10 @@ export default function AdminMembershipsPage() {
     try {
       const [tiersRes, enrollRes] = await Promise.all([
         fetch(
-          `${API_BASE}/membership-tiers?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+          `${API_BASE}/membership-tiers?clinic_id=${encodeURIComponent(clinicId)}`,
         ),
         fetch(
-          `${API_BASE}/patient-memberships?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+          `${API_BASE}/patient-memberships?clinic_id=${encodeURIComponent(clinicId)}`,
         ),
       ]);
       const tiersJson = tiersRes.ok ? await tiersRes.json() : [];
@@ -169,7 +171,7 @@ export default function AdminMembershipsPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [clinicId]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -251,7 +253,7 @@ export default function AdminMembershipsPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            clinic_id: CLINIC_ID,
+            clinic_id: clinicId,
             name: formName.trim(),
             description: formDescription.trim() || null,
             price_cents,

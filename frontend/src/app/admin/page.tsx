@@ -17,7 +17,8 @@ import {
   getEasternYMD,
 } from "@/components/adminEastern";
 
-const CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
+import { useAdminClinic } from "./AdminClinicContext";
+
 const API_BASE = "https://altheon-platform.onrender.com";
 const NY = "America/New_York";
 
@@ -153,6 +154,7 @@ function formatNextAppointmentLine(row: AppointmentRow | null): string {
 }
 
 export default function AdminOverviewPage() {
+  const { clinicId } = useAdminClinic();
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [billingRecords, setBillingRecords] = useState<BillingRecordRow[]>([]);
@@ -166,14 +168,14 @@ export default function AdminOverviewPage() {
   const refetchAppointments = useCallback(async () => {
     try {
       const apRes = await fetch(
-        `${API_BASE}/appointments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+        `${API_BASE}/appointments?clinic_id=${encodeURIComponent(clinicId)}`,
       );
       const apJson = apRes.ok ? await apRes.json() : [];
       setAppointments(Array.isArray(apJson) ? apJson : []);
     } catch {
       setAppointments([]);
     }
-  }, []);
+  }, [clinicId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -181,10 +183,10 @@ export default function AdminOverviewPage() {
       try {
         const [vsRes, vcRes] = await Promise.all([
           fetch(
-            `${API_BASE}/voice-agent/status?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+            `${API_BASE}/voice-agent/status?clinic_id=${encodeURIComponent(clinicId)}`,
           ),
           fetch(
-            `${API_BASE}/voice-agent/conversations?clinic_id=${encodeURIComponent(CLINIC_ID)}&page_size=50`,
+            `${API_BASE}/voice-agent/conversations?clinic_id=${encodeURIComponent(clinicId)}&page_size=50`,
           ),
         ]);
         const statusJson = vsRes.ok
@@ -221,14 +223,14 @@ export default function AdminOverviewPage() {
       try {
         const [apRes, ptRes, brRes, piRes] = await Promise.all([
           fetch(
-            `${API_BASE}/appointments?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+            `${API_BASE}/appointments?clinic_id=${encodeURIComponent(clinicId)}`,
           ),
-          fetch(`${API_BASE}/patients?clinic_id=${encodeURIComponent(CLINIC_ID)}`),
+          fetch(`${API_BASE}/patients?clinic_id=${encodeURIComponent(clinicId)}`),
           fetch(
-            `${API_BASE}/billing-records?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+            `${API_BASE}/billing-records?clinic_id=${encodeURIComponent(clinicId)}`,
           ),
           fetch(
-            `${API_BASE}/pi-cases?clinic_id=${encodeURIComponent(CLINIC_ID)}&status=open`,
+            `${API_BASE}/pi-cases?clinic_id=${encodeURIComponent(clinicId)}&status=open`,
           ),
         ]);
         const apJson = apRes.ok ? await apRes.json() : [];
@@ -265,7 +267,7 @@ export default function AdminOverviewPage() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, []);
+  }, [clinicId]);
 
   const todayEasternYmd = useMemo(() => getEasternYMD(new Date()), []);
 
@@ -289,7 +291,7 @@ export default function AdminOverviewPage() {
     setFocusCheckInBusy(true);
     try {
       const res = await fetch(
-        `${API_BASE}/appointments/${encodeURIComponent(appointmentId)}/status?clinic_id=${encodeURIComponent(CLINIC_ID)}`,
+        `${API_BASE}/appointments/${encodeURIComponent(appointmentId)}/status?clinic_id=${encodeURIComponent(clinicId)}`,
         {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
