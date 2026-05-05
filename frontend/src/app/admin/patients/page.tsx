@@ -19,7 +19,7 @@ import {
   DS_TR,
 } from "@/app/admin/designSystem";
 
-import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+import { useClinic } from "@/app/admin/ClinicContext";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -84,7 +84,7 @@ function patientInitials(p: PatientRow): string {
 }
 
 export default function AdminPatientsPage() {
-  const { clinicId } = useAdminClinic();
+  const { clinicId } = useClinic();
   const router = useRouter();
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);

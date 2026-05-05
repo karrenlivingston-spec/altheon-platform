@@ -23,7 +23,7 @@ import {
   DS_SECTION_HEADER,
 } from "@/app/admin/designSystem";
 
-import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+import { useClinic } from "@/app/admin/ClinicContext";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -134,7 +134,7 @@ function dayLabel(ymd: string): string {
 }
 
 export default function AdminAppointmentsPage() {
-  const { clinicId } = useAdminClinic();
+  const { clinicId } = useClinic();
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [patientsList, setPatientsList] = useState<PatientListRow[]>([]);
   const [loading, setLoading] = useState(true);

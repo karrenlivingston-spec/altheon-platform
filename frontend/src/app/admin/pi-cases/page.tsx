@@ -21,7 +21,7 @@ import {
   piCaseStatusBadgeClass,
 } from "@/app/admin/designSystem";
 
-import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+import { useClinic } from "@/app/admin/ClinicContext";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -105,7 +105,7 @@ function dash(s: string | null | undefined): string {
 }
 
 export default function AdminPiCasesPage() {
-  const { clinicId } = useAdminClinic();
+  const { clinicId } = useClinic();
   const [cases, setCases] = useState<PiCaseRow[]>([]);
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [billingRecords, setBillingRecords] = useState<BillingRecordRow[]>([]);

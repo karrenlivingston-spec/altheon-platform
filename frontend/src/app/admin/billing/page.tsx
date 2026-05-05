@@ -20,7 +20,7 @@ import {
   DS_TR,
 } from "@/app/admin/designSystem";
 
-import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+import { useClinic } from "@/app/admin/ClinicContext";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -143,7 +143,7 @@ function compareDateOfServiceDesc(a: BillingRecordRow, b: BillingRecordRow): num
 }
 
 export default function AdminBillingPage() {
-  const { clinicId } = useAdminClinic();
+  const { clinicId } = useClinic();
   const [records, setRecords] = useState<BillingRecordRow[]>([]);
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [loading, setLoading] = useState(true);

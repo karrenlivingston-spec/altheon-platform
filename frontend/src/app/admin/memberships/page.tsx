@@ -20,7 +20,7 @@ import {
   membershipStatusBadgeClass,
 } from "@/app/admin/designSystem";
 
-import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+import { useClinic } from "@/app/admin/ClinicContext";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 const TREATMENT_TYPE_NAMES: Record<string, string> = {
@@ -112,7 +112,7 @@ type TabId = "tiers" | "enrollments";
 const STATUS_OPTIONS = ["active", "paused", "cancelled", "expired"] as const;
 
 export default function AdminMembershipsPage() {
-  const { clinicId } = useAdminClinic();
+  const { clinicId } = useClinic();
   const [tab, setTab] = useState<TabId>("tiers");
   const [tiers, setTiers] = useState<MembershipTier[]>([]);
   const [enrollments, setEnrollments] = useState<PatientMembership[]>([]);

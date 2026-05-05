@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Send, Sparkles, X } from "lucide-react";
 
-import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+import { useClinic } from "@/app/admin/ClinicContext";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -24,7 +24,7 @@ const cleanText = (text: string) =>
   text.replace(/\*\*(.*?)\*\*/g, "$1").replace(/\*(.*?)\*/g, "$1");
 
 export default function AskAltheon() {
-  const { clinicId } = useAdminClinic();
+  const { clinicId } = useClinic();
   const [isOpen, setIsOpen] = useState(false);
   const [question, setQuestion] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);

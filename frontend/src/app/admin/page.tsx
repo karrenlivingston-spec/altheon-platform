@@ -17,7 +17,7 @@ import {
   getEasternYMD,
 } from "@/components/adminEastern";
 
-import { useAdminClinic } from "./AdminClinicContext";
+import { useClinic } from "./ClinicContext";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 const NY = "America/New_York";
@@ -169,7 +169,7 @@ function formatNextAppointmentLine(row: AppointmentRow | null): string {
 }
 
 export default function AdminOverviewPage() {
-  const { clinicId } = useAdminClinic();
+  const { clinicId } = useClinic();
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [billingRecords, setBillingRecords] = useState<BillingRecordRow[]>([]);

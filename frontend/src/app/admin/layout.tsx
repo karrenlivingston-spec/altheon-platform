@@ -7,6 +7,7 @@ import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
   CalendarDays,
+  ChevronDown,
   Scale,
   Users,
   CreditCard,
@@ -18,7 +19,7 @@ import {
 
 import { supabase } from "@/lib/supabase";
 
-import { AdminClinicProvider } from "./AdminClinicContext";
+import { ClinicProvider, useClinic } from "./ClinicContext";
 import AskAltheon from "./components/AskAltheon";
 
 export default function AdminLayout({
@@ -67,7 +68,7 @@ export default function AdminLayout({
   }
 
   return (
-    <AdminAuthenticatedShell pathname={pathname}>
+    <AdminAuthenticatedShell pathname={pathname} accessToken={session.access_token}>
       {children}
     </AdminAuthenticatedShell>
   );
@@ -76,12 +77,40 @@ export default function AdminLayout({
 function AdminAuthenticatedShell({
   children,
   pathname,
+  accessToken,
+}: {
+  children: React.ReactNode;
+  pathname: string;
+  accessToken: string;
+}) {
+  return (
+    <ClinicProvider accessToken={accessToken}>
+      <AdminAuthenticatedShellInner pathname={pathname}>
+        {children}
+      </AdminAuthenticatedShellInner>
+    </ClinicProvider>
+  );
+}
+
+function AdminAuthenticatedShellInner({
+  children,
+  pathname,
 }: {
   children: React.ReactNode;
   pathname: string;
 }) {
   const router = useRouter();
+  const {
+    clinic_id: clinicId,
+    brand_name: brandName,
+    role,
+    all_clinics: allClinics,
+    loading: clinicLoading,
+    error: clinicError,
+    setClinicId,
+  } = useClinic();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [clinicMenuOpen, setClinicMenuOpen] = useState(false);
 
   function isNavLinkActive(href: string): boolean {
     return (
@@ -111,8 +140,23 @@ function AdminAuthenticatedShell({
     router.replace("/admin/login");
   }
 
+  if (clinicLoading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC] text-sm text-slate-500">
+        Loading clinic…
+      </div>
+    );
+  }
+
+  if (clinicError || !clinicId) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC] px-6 text-sm text-red-600">
+        {clinicError || "Could not resolve clinic context."}
+      </div>
+    );
+  }
+
   return (
-    <AdminClinicProvider>
     <div className="min-h-screen bg-[#F8FAFC]">
       <button
         type="button"
@@ -167,9 +211,49 @@ function AdminAuthenticatedShell({
         >
           <div className="flex items-center gap-2 px-4 py-5">
             <span className="text-xl font-semibold tracking-wide text-white">
-              Altheon
+              {brandName}
             </span>
           </div>
+          {role === "super_admin" && allClinics.length > 0 ? (
+            <div className="relative px-3 pb-3">
+              <button
+                type="button"
+                onClick={() => setClinicMenuOpen((v) => !v)}
+                className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2.5 text-left text-sm font-medium text-white shadow-sm transition-colors hover:border-white/15 hover:bg-white/[0.1]"
+              >
+                <span className="truncate">
+                  {allClinics.find((c) => c.id === clinicId)?.brand_name || brandName}
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 shrink-0 text-[#94A3B8] transition-transform duration-200 ${clinicMenuOpen ? "rotate-180" : ""}`}
+                  aria-hidden
+                />
+              </button>
+              {clinicMenuOpen ? (
+                <ul className="absolute left-3 right-3 top-full z-50 mt-1 max-h-60 overflow-auto rounded-lg border border-white/10 bg-[#0E2238] py-1 shadow-lg ring-1 ring-black/20">
+                  {allClinics.map((c) => (
+                    <li key={c.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setClinicId(c.id);
+                          setClinicMenuOpen(false);
+                        }}
+                        className={[
+                          "w-full px-3 py-2 text-left text-sm transition-colors",
+                          c.id === clinicId
+                            ? "bg-white/10 font-medium text-white"
+                            : "text-[#CBD5E1] hover:bg-white/[0.08] hover:text-white",
+                        ].join(" ")}
+                      >
+                        {c.brand_name || c.slug || c.id}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+          ) : null}
           <nav className="flex flex-1 flex-col gap-1 px-3 py-8">
             <Link
               href="/admin"
@@ -303,6 +387,5 @@ function AdminAuthenticatedShell({
       </div>
       <AskAltheon />
     </div>
-    </AdminClinicProvider>
   );
 }

@@ -17,7 +17,7 @@ import {
   legalStatusBadgeClass,
 } from "@/app/admin/designSystem";
 
-import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+import { useClinic } from "@/app/admin/ClinicContext";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 const NY = "America/New_York";
@@ -46,7 +46,7 @@ function formatReceived(iso?: string): string {
 }
 
 export default function AdminLegalRequestsPage() {
-  const { clinicId } = useAdminClinic();
+  const { clinicId } = useClinic();
   const [rows, setRows] = useState<LegalRequestRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [fetchNote, setFetchNote] = useState<string | null>(null);

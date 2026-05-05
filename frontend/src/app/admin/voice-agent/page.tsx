@@ -25,7 +25,7 @@ import {
   DS_TR,
 } from "@/app/admin/designSystem";
 
-import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+import { useClinic } from "@/app/admin/ClinicContext";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 const NY = "America/New_York";
@@ -153,7 +153,7 @@ function callVolumeLast7Days(convs: VoiceConversation[]): {
 }
 
 export default function AdminVoiceAgentPage() {
-  const { clinicId } = useAdminClinic();
+  const { clinicId } = useClinic();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<VoiceStatus | null>(null);

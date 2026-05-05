@@ -11,7 +11,7 @@ import {
   DS_PRIMARY_BTN,
 } from "@/app/admin/designSystem";
 
-import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+import { useClinic } from "@/app/admin/ClinicContext";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -229,7 +229,7 @@ function pickChangedClinicFields(
 }
 
 export default function AdminSettingsPage() {
-  const { clinicId } = useAdminClinic();
+  const { clinicId } = useClinic();
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [clinicInfo, setClinicInfo] = useState<ClinicInfoForm>(() =>

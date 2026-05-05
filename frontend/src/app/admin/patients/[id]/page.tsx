@@ -23,7 +23,7 @@ import {
   piCaseStatusBadgeClass,
 } from "@/app/admin/designSystem";
 
-import { useAdminClinic } from "@/app/admin/AdminClinicContext";
+import { useClinic } from "@/app/admin/ClinicContext";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -180,7 +180,7 @@ const FIELD_INPUT = `mt-1 w-full ${DS_INPUT}`;
 const LABEL_CLASS = "block text-xs font-medium uppercase tracking-wide text-gray-500";
 
 export default function PatientDetailPage() {
-  const { clinicId } = useAdminClinic();
+  const { clinicId } = useClinic();
   const params = useParams();
   const router = useRouter();
   const patientId = typeof params.id === "string" ? params.id : "";
