@@ -4,18 +4,13 @@ import {
   createContext,
   useCallback,
   useContext,
-  useEffect,
   useMemo,
   useState,
 } from "react";
 
-import { supabase } from "@/lib/supabase";
-
 /** Default clinic (STTPDN) on first load when nothing is stored. */
 export const DEFAULT_ADMIN_CLINIC_ID =
   "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
-
-const STORAGE_KEY = "altheon_admin_selected_clinic_id";
 
 export type AdminClinicRow = { id: string; name: string };
 
@@ -30,53 +25,15 @@ type AdminClinicContextValue = {
 const AdminClinicContext = createContext<AdminClinicContextValue | null>(null);
 
 export function AdminClinicProvider({ children }: { children: React.ReactNode }) {
-  const [clinics, setClinics] = useState<AdminClinicRow[]>([]);
+  const [clinics] = useState<AdminClinicRow[]>([
+    { id: DEFAULT_ADMIN_CLINIC_ID, name: "STTPDN" },
+  ]);
   const [clinicId, setClinicIdState] = useState(DEFAULT_ADMIN_CLINIC_ID);
-  const [clinicsLoading, setClinicsLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      const { data, error } = await supabase
-        .from("clinics")
-        .select("id,name")
-        .order("name", { ascending: true });
-      if (cancelled) return;
-      if (error) {
-        console.error(error);
-        setClinics([]);
-        setClinicsLoading(false);
-        return;
-      }
-      const rows = (data ?? []) as AdminClinicRow[];
-      setClinics(rows);
-      const ids = new Set(rows.map((r) => r.id));
-      let stored: string | null = null;
-      try {
-        stored = localStorage.getItem(STORAGE_KEY);
-      } catch {
-        stored = null;
-      }
-      if (stored && ids.has(stored)) {
-        setClinicIdState(stored);
-      } else if (ids.has(DEFAULT_ADMIN_CLINIC_ID)) {
-        setClinicIdState(DEFAULT_ADMIN_CLINIC_ID);
-      } else if (rows[0]) {
-        setClinicIdState(rows[0].id);
-      }
-      setClinicsLoading(false);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const clinicsLoading = false;
 
   const setClinicId = useCallback((id: string) => {
-    setClinicIdState(id);
-    try {
-      localStorage.setItem(STORAGE_KEY, id);
-    } catch {
-      /* ignore */
+    if (id === DEFAULT_ADMIN_CLINIC_ID) {
+      setClinicIdState(DEFAULT_ADMIN_CLINIC_ID);
     }
   }, []);
 
