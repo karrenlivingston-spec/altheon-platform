@@ -10,7 +10,6 @@ from zoneinfo import ZoneInfo
 from fastapi import Body, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
-import jwt
 import os
 import re
 
@@ -79,27 +78,6 @@ def _extract_bearer_token(authorization: Optional[str]) -> str:
     return parts[1].strip()
 
 
-def _verify_supabase_jwt(token: str) -> dict[str, Any]:
-    secret = os.getenv("SUPABASE_JWT_SECRET")
-    if not secret:
-        raise HTTPException(
-            status_code=500,
-            detail="SUPABASE_JWT_SECRET is not configured",
-        )
-    try:
-        payload = jwt.decode(
-            token,
-            secret,
-            algorithms=["HS256"],
-            options={"verify_aud": False},
-        )
-    except jwt.PyJWTError as exc:
-        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
-    if not isinstance(payload, dict):
-        raise HTTPException(status_code=401, detail="Invalid token payload")
-    return payload
-
-
 def _clinic_shape(row: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": row.get("id"),
@@ -114,10 +92,20 @@ def _clinic_shape(row: dict[str, Any]) -> dict[str, Any]:
 @app.get("/me")
 def me(authorization: Optional[str] = Header(default=None, alias="Authorization")):
     token = _extract_bearer_token(authorization)
-    payload = _verify_supabase_jwt(token)
-    user_id = str(payload.get("sub") or "").strip()
+    try:
+        auth_response = supabase.auth.get_user(token)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
+
+    user_obj = getattr(auth_response, "user", None)
+    if user_obj is None and isinstance(auth_response, dict):
+        user_obj = auth_response.get("user")
+
+    user_id = str(getattr(user_obj, "id", None) or "").strip()
+    if not user_id and isinstance(user_obj, dict):
+        user_id = str(user_obj.get("id") or "").strip()
     if not user_id:
-        raise HTTPException(status_code=401, detail="Token missing sub claim")
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
 
     try:
         cu_resp = (
