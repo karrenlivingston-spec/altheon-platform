@@ -23,7 +23,8 @@ def list_appointments(clinic_id: str = Query(...)):
             .select(
                 "id, clinic_id, patient_id, clinician_id, location_id, treatment_type_id, "
                 "start_time, end_time, status, notes, created_at, "
-                "patients(first_name, last_name), treatment_types(name)"
+                "patients(first_name, last_name), treatment_types(name), "
+                "clinicians(first_name, last_name)"
             )
             .eq("clinic_id", clinic_id)
             .order("start_time")

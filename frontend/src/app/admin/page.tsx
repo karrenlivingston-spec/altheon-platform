@@ -33,6 +33,8 @@ type PatientRow = {
   last_name?: string;
 };
 
+type ClinicianEmbed = { first_name?: string | null; last_name?: string | null };
+
 type AppointmentRow = {
   id: string;
   clinician_id: string;
@@ -41,6 +43,7 @@ type AppointmentRow = {
   created_at?: string;
   patients?: { first_name?: string; last_name?: string } | null;
   treatment_types?: { name?: string } | null;
+  clinicians?: ClinicianEmbed | ClinicianEmbed[] | null;
 };
 
 type BillingRecordRow = {
@@ -66,6 +69,18 @@ function clinicianLabel(id: string): string {
   if (id === CLINICIAN_WEST_ID) return "Dr. West";
   if (id === CLINICIAN_SHARPE_ID) return "Dr. Sharpe";
   return id;
+}
+
+function clinicianDrLastName(row: AppointmentRow): string {
+  const raw = row.clinicians;
+  const c = Array.isArray(raw) ? raw[0] : raw;
+  if (c && typeof c === "object") {
+    const ln = (c.last_name ?? "").trim();
+    if (ln) return `Dr. ${ln}`;
+    const fn = (c.first_name ?? "").trim();
+    if (fn) return `Dr. ${fn}`;
+  }
+  return clinicianLabel(row.clinician_id);
 }
 
 function clinicianRowAccentClass(id: string): string {
@@ -571,7 +586,7 @@ export default function AdminOverviewPage() {
                         {patientName(row)}
                       </p>
                       <p className="mt-0.5 text-xs text-gray-400">
-                        {serviceName(row)} · {clinicianLabel(row.clinician_id)}
+                        {serviceName(row)} · {clinicianDrLastName(row)}
                       </p>
                     </div>
                     <span

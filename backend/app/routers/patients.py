@@ -282,14 +282,12 @@ def list_patient_surveys(patient_id: str, clinic_id: str = Query(...)):
 
 @router.get("")
 def list_patients(clinic_id: str = Query(...)):
-    """Return patients scoped to STTPDN clinic (clinic_id on patient row)."""
-    if clinic_id != STTPDN_CLINIC_ID:
-        return []
+    """Return patients for the requested clinic (clinic_id on patient row)."""
     try:
         resp = (
             supabase.table("patients")
             .select("*")
-            .eq("clinic_id", STTPDN_CLINIC_ID)
+            .eq("clinic_id", clinic_id)
             .execute()
         )
         _handle_supabase_error(resp)
