@@ -7,9 +7,10 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import Body, FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+import jwt
 import os
 import re
 
@@ -67,6 +68,111 @@ def root():
 def health():
     supabase.table("clinics").select("id").limit(1).execute()
     return {"status": "ok", "supabase": "connected"}
+
+
+def _extract_bearer_token(authorization: Optional[str]) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    parts = authorization.strip().split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1].strip():
+        raise HTTPException(status_code=401, detail="Invalid Authorization header")
+    return parts[1].strip()
+
+
+def _verify_supabase_jwt(token: str) -> dict[str, Any]:
+    secret = os.getenv("SUPABASE_JWT_SECRET")
+    if not secret:
+        raise HTTPException(
+            status_code=500,
+            detail="SUPABASE_JWT_SECRET is not configured",
+        )
+    try:
+        payload = jwt.decode(
+            token,
+            secret,
+            algorithms=["HS256"],
+            options={"verify_aud": False},
+        )
+    except jwt.PyJWTError as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    return payload
+
+
+def _clinic_shape(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row.get("id"),
+        "slug": row.get("slug"),
+        "brand_name": row.get("brand_name"),
+        "logo_url": row.get("logo_url"),
+        "primary_color": row.get("primary_color"),
+        "agent_name": row.get("agent_name"),
+    }
+
+
+@app.get("/me")
+def me(authorization: Optional[str] = Header(default=None, alias="Authorization")):
+    token = _extract_bearer_token(authorization)
+    payload = _verify_supabase_jwt(token)
+    user_id = str(payload.get("sub") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Token missing sub claim")
+
+    try:
+        cu_resp = (
+            supabase.table("clinic_users")
+            .select(
+                "user_id,role,clinic_id,"
+                "clinics:clinic_id(id,slug,brand_name,logo_url,primary_color,agent_name)"
+            )
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(cu_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    rows = cu_resp.data or []
+    if not rows:
+        raise HTTPException(status_code=403, detail="No clinic access for user")
+
+    row = rows[0]
+    role = str(row.get("role") or "").strip() or "member"
+    clinic_raw = row.get("clinics")
+    if isinstance(clinic_raw, list):
+        clinic_raw = clinic_raw[0] if clinic_raw else None
+    if not isinstance(clinic_raw, dict):
+        raise HTTPException(status_code=500, detail="Clinic join returned no clinic data")
+
+    out: dict[str, Any] = {
+        "user_id": user_id,
+        "role": role,
+        "clinic": _clinic_shape(clinic_raw),
+    }
+
+    if role == "super_admin":
+        try:
+            clinics_resp = (
+                supabase.table("clinics")
+                .select("id,slug,brand_name,logo_url,primary_color,agent_name")
+                .order("brand_name")
+                .execute()
+            )
+            _handle_supabase_error(clinics_resp)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        all_rows = clinics_resp.data or []
+        out["all_clinics"] = [
+            _clinic_shape(r) for r in all_rows if isinstance(r, dict)
+        ]
+
+    return out
 
 
 @app.get("/patient-lookup")
