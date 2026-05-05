@@ -24,13 +24,41 @@ import {
 } from "@/app/admin/designSystem";
 
 import { useClinic } from "@/app/admin/ClinicContext";
+import { supabase } from "@/lib/supabase";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
-const CLINICIAN_WEST_ID = "fb6fa0fc-78f3-48c0-818b-511ad7a8ee93";
-const CLINICIAN_SHARPE_ID = "ee6eaa90-1f90-4af7-85a5-4ae78aea3df7";
+type ClinicianRow = {
+  id: string;
+  first_name: string | null;
+  last_name: string | null;
+};
 
-type ClinicianFilter = "all" | "west" | "sharpe";
+const FLOW_CARD_BORDER_ACCENTS = [
+  "border-l-4 border-l-[#1A6B8A]",
+  "border-l-4 border-l-[#7C3AED]",
+  "border-l-4 border-l-[#0EA5A4]",
+  "border-l-4 border-l-[#CA8A04]",
+  "border-l-4 border-l-[#DB2777]",
+  "border-l-4 border-l-[#2563EB]",
+] as const;
+
+const WEEK_CELL_ACCENTS = [
+  "border-l-2 border-l-[#0EA5A4] bg-gray-50",
+  "border-l-2 border-l-[#7C3AED] bg-gray-50",
+  "border-l-2 border-l-[#1A6B8A] bg-gray-50",
+  "border-l-2 border-l-[#CA8A04] bg-gray-50",
+  "border-l-2 border-l-[#DB2777] bg-gray-50",
+  "border-l-2 border-l-[#2563EB] bg-gray-50",
+] as const;
+
+function hashClinicianIndex(id: string, modulo: number): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = (h + id.charCodeAt(i)) % 2147483647;
+  }
+  return modulo > 0 ? Math.abs(h) % modulo : 0;
+}
 
 type AppointmentRow = {
   id: string;
@@ -68,10 +96,18 @@ type QuickBillLineItem = {
 
 const BILL_MODAL_INPUT = `mt-1 h-9 ${DS_INPUT}`;
 
-function clinicianLabel(id: string): string {
-  if (id === CLINICIAN_WEST_ID) return "Dr. West";
-  if (id === CLINICIAN_SHARPE_ID) return "Dr. Sharpe";
-  return id;
+function formatClinicianName(c: Pick<ClinicianRow, "first_name" | "last_name">): string {
+  const last = (c.last_name ?? "").trim();
+  const first = (c.first_name ?? "").trim();
+  if (last) return `Dr. ${last}`;
+  if (first) return `Dr. ${first}`;
+  return "Clinician";
+}
+
+function clinicianLabel(id: string, clinicians: ClinicianRow[]): string {
+  const row = clinicians.find((c) => c.id === id);
+  if (row) return formatClinicianName(row);
+  return id || "—";
 }
 
 function patientName(row: AppointmentRow): string {
@@ -105,13 +141,15 @@ function patientIdForBilling(
 }
 
 function flowCardClinicianBorderClass(clinicianId: string): string {
-  if (clinicianId === CLINICIAN_WEST_ID) {
-    return "border-l-4 border-l-[#1A6B8A]";
-  }
-  if (clinicianId === CLINICIAN_SHARPE_ID) {
-    return "border-l-4 border-l-[#7C3AED]";
-  }
-  return "border-l-4 border-l-gray-300";
+  if (!clinicianId) return "border-l-4 border-l-gray-300";
+  const idx = hashClinicianIndex(clinicianId, FLOW_CARD_BORDER_ACCENTS.length);
+  return FLOW_CARD_BORDER_ACCENTS[idx] ?? "border-l-4 border-l-gray-300";
+}
+
+function weekCellAccentClass(clinicianId: string): string {
+  if (!clinicianId) return "border-l-2 border-l-gray-300 bg-gray-50";
+  const idx = hashClinicianIndex(clinicianId, WEEK_CELL_ACCENTS.length);
+  return WEEK_CELL_ACCENTS[idx] ?? "border-l-2 border-l-gray-300 bg-gray-50";
 }
 
 function filterPillClass(isActive: boolean): string {
@@ -139,7 +177,11 @@ export default function AdminAppointmentsPage() {
   const [patientsList, setPatientsList] = useState<PatientListRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [updatingIds, setUpdatingIds] = useState<Record<string, boolean>>({});
-  const [clinicianFilter, setClinicianFilter] = useState<ClinicianFilter>("all");
+  /** `null` = All clinicians */
+  const [selectedClinicianId, setSelectedClinicianId] = useState<string | null>(
+    null,
+  );
+  const [clinicians, setClinicians] = useState<ClinicianRow[]>([]);
 
   const [billingModalOpen, setBillingModalOpen] = useState(false);
   const [billingTarget, setBillingTarget] = useState<BillingTarget | null>(null);
@@ -207,6 +249,28 @@ export default function AdminAppointmentsPage() {
   }, [clinicId]);
 
   useEffect(() => {
+    setSelectedClinicianId(null);
+    let cancelled = false;
+    (async () => {
+      const { data, error } = await supabase
+        .from("clinicians")
+        .select("id, first_name, last_name")
+        .eq("clinic_id", clinicId)
+        .order("last_name", { ascending: true })
+        .order("first_name", { ascending: true });
+      if (cancelled) return;
+      if (error) {
+        setClinicians([]);
+        return;
+      }
+      setClinicians(Array.isArray(data) ? (data as ClinicianRow[]) : []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clinicId]);
+
+  useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
@@ -238,14 +302,9 @@ export default function AdminAppointmentsPage() {
   }, [toastVisible, toastMessage]);
 
   const filteredAppointments = useMemo(() => {
-    if (clinicianFilter === "west") {
-      return appointments.filter((a) => a.clinician_id === CLINICIAN_WEST_ID);
-    }
-    if (clinicianFilter === "sharpe") {
-      return appointments.filter((a) => a.clinician_id === CLINICIAN_SHARPE_ID);
-    }
-    return appointments;
-  }, [appointments, clinicianFilter]);
+    if (!selectedClinicianId) return appointments;
+    return appointments.filter((a) => a.clinician_id === selectedClinicianId);
+  }, [appointments, selectedClinicianId]);
 
   const todayYmd = useMemo(() => getEasternYMD(new Date()), []);
   const { mon: weekMon, sun: weekSun } = useMemo(
@@ -344,7 +403,7 @@ export default function AdminAppointmentsPage() {
       patient_name: patientName(row),
       patient_id,
       appointment_date: getEasternYMD(new Date(row.start_time)),
-      clinician: clinicianLabel(row.clinician_id),
+      clinician: clinicianLabel(row.clinician_id, clinicians),
     });
     setBillingModalOpen(true);
   }
@@ -489,7 +548,7 @@ export default function AdminAppointmentsPage() {
               {formatTimeEastern(row.start_time)}
             </p>
             <p className="text-xs text-gray-500">
-              {clinicianLabel(row.clinician_id)}
+              {clinicianLabel(row.clinician_id, clinicians)}
             </p>
             <p className="text-xs text-gray-500">{serviceName(row)}</p>
           </div>
@@ -517,7 +576,7 @@ export default function AdminAppointmentsPage() {
             {formatTimeEastern(row.start_time)}
           </p>
           <p className="text-xs text-gray-500">
-            {clinicianLabel(row.clinician_id)}
+            {clinicianLabel(row.clinician_id, clinicians)}
           </p>
           <p className="text-xs text-gray-500">{serviceName(row)}</p>
         </div>
@@ -586,25 +645,21 @@ export default function AdminAppointmentsPage() {
       <div className={`${DS_FILTER_BAR} mt-8 flex flex-wrap items-center gap-2`}>
         <button
           type="button"
-          className={filterPillClass(clinicianFilter === "all")}
-          onClick={() => setClinicianFilter("all")}
+          className={filterPillClass(selectedClinicianId === null)}
+          onClick={() => setSelectedClinicianId(null)}
         >
           All
         </button>
-        <button
-          type="button"
-          className={filterPillClass(clinicianFilter === "west")}
-          onClick={() => setClinicianFilter("west")}
-        >
-          Dr. West
-        </button>
-        <button
-          type="button"
-          className={filterPillClass(clinicianFilter === "sharpe")}
-          onClick={() => setClinicianFilter("sharpe")}
-        >
-          Dr. Sharpe
-        </button>
+        {clinicians.map((c) => (
+          <button
+            key={c.id}
+            type="button"
+            className={filterPillClass(selectedClinicianId === c.id)}
+            onClick={() => setSelectedClinicianId(c.id)}
+          >
+            {formatClinicianName(c)}
+          </button>
+        ))}
       </div>
 
       <section className="mt-8">
@@ -667,8 +722,6 @@ export default function AdminAppointmentsPage() {
                     </p>
                   ) : (
                     dayRows.map((row) => {
-                      const west = row.clinician_id === CLINICIAN_WEST_ID;
-                      const sharpe = row.clinician_id === CLINICIAN_SHARPE_ID;
                       const st = row.status.toLowerCase();
                       const cancelled = st === "cancelled";
                       const checkedInBlock = st === "checked_in";
@@ -677,11 +730,7 @@ export default function AdminAppointmentsPage() {
                       const firstNameOnly =
                         fullName.trim().split(/\s+/).filter(Boolean)[0] ??
                         fullName;
-                      const cellAccent = west
-                        ? "border-l-2 border-l-[#0EA5A4] bg-gray-50"
-                        : sharpe
-                          ? "border-l-2 border-l-[#7C3AED] bg-gray-50"
-                          : "border-l-2 border-l-gray-300 bg-gray-50";
+                      const cellAccent = weekCellAccentClass(row.clinician_id);
 
                       return (
                         <div
