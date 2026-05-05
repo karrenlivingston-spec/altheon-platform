@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from fastapi import Body, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+from pydantic import BaseModel, Field, field_validator
 import os
 import re
 
@@ -78,19 +79,8 @@ def _extract_bearer_token(authorization: Optional[str]) -> str:
     return parts[1].strip()
 
 
-def _clinic_shape(row: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "id": row.get("id"),
-        "slug": row.get("slug"),
-        "brand_name": row.get("brand_name"),
-        "logo_url": row.get("logo_url"),
-        "primary_color": row.get("primary_color"),
-        "agent_name": row.get("agent_name"),
-    }
-
-
-@app.get("/me")
-def me(authorization: Optional[str] = Header(default=None, alias="Authorization")):
+def _resolve_bearer_user_id(authorization: Optional[str]) -> str:
+    """Validate Supabase JWT (same mechanism as GET /me) and return auth user id."""
     token = _extract_bearer_token(authorization)
     try:
         auth_response = supabase.auth.get_user(token)
@@ -106,6 +96,23 @@ def me(authorization: Optional[str] = Header(default=None, alias="Authorization"
         user_id = str(user_obj.get("id") or "").strip()
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return user_id
+
+
+def _clinic_shape(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": row.get("id"),
+        "slug": row.get("slug"),
+        "brand_name": row.get("brand_name"),
+        "logo_url": row.get("logo_url"),
+        "primary_color": row.get("primary_color"),
+        "agent_name": row.get("agent_name"),
+    }
+
+
+@app.get("/me")
+def me(authorization: Optional[str] = Header(default=None, alias="Authorization")):
+    user_id = _resolve_bearer_user_id(authorization)
 
     try:
         cu_resp = (
@@ -228,6 +235,311 @@ def _handle_supabase_error(response: Any) -> None:
     if error:
         detail = getattr(error, "message", None) or str(error)
         raise HTTPException(status_code=500, detail=detail)
+
+
+def _require_super_admin(authorization: Optional[str]) -> None:
+    user_id = _resolve_bearer_user_id(authorization)
+    try:
+        sa_resp = (
+            supabase.table("clinic_users")
+            .select("user_id")
+            .eq("user_id", user_id)
+            .eq("role", "super_admin")
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(sa_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if not sa_resp.data:
+        raise HTTPException(status_code=403, detail="Super admin only")
+
+
+def _rollback_clinic_onboard(clinic_id: Optional[str], admin_user_id: Optional[str]) -> None:
+    """Best-effort undo after a failed provision (DB cascade, then auth user)."""
+    if clinic_id:
+        try:
+            supabase.table("clinics").delete().eq("id", clinic_id).execute()
+        except Exception:
+            pass
+    if admin_user_id:
+        try:
+            supabase.auth.admin.delete_user(admin_user_id)
+        except Exception:
+            pass
+
+
+def _admin_create_user_id(email: str, password: str) -> str:
+    try:
+        auth_res = supabase.auth.admin.create_user(
+            {
+                "email": email,
+                "password": password,
+                "email_confirm": True,
+            }
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to create admin user: {exc}",
+        ) from exc
+    user_obj = getattr(auth_res, "user", None)
+    if user_obj is None and isinstance(auth_res, dict):
+        user_obj = auth_res.get("user")
+    uid = str(getattr(user_obj, "id", None) or "").strip()
+    if not uid and isinstance(user_obj, dict):
+        uid = str(user_obj.get("id") or "").strip()
+    if not uid:
+        raise HTTPException(
+            status_code=500,
+            detail="Admin user was created but no user id was returned",
+        )
+    return uid
+
+
+_BILLING_MODELS = frozenset({"cash_pay", "insurance", "hybrid"})
+
+
+class OnboardClinicFields(BaseModel):
+    name: str
+    slug: str
+    brand_name: str
+    primary_color: str = "#16A34A"
+    agent_name: str = "Aria"
+    billing_model: str
+
+    @field_validator("slug")
+    @classmethod
+    def slug_url_safe(cls, v: str) -> str:
+        s = v.strip().lower()
+        if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", s):
+            raise ValueError(
+                "slug must be URL-safe (lowercase letters, numbers, hyphens only)"
+            )
+        return s
+
+    @field_validator("billing_model")
+    @classmethod
+    def billing_model_ok(cls, v: str) -> str:
+        b = v.strip()
+        if b not in _BILLING_MODELS:
+            raise ValueError("billing_model must be cash_pay, insurance, or hybrid")
+        return b
+
+
+class OnboardLocationFields(BaseModel):
+    name: str
+    address_line1: str
+    city: str
+    state: str
+    zip: str
+    phone: str
+    email: str
+    timezone: str
+
+
+class OnboardClinicianFields(BaseModel):
+    first_name: str
+    last_name: str
+    title: str = ""
+    email: str
+    specialty: str = ""
+    color: str = "#0EA5A4"
+
+
+class OnboardAdminUserFields(BaseModel):
+    email: str
+    password: str = Field(..., min_length=8)
+
+    @field_validator("email")
+    @classmethod
+    def email_normalized(cls, v: str) -> str:
+        return v.strip().lower()
+
+
+class ClinicOnboardBody(BaseModel):
+    clinic: OnboardClinicFields
+    location: OnboardLocationFields
+    clinicians: list[OnboardClinicianFields]
+    admin_user: OnboardAdminUserFields
+
+
+@app.post("/clinics/onboard")
+def clinics_onboard(
+    body: ClinicOnboardBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    _require_super_admin(authorization)
+
+    clinic_id: Optional[str] = None
+    admin_user_id: Optional[str] = None
+    location_id: str = ""
+    clinician_ids: list[str] = []
+    slug = body.clinic.slug
+
+    try:
+        dup = (
+            supabase.table("clinics")
+            .select("id")
+            .eq("slug", slug)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(dup)
+        if dup.data:
+            raise HTTPException(status_code=400, detail="Slug is already in use")
+
+        clinic_ins = (
+            supabase.table("clinics")
+            .insert(
+                {
+                    "name": body.clinic.name.strip(),
+                    "slug": slug,
+                    "brand_name": body.clinic.brand_name.strip(),
+                    "primary_color": body.clinic.primary_color.strip(),
+                    "agent_name": body.clinic.agent_name.strip(),
+                    "phone": body.location.phone.strip(),
+                    "email": body.location.email.strip(),
+                }
+            )
+            .select("id")
+            .execute()
+        )
+        _handle_supabase_error(clinic_ins)
+        crows = clinic_ins.data or []
+        if not crows:
+            raise HTTPException(status_code=500, detail="Clinic insert returned no row")
+        clinic_id = str(crows[0]["id"])
+
+        address_one_line = (
+            f"{body.location.address_line1.strip()}, {body.location.city.strip()}, "
+            f"{body.location.state.strip()} {body.location.zip.strip()}"
+        )
+        loc_ins = (
+            supabase.table("locations")
+            .insert(
+                {
+                    "clinic_id": clinic_id,
+                    "name": body.location.name.strip(),
+                    "address": address_one_line,
+                    "phone": body.location.phone.strip(),
+                    "timezone": body.location.timezone.strip(),
+                    "is_active": True,
+                }
+            )
+            .execute()
+        )
+        _handle_supabase_error(loc_ins)
+        lrows = loc_ins.data or []
+        if not lrows:
+            raise HTTPException(status_code=500, detail="Location insert returned no row")
+        location_id = str(lrows[0]["id"])
+
+        for c in body.clinicians:
+            spec = c.specialty.strip()
+            col = c.color.strip()
+            clin_payload: dict[str, Any] = {
+                "clinic_id": clinic_id,
+                "location_id": location_id,
+                "first_name": c.first_name.strip(),
+                "last_name": c.last_name.strip(),
+                "title": c.title.strip() or None,
+                "email": c.email.strip(),
+            }
+            if spec:
+                clin_payload["specialty"] = spec
+                clin_payload["bio"] = spec
+            if col:
+                clin_payload["color"] = col
+            cin = (
+                supabase.table("clinicians")
+                .insert(clin_payload)
+                .select("id")
+                .execute()
+            )
+            _handle_supabase_error(cin)
+            cirows = cin.data or []
+            if not cirows:
+                raise HTTPException(
+                    status_code=500, detail="Clinician insert returned no row"
+                )
+            clinician_ids.append(str(cirows[0]["id"]))
+
+        rule_rows: list[dict[str, Any]] = []
+        for cid in clinician_ids:
+            for dow in (1, 2, 3, 4, 5):
+                rule_rows.append(
+                    {
+                        "clinic_id": clinic_id,
+                        "clinician_id": cid,
+                        "day_of_week": dow,
+                        "start_time": "09:00:00",
+                        "end_time": "17:00:00",
+                        "buffer_minutes": 0,
+                        "is_active": True,
+                    }
+                )
+        if rule_rows:
+            ar = supabase.table("availability_rules").insert(rule_rows).execute()
+            _handle_supabase_error(ar)
+
+        st_payload = {
+            "clinic_id": clinic_id,
+            "billing_model": body.clinic.billing_model,
+            "clinic_name": body.clinic.name.strip(),
+            "timezone": body.location.timezone.strip(),
+            "phone": body.location.phone.strip(),
+            "email": body.location.email.strip(),
+            "address_line1": body.location.address_line1.strip(),
+            "city": body.location.city.strip(),
+            "state": body.location.state.strip(),
+            "zip": body.location.zip.strip(),
+        }
+        st = supabase.table("clinic_settings").insert(st_payload).execute()
+        _handle_supabase_error(st)
+
+        admin_user_id = _admin_create_user_id(
+            body.admin_user.email,
+            body.admin_user.password,
+        )
+
+        cui = (
+            supabase.table("clinic_users")
+            .insert(
+                {
+                    "user_id": admin_user_id,
+                    "clinic_id": clinic_id,
+                    "role": "clinic_admin",
+                }
+            )
+            .execute()
+        )
+        _handle_supabase_error(cui)
+        if not cui.data:
+            raise HTTPException(
+                status_code=500, detail="clinic_users insert returned no row"
+            )
+
+    except HTTPException:
+        _rollback_clinic_onboard(clinic_id, admin_user_id)
+        raise
+    except Exception as exc:
+        _rollback_clinic_onboard(clinic_id, admin_user_id)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Clinic onboarding failed: {exc}",
+        ) from exc
+
+    return {
+        "clinic_id": clinic_id,
+        "location_id": location_id,
+        "slug": slug,
+        "clinician_ids": clinician_ids,
+        "admin_user_id": admin_user_id,
+        "message": "Clinic provisioned successfully",
+    }
 
 
 def _now_iso() -> str:
