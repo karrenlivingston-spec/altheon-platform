@@ -9,6 +9,33 @@ from app.db import supabase
 router = APIRouter()
 
 
+def _blocked_windows_for_date(clinician_id: str, target_date: date):
+    start_iso = f"{target_date.isoformat()}T00:00:00"
+    end_iso = f"{target_date.isoformat()}T23:59:59"
+    resp = (
+        supabase.table("blocked_time")
+        .select("start_time,end_time")
+        .eq("clinician_id", clinician_id)
+        .lte("start_time", end_iso)
+        .gte("end_time", start_iso)
+        .order("start_time")
+        .execute()
+    )
+    windows = []
+    for row in resp.data or []:
+        s = row.get("start_time")
+        e = row.get("end_time")
+        if not s or not e:
+            continue
+        try:
+            sdt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+            edt = datetime.fromisoformat(str(e).replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        windows.append((sdt, edt))
+    return windows
+
+
 def get_slots_for_date(
     clinic_id: str,
     clinician_id: Optional[str],
@@ -53,7 +80,7 @@ def get_slots_for_date(
     # Get existing appointments to check overlap
     appts_query = (
         supabase.table("appointments")
-        .select("start_time, end_time")
+        .select("start_time, end_time, clinician_id")
         .eq("clinic_id", clinic_id)
         .in_("status", ["scheduled", "confirmed"])
         .gte("start_time", target_date.isoformat())
@@ -64,6 +91,11 @@ def get_slots_for_date(
 
     appts_resp = appts_query.execute()
     existing = appts_resp.data or []
+    blocked_by_clinician: dict[str, list[tuple[datetime, datetime]]] = {}
+    for rule in rules_resp.data:
+        cid = str(rule.get("clinician_id") or "").strip()
+        if cid and cid not in blocked_by_clinician:
+            blocked_by_clinician[cid] = _blocked_windows_for_date(cid, target_date)
 
     slots = []
     for rule in rules_resp.data:
@@ -89,7 +121,19 @@ def get_slots_for_date(
 
             # Check overlap with existing appointments
             overlap = False
+            cid = str(rule.get("clinician_id") or "").strip()
+            blocked_windows = blocked_by_clinician.get(cid, [])
+            for bs, be in blocked_windows:
+                if slot_start_utc < be and slot_end_utc > bs:
+                    overlap = True
+                    break
+            if overlap:
+                current += timedelta(minutes=step)
+                continue
             for appt in existing:
+                appt_cid = str(appt.get("clinician_id") or "").strip()
+                if cid and appt_cid and appt_cid != cid:
+                    continue
                 appt_start = datetime.fromisoformat(appt["start_time"].replace("Z", "+00:00"))
                 appt_end = datetime.fromisoformat(appt["end_time"].replace("Z", "+00:00"))
                 if slot_start_utc < appt_end and slot_end_utc > appt_start:

@@ -18,6 +18,7 @@ from app.db import supabase
 from app.routers import (
     slots,
     appointments,
+    availability,
     next_available,
     patients,
     legal_requests,
@@ -46,6 +47,7 @@ app.add_middleware(
 
 app.include_router(slots.router, prefix="/slots", tags=["slots"])
 app.include_router(appointments.router, prefix="/appointments", tags=["appointments"])
+app.include_router(availability.router, tags=["availability"])
 app.include_router(patients.router, prefix="/patients", tags=["patients"])
 app.include_router(
     legal_requests.router, prefix="/legal-requests", tags=["legal-requests"]

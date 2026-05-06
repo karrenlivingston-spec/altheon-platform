@@ -15,6 +15,7 @@ import {
   Briefcase,
   Phone,
   Settings,
+  Clock3,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
@@ -363,6 +364,19 @@ function AdminAuthenticatedShellInner({
                   aria-hidden
                 />
                 Settings
+              </span>
+            </Link>
+            <Link
+              href="/admin/settings/availability"
+              className={navLinkClass("/admin/settings/availability")}
+              onClick={() => setSidebarOpen(false)}
+            >
+              <span className="flex items-center gap-3">
+                <Clock3
+                  className={navIconClass("/admin/settings/availability")}
+                  aria-hidden
+                />
+                Availability
               </span>
             </Link>
           </nav>

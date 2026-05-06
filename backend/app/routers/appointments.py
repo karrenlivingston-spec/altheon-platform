@@ -383,6 +383,29 @@ def _to_e164_us(phone: str) -> str:
     return p if p.startswith("+") else f"+{d}"
 
 
+def _parse_iso_utc(value: str) -> datetime:
+    dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _is_blocked_time(clinician_id: str, start_time: str, end_time: str) -> bool:
+    start_dt = _parse_iso_utc(start_time)
+    end_dt = _parse_iso_utc(end_time)
+    query = (
+        supabase.table("blocked_time")
+        .select("id,start_time,end_time")
+        .eq("clinician_id", clinician_id)
+        .lt("start_time", end_dt.isoformat())
+        .gt("end_time", start_dt.isoformat())
+        .limit(1)
+        .execute()
+    )
+    _handle_supabase_error(query)
+    return bool(query.data)
+
+
 @router.post("")
 def create_appointment(payload: CreateAppointmentRequest):
     try:
@@ -455,6 +478,17 @@ def create_appointment(payload: CreateAppointmentRequest):
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    try:
+        if _is_blocked_time(payload.clinician_id, payload.start_time, payload.end_time):
+            raise HTTPException(
+                status_code=409,
+                detail="Selected slot falls within blocked time",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
         appointment_insert = (
