@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, ChevronLeft, ChevronRight, CircleCheck, User } from "lucide-react";
+import { ChevronLeft, ChevronRight, CircleCheck, User } from "lucide-react";
 
 import { useClinic } from "@/app/admin/ClinicContext";
 import { supabase } from "@/lib/supabase";
@@ -238,19 +238,19 @@ export default function PatientFlow() {
     return (
       <div
         key={a.id}
-        className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm"
+        className="rounded-xl border border-black/10 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.08)] transition-all duration-150 ease-in hover:-translate-y-px hover:shadow-[0_4px_12px_rgba(0,0,0,0.10)]"
         style={{ borderLeft: `4px solid ${clinicianColor}` }}
       >
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-sm font-bold text-slate-900">{formatClock(a.start_time)}</span>
           <span className="text-xs text-slate-500">{a.duration_minutes} min</span>
           {a.is_new_patient ? (
-            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
+            <span className="rounded-full bg-[#FEF3C7] px-2 py-0.5 text-xs font-medium text-[#92400E]">
               New Patient
             </span>
           ) : null}
           {a.source === "ai" ? (
-            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
+            <span className="rounded-full bg-[#F1F5F9] px-2 py-0.5 text-xs font-medium text-[#475569]">
               Aria
             </span>
           ) : null}
@@ -264,7 +264,7 @@ export default function PatientFlow() {
               type="button"
               disabled={busy}
               onClick={() => void patchStatus(a.id, "checked_in")}
-              className="rounded-md border border-[#16A34A] px-3 py-1.5 text-sm font-medium text-[#16A34A] hover:bg-green-50 disabled:opacity-50"
+              className="rounded-lg border-[1.5px] border-[var(--color-primary,#16A34A)] px-3 py-1.5 text-sm font-medium text-[var(--color-primary,#16A34A)] transition-all duration-150 ease-in hover:-translate-y-px hover:bg-[#f0fdf4] disabled:opacity-50"
             >
               Check In
             </button>
@@ -272,7 +272,7 @@ export default function PatientFlow() {
               type="button"
               disabled={busy}
               onClick={() => void patchStatus(a.id, "no_show")}
-              className="text-xs font-medium text-red-600 hover:text-red-700 disabled:opacity-50"
+              className="text-xs font-medium text-[#DC2626] hover:text-red-700 disabled:opacity-50"
             >
               No Show
             </button>
@@ -284,7 +284,7 @@ export default function PatientFlow() {
               type="button"
               disabled={busy}
               onClick={() => void patchStatus(a.id, "completed")}
-              className="rounded-md border border-[#7C3AED] px-3 py-1.5 text-sm font-medium text-[#7C3AED] hover:bg-violet-50 disabled:opacity-50"
+              className="rounded-lg border-[1.5px] border-[#7C3AED] px-3 py-1.5 text-sm font-medium text-[#7C3AED] transition-all duration-150 ease-in hover:-translate-y-px hover:bg-violet-50 disabled:opacity-50"
             >
               Mark Complete
             </button>
@@ -292,7 +292,7 @@ export default function PatientFlow() {
               type="button"
               disabled={busy}
               onClick={() => void patchStatus(a.id, "cancelled")}
-              className="text-xs font-medium text-slate-500 hover:text-slate-700 disabled:opacity-50"
+              className="text-xs font-medium text-[#DC2626] hover:text-red-700 disabled:opacity-50"
             >
               Cancel
             </button>

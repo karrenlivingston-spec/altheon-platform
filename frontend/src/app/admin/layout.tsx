@@ -61,7 +61,7 @@ export default function AdminLayout({
 
   if (!ready || !session) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC] text-sm text-slate-500">
+      <div className="flex min-h-screen items-center justify-center bg-[#f0f4f8] text-sm text-slate-500">
         Loading…
       </div>
     );
@@ -124,15 +124,15 @@ function AdminAuthenticatedShellInner({
     return [
       "block rounded-lg border-l-2 py-3 pl-3 pr-4 text-sm font-medium transition-all duration-200",
       active
-        ? "border-green-400 bg-white/5 text-white"
-        : "border-transparent text-[#94A3B8] hover:bg-[rgba(255,255,255,0.05)]",
+        ? "border-l-[3px] border-[#22c55e] bg-[rgba(34,197,94,0.15)] text-white"
+        : "border-transparent text-white/65 hover:bg-white/10 hover:text-white/90",
     ].join(" ");
   }
 
   function navIconClass(href: string): string {
     return isNavLinkActive(href)
-      ? "w-4 h-4 shrink-0 text-white"
-      : "w-4 h-4 shrink-0 text-[#94A3B8]";
+      ? "h-4 w-4 shrink-0 text-white"
+      : "h-4 w-4 shrink-0 text-white/65";
   }
 
   async function handleSignOut() {
@@ -142,7 +142,7 @@ function AdminAuthenticatedShellInner({
 
   if (clinicLoading) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC] text-sm text-slate-500">
+      <div className="flex min-h-screen items-center justify-center bg-[#f0f4f8] text-sm text-slate-500">
         Loading clinic…
       </div>
     );
@@ -150,14 +150,14 @@ function AdminAuthenticatedShellInner({
 
   if (clinicError || !clinicId) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC] px-6 text-sm text-red-600">
+      <div className="flex min-h-screen items-center justify-center bg-[#f0f4f8] px-6 text-sm text-red-600">
         {clinicError || "Could not resolve clinic context."}
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#F8FAFC]">
+    <div className="min-h-screen bg-[#f0f4f8]">
       <button
         type="button"
         aria-label="Toggle menu"
@@ -206,7 +206,8 @@ function AdminAuthenticatedShellInner({
             sidebarOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0",
           ].join(" ")}
           style={{
-            background: "linear-gradient(180deg, #0B1A2B 0%, #0E2238 100%)",
+            background: "linear-gradient(160deg, #0f2f2a 0%, #0b1f2d 100%)",
+            boxShadow: "inset -1px 0 0 rgba(255,255,255,0.05)",
           }}
         >
           <div className="flex items-center gap-2 px-4 py-5">
@@ -372,7 +373,7 @@ function AdminAuthenticatedShellInner({
                 setSidebarOpen(false);
                 void handleSignOut();
               }}
-              className="w-full rounded-lg px-4 py-3 text-left text-sm font-medium text-[#94A3B8] transition-colors hover:bg-[rgba(255,255,255,0.05)]"
+              className="w-full rounded-lg px-4 py-3 text-left text-sm font-medium text-white/65 transition-colors hover:bg-white/10 hover:text-white/90"
             >
               Sign Out
             </button>

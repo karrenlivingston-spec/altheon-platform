@@ -52,6 +52,14 @@ function clinicianName(row: AppointmentRow): string {
   return "Clinician";
 }
 
+function statusDotClass(status: string): string {
+  const s = status.toLowerCase();
+  if (s === "checked_in") return "bg-[#16A34A]";
+  if (s === "completed") return "bg-[#7C3AED]";
+  if (s === "cancelled") return "bg-[#DC2626]";
+  return "bg-slate-400";
+}
+
 function tabClass(active: boolean): string {
   return active
     ? "rounded-lg bg-[#0B1A2B] px-4 py-2 text-sm font-medium text-white"
@@ -106,7 +114,7 @@ export default function AdminAppointmentsPage() {
 
   return (
     <div className={`${DS_PAGE_ROOT} mx-auto max-w-7xl`}>
-      <h1 className={DS_PAGE_TITLE}>Scheduling</h1>
+      <h1 className={`${DS_PAGE_TITLE} mb-6 font-bold`}>Scheduling</h1>
       <p className={DS_PAGE_SUBTITLE}>Calendar and patient flow</p>
 
       <div className="mt-6 flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-2">
@@ -160,20 +168,17 @@ export default function AdminAppointmentsPage() {
                         <p className="text-xs text-slate-400">No appointments</p>
                       ) : (
                         rows.map((row) => (
-                          <div
-                            key={row.id}
-                            className="rounded-lg border-l-2 border-l-slate-300 bg-slate-50 p-2"
-                          >
+                          <div key={row.id} className="rounded-lg border border-black/10 bg-slate-50 p-2">
                             <p className="text-xs text-slate-500">{formatTimeEastern(row.start_time)}</p>
                             <p className="truncate text-xs font-medium text-slate-800">
                               {patientName(row)}
                             </p>
                             <p className="truncate text-[11px] text-slate-500">
-                              {clinicianName(row)} · {row.treatment_types?.name ?? "Visit"}
+                              {clinicianName(row)}
                             </p>
-                            <p className="text-[11px] uppercase tracking-wide text-slate-400">
-                              {row.status}
-                            </p>
+                            <div className="mt-1 flex items-center gap-1.5">
+                              <span className={`h-2 w-2 rounded-full ${statusDotClass(row.status)}`} />
+                            </div>
                           </div>
                         ))
                       )}
