@@ -43,6 +43,15 @@ class AppointmentStatusPatchBody(BaseModel):
     status: str = Field(...)
 
 
+class AppointmentTimePatchBody(BaseModel):
+    start_time: str = Field(...)
+
+
+class AppointmentSwapBody(BaseModel):
+    appointment_id_1: str = Field(...)
+    appointment_id_2: str = Field(...)
+
+
 class PatientFlowStats(BaseModel):
     total: int
     new_patients: int
@@ -251,6 +260,400 @@ def get_patient_flow(
         "stats": PatientFlowStats(**stats).model_dump(),
         "appointments": out_rows,
     }
+
+
+def _format_calendar_appt_row(
+    r: dict[str, Any],
+    first_appt_by_patient: dict[str, datetime],
+    clinic_tz: ZoneInfo,
+) -> dict[str, Any]:
+    patient = r.get("patients") or {}
+    clinician = r.get("clinicians") or {}
+    treatment = r.get("treatment_types") or {}
+    pid = str(patient.get("id") or r.get("patient_id") or "").strip()
+    start_raw = str(r.get("start_time") or "").strip()
+    appt_date_str = ""
+    try:
+        dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        local = dt.astimezone(clinic_tz)
+        appt_date_str = local.date().isoformat()
+    except ValueError:
+        pass
+    first_dt = first_appt_by_patient.get(pid)
+    is_new_patient = bool(
+        first_dt and appt_date_str and first_dt.date().isoformat() == appt_date_str
+    )
+    return {
+        "id": str(r.get("id")),
+        "start_time": start_raw,
+        "end_time": str(r.get("end_time") or ""),
+        "status": str(r.get("status") or "scheduled"),
+        "source": r.get("source") or "manual",
+        "location_id": str(r.get("location_id") or ""),
+        "is_new_patient": is_new_patient,
+        "patient": {
+            "id": pid or str(r.get("patient_id") or ""),
+            "first_name": patient.get("first_name"),
+            "last_name": patient.get("last_name"),
+            "phone": patient.get("phone"),
+        },
+        "clinician": {
+            "id": str(clinician.get("id") or r.get("clinician_id") or ""),
+            "first_name": clinician.get("first_name"),
+            "last_name": clinician.get("last_name"),
+            "title": clinician.get("title"),
+            "color": clinician.get("color") or "#0EA5A4",
+        },
+        "treatment_type": {
+            "name": treatment.get("name"),
+            "duration_minutes": int(treatment.get("duration_minutes") or 0),
+        },
+    }
+
+
+@router.get("/calendar")
+def get_appointments_calendar(
+    start_date: str = Query(...),
+    end_date: str = Query(...),
+    clinic_id: str = Query(...),
+    clinician_id: Optional[str] = Query(default=None),
+):
+    clinic_tz = ZoneInfo("America/New_York")
+    try:
+        sd = date.fromisoformat(start_date.strip())
+        ed = date.fromisoformat(end_date.strip())
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="start_date and end_date must be YYYY-MM-DD",
+        ) from exc
+    if ed < sd:
+        raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
+
+    range_start_local = datetime.combine(sd, time(0, 0), tzinfo=clinic_tz)
+    range_end_exclusive = datetime.combine(ed + timedelta(days=1), time(0, 0), tzinfo=clinic_tz)
+    range_start_utc = range_start_local.astimezone(timezone.utc)
+    range_end_utc = range_end_exclusive.astimezone(timezone.utc)
+
+    try:
+        q = (
+            supabase.table("appointments")
+            .select(
+                "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,"
+                "patients(id,first_name,last_name,phone),"
+                "clinicians(id,first_name,last_name,color,title),"
+                "treatment_types(name,duration_minutes)"
+            )
+            .eq("clinic_id", clinic_id)
+            .neq("status", "cancelled")
+            .gte("start_time", range_start_utc.isoformat())
+            .lt("start_time", range_end_utc.isoformat())
+            .order("start_time")
+        )
+        if clinician_id and clinician_id.strip():
+            q = q.eq("clinician_id", clinician_id.strip())
+        ap_resp = q.execute()
+        _handle_supabase_error(ap_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    rows = ap_resp.data or []
+    patient_ids = sorted(
+        {
+            str(r.get("patient_id") or "").strip()
+            for r in rows
+            if str(r.get("patient_id") or "").strip()
+        }
+    )
+    first_appt_by_patient: dict[str, datetime] = {}
+    if patient_ids:
+        try:
+            hist_resp = (
+                supabase.table("appointments")
+                .select("patient_id,start_time")
+                .eq("clinic_id", clinic_id)
+                .in_("patient_id", patient_ids)
+                .order("start_time")
+                .execute()
+            )
+            _handle_supabase_error(hist_resp)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        for hr in hist_resp.data or []:
+            pid = str(hr.get("patient_id") or "").strip()
+            if not pid or pid in first_appt_by_patient:
+                continue
+            start_raw_h = str(hr.get("start_time") or "").strip()
+            if not start_raw_h:
+                continue
+            try:
+                dth = datetime.fromisoformat(start_raw_h.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if dth.tzinfo is None:
+                dth = dth.replace(tzinfo=timezone.utc)
+            first_appt_by_patient[pid] = dth.astimezone(clinic_tz)
+
+    appointments = [_format_calendar_appt_row(r, first_appt_by_patient, clinic_tz) for r in rows]
+    return {"appointments": appointments}
+
+
+def _duration_minutes_from_appt_row(row: dict[str, Any]) -> int:
+    treatment = row.get("treatment_types") or {}
+    d = int(treatment.get("duration_minutes") or 0)
+    if d > 0:
+        return d
+    try:
+        s = datetime.fromisoformat(str(row.get("start_time")).replace("Z", "+00:00"))
+        e = datetime.fromisoformat(str(row.get("end_time")).replace("Z", "+00:00"))
+        if s.tzinfo is None:
+            s = s.replace(tzinfo=timezone.utc)
+        if e.tzinfo is None:
+            e = e.replace(tzinfo=timezone.utc)
+        mins = int((e - s).total_seconds() // 60)
+        return mins if mins > 0 else 30
+    except Exception:
+        return 30
+
+
+@router.patch("/{appointment_id}/time")
+def update_appointment_time(
+    appointment_id: str,
+    body: AppointmentTimePatchBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    user_id = _resolve_bearer_user_id(authorization)
+    try:
+        ap_resp = (
+            supabase.table("appointments")
+            .select(
+                "id,clinic_id,patient_id,clinician_id,location_id,start_time,end_time,status,source,"
+                "treatment_types(duration_minutes)"
+            )
+            .eq("id", appointment_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(ap_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    rows_a = ap_resp.data or []
+    if not rows_a:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    row = rows_a[0]
+    clinic_id = str(row.get("clinic_id") or "").strip()
+    if not clinic_id:
+        raise HTTPException(status_code=500, detail="Appointment has no clinic_id")
+    _assert_user_has_clinic_access(user_id, clinic_id)
+
+    dur = _duration_minutes_from_appt_row(row)
+    new_start = _parse_iso_utc(body.start_time)
+    new_end = new_start + timedelta(minutes=dur)
+
+    try:
+        upd = (
+            supabase.table("appointments")
+            .update(
+                {
+                    "start_time": new_start.isoformat(),
+                    "end_time": new_end.isoformat(),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            .eq("id", appointment_id)
+            .execute()
+        )
+        _handle_supabase_error(upd)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    clinic_tz = ZoneInfo("America/New_York")
+    try:
+        refetch = (
+            supabase.table("appointments")
+            .select(
+                "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,"
+                "patients(id,first_name,last_name,phone),"
+                "clinicians(id,first_name,last_name,color,title),"
+                "treatment_types(name,duration_minutes)"
+            )
+            .eq("id", appointment_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(refetch)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    r_rows = refetch.data or []
+    if not r_rows:
+        raise HTTPException(status_code=500, detail="Appointment missing after update")
+    r0 = r_rows[0]
+    patient = r0.get("patients") or {}
+    pid = str(patient.get("id") or r0.get("patient_id") or "").strip()
+    first_map: dict[str, datetime] = {}
+    if pid:
+        try:
+            hist_resp = (
+                supabase.table("appointments")
+                .select("patient_id,start_time")
+                .eq("clinic_id", clinic_id)
+                .eq("patient_id", pid)
+                .order("start_time")
+                .limit(1)
+                .execute()
+            )
+            _handle_supabase_error(hist_resp)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        hr = (hist_resp.data or [None])[0]
+        if hr:
+            st = str(hr.get("start_time") or "")
+            try:
+                dth = datetime.fromisoformat(st.replace("Z", "+00:00"))
+                if dth.tzinfo is None:
+                    dth = dth.replace(tzinfo=timezone.utc)
+                first_map[pid] = dth.astimezone(clinic_tz)
+            except ValueError:
+                pass
+
+    return _format_calendar_appt_row(r0, first_map, clinic_tz)
+
+
+@router.post("/swap")
+def swap_appointment_times(
+    body: AppointmentSwapBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    user_id = _resolve_bearer_user_id(authorization)
+    id1 = body.appointment_id_1.strip()
+    id2 = body.appointment_id_2.strip()
+    if id1 == id2:
+        raise HTTPException(status_code=400, detail="Cannot swap an appointment with itself")
+
+    def fetch_slot(aid: str) -> dict[str, Any]:
+        resp = (
+            supabase.table("appointments")
+            .select("id,clinic_id,start_time,end_time")
+            .eq("id", aid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+        rows = resp.data or []
+        if not rows:
+            raise HTTPException(status_code=404, detail=f"Appointment not found: {aid}")
+        return rows[0]
+
+    try:
+        r1 = fetch_slot(id1)
+        r2 = fetch_slot(id2)
+    except HTTPException:
+        raise
+
+    c1 = str(r1.get("clinic_id") or "")
+    c2 = str(r2.get("clinic_id") or "")
+    if not c1 or c1 != c2:
+        raise HTTPException(
+            status_code=400,
+            detail="Appointments must belong to the same clinic",
+        )
+    _assert_user_has_clinic_access(user_id, c1)
+
+    s1, e1 = r1.get("start_time"), r1.get("end_time")
+    s2, e2 = r2.get("start_time"), r2.get("end_time")
+    now_ts = datetime.now(timezone.utc).isoformat()
+
+    try:
+        u1 = (
+            supabase.table("appointments")
+            .update({"start_time": s2, "end_time": e2, "updated_at": now_ts})
+            .eq("id", id1)
+            .execute()
+        )
+        _handle_supabase_error(u1)
+        u2 = (
+            supabase.table("appointments")
+            .update({"start_time": s1, "end_time": e1, "updated_at": now_ts})
+            .eq("id", id2)
+            .execute()
+        )
+        _handle_supabase_error(u2)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    clinic_tz = ZoneInfo("America/New_York")
+    first_map: dict[str, datetime] = {}
+    pids: list[str] = []
+    out_rows: list[dict[str, Any]] = []
+    try:
+        for aid in (id1, id2):
+            refetch = (
+                supabase.table("appointments")
+                .select(
+                    "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,"
+                    "patients(id,first_name,last_name,phone),"
+                    "clinicians(id,first_name,last_name,color,title),"
+                    "treatment_types(name,duration_minutes)"
+                )
+                .eq("id", aid)
+                .limit(1)
+                .execute()
+            )
+            _handle_supabase_error(refetch)
+            r0 = (refetch.data or [None])[0]
+            if r0:
+                out_rows.append(r0)
+                p = r0.get("patients") or {}
+                pid = str(p.get("id") or r0.get("patient_id") or "").strip()
+                if pid and pid not in pids:
+                    pids.append(pid)
+
+        if pids:
+            hist_resp = (
+                supabase.table("appointments")
+                .select("patient_id,start_time")
+                .eq("clinic_id", c1)
+                .in_("patient_id", pids)
+                .order("start_time")
+                .execute()
+            )
+            _handle_supabase_error(hist_resp)
+            for hr in hist_resp.data or []:
+                pid = str(hr.get("patient_id") or "").strip()
+                if not pid or pid in first_map:
+                    continue
+                st = str(hr.get("start_time") or "")
+                try:
+                    dth = datetime.fromisoformat(st.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if dth.tzinfo is None:
+                    dth = dth.replace(tzinfo=timezone.utc)
+                first_map[pid] = dth.astimezone(clinic_tz)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    formatted = [_format_calendar_appt_row(r, first_map, clinic_tz) for r in out_rows]
+    return {"appointments": formatted}
 
 
 @router.patch("/{appointment_id}/status")
