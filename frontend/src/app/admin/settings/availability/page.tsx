@@ -121,21 +121,8 @@ export default function AvailabilitySettingsPage() {
     }
   }
 
-  async function fetchAvailability(cid: string) {
-    console.log("Fetching availability for:", cid);
-    const [rulesRes, blockRes] = await Promise.all([
-      fetch(`${API_BASE}/clinicians/${encodeURIComponent(cid)}/availability`, {
-        headers: await headers(),
-      }),
-      fetch(
-        `${API_BASE}/clinicians/${encodeURIComponent(cid)}/blocked-time?from_date=${encodeURIComponent(toYmd(new Date()))}`,
-        { headers: await headers() },
-      ),
-    ]);
-    const rulesData = (rulesRes.ok ? await rulesRes.json() : []) as Rule[];
-    console.log("Availability response:", rulesData);
-    const blockData = (blockRes.ok ? await blockRes.json() : []) as Blocked[];
-    const next: Rule[] = [0, 1, 2, 3, 4, 5, 6].map((dayNum) => {
+  function mapApiRulesToState(rulesData: Rule[]): Rule[] {
+    return [0, 1, 2, 3, 4, 5, 6].map((dayNum) => {
       const rule = (rulesData || []).find((r) => Number(r.day_of_week) === dayNum);
       return {
         day_of_week: dayNum,
@@ -146,8 +133,29 @@ export default function AvailabilitySettingsPage() {
         buffer_minutes: rule ? Number(rule.buffer_minutes || 10) : 10,
       };
     });
-    setRules(next);
-    setBlocked(Array.isArray(blockData) ? blockData : []);
+  }
+
+  async function loadRulesForProvider(cid: string): Promise<Rule[]> {
+    console.log("Fetching availability for:", cid);
+    const rulesRes = await fetch(`${API_BASE}/clinicians/${encodeURIComponent(cid)}/availability`, {
+      headers: await headers(),
+    });
+    const rulesData = (rulesRes.ok ? await rulesRes.json() : []) as Rule[];
+    console.log("Availability response:", rulesData);
+    return mapApiRulesToState(rulesData);
+  }
+
+  async function loadBlockedForProvider(cid: string): Promise<Blocked[]> {
+    const blockRes = await fetch(
+      `${API_BASE}/clinicians/${encodeURIComponent(cid)}/blocked-time?from_date=${encodeURIComponent(toYmd(new Date()))}`,
+      { headers: await headers() },
+    );
+    const blockData = (blockRes.ok ? await blockRes.json() : []) as Blocked[];
+    return Array.isArray(blockData) ? blockData : [];
+  }
+
+  async function fetchAvailability(cid: string) {
+    setRules(await loadRulesForProvider(cid));
   }
 
   useEffect(() => {
@@ -163,15 +171,28 @@ export default function AvailabilitySettingsPage() {
   }, [clinicId]);
 
   useEffect(() => {
-    if (!selectedClinicianId) return;
     let cancelled = false;
-    (async () => {
-      setRefreshing(true);
-      await fetchAvailability(selectedClinicianId);
-      if (!cancelled) setRefreshing(false);
-    })();
+    const timer = setTimeout(() => {
+      if (!selectedClinicianId) return;
+      const cid = selectedClinicianId;
+      void (async () => {
+        setRefreshing(true);
+        try {
+          const [nextRules, nextBlocked] = await Promise.all([
+            loadRulesForProvider(cid),
+            loadBlockedForProvider(cid),
+          ]);
+          if (cancelled) return;
+          setRules(nextRules);
+          setBlocked(nextBlocked);
+        } finally {
+          if (!cancelled) setRefreshing(false);
+        }
+      })();
+    }, 150);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [selectedClinicianId]);
 
@@ -190,6 +211,7 @@ export default function AvailabilitySettingsPage() {
       });
       if (res.ok) {
         setMsg("Schedule saved.");
+        await fetchAvailability(selectedClinicianId);
       } else {
         setMsg(`Failed to save (${res.status})`);
       }
@@ -226,7 +248,12 @@ export default function AvailabilitySettingsPage() {
         method: "DELETE",
         headers: await headers(),
       });
-      await fetchAvailability(selectedClinicianId);
+      const [r, b] = await Promise.all([
+        loadRulesForProvider(selectedClinicianId),
+        loadBlockedForProvider(selectedClinicianId),
+      ]);
+      setRules(r);
+      setBlocked(b);
     } finally {
       setBusyDelete((p) => {
         const next = { ...p };

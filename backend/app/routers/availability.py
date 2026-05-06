@@ -185,8 +185,7 @@ def replace_clinician_availability(
 
     insert_rows: list[dict[str, Any]] = []
     for rule in rules:
-        raw = rule.get("is_active", False)
-        is_active = raw if isinstance(raw, bool) else str(raw).lower() == "true"
+        is_active = bool(rule.get("is_active", False))
         insert_rows.append(
             {
                 "clinic_id": clinic_id,
@@ -208,11 +207,19 @@ def replace_clinician_availability(
             .execute()
         )
         _handle_supabase_error(del_resp)
-        if not insert_rows:
-            return []
-        ins_resp = supabase.table("availability_rules").insert(insert_rows).execute()
-        _handle_supabase_error(ins_resp)
-        return ins_resp.data or []
+        if insert_rows:
+            print(f"Inserting rows: {insert_rows}")
+            ins_resp = supabase.table("availability_rules").insert(insert_rows).execute()
+            _handle_supabase_error(ins_resp)
+        verify = (
+            supabase.table("availability_rules")
+            .select("day_of_week, is_active")
+            .eq("clinician_id", clinician_id)
+            .execute()
+        )
+        _handle_supabase_error(verify)
+        print(f"Verification after save: {verify.data}")
+        return verify.data or []
     except HTTPException:
         raise
     except Exception as exc:
