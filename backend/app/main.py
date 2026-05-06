@@ -63,22 +63,18 @@ app.include_router(legal_router)
 app.include_router(surveys.router)
 
 
-def _pool_dsn() -> Optional[str]:
-    # Prefer Supabase transaction pooler (port 6543) when configured.
-    return os.getenv("SUPABASE_DB_POOL_URL") or os.getenv("SUPABASE_DB_URL")
-
-
 @app.on_event("startup")
 async def startup_db_pool() -> None:
-    dsn = _pool_dsn()
+    dsn = os.environ.get("SUPABASE_DB_URL")
     if not dsn:
-        print("DB pool disabled: SUPABASE_DB_POOL_URL / SUPABASE_DB_URL not set")
+        print("DB pool disabled: SUPABASE_DB_URL not set")
         return
     app.state.pool = await asyncpg.create_pool(
         dsn=dsn,
         min_size=1,
         max_size=3,
         command_timeout=30,
+        max_inactive_connection_lifetime=300,
     )
     print("DB pool initialized")
 
