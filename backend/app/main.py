@@ -299,7 +299,7 @@ def _admin_create_user_id(email: str, password: str) -> str:
     return uid
 
 
-_BILLING_MODELS = frozenset({"cash_pay", "insurance", "hybrid"})
+_ONBOARD_BILLING_MODELS = frozenset({"cash", "insurance", "hybrid"})
 
 
 class OnboardClinicFields(BaseModel):
@@ -308,7 +308,7 @@ class OnboardClinicFields(BaseModel):
     brand_name: str
     primary_color: str = "#16A34A"
     agent_name: str = "Aria"
-    billing_model: str
+    billing_model: str = "cash"
 
     @field_validator("slug")
     @classmethod
@@ -323,9 +323,11 @@ class OnboardClinicFields(BaseModel):
     @field_validator("billing_model")
     @classmethod
     def billing_model_ok(cls, v: str) -> str:
-        b = v.strip()
-        if b not in _BILLING_MODELS:
-            raise ValueError("billing_model must be cash_pay, insurance, or hybrid")
+        b = v.strip().lower()
+        if b not in _ONBOARD_BILLING_MODELS:
+            raise ValueError(
+                "billing_model must be one of: cash, insurance, hybrid"
+            )
         return b
 
 
