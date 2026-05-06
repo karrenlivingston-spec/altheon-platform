@@ -183,6 +183,51 @@ const FIELD_INPUT = `mt-1 w-full ${DS_INPUT}`;
 
 const LABEL_CLASS = "block text-xs font-medium uppercase tracking-wide text-gray-500";
 
+const SKELETON_PULSE = "animate-pulse rounded-md bg-gray-200/80";
+
+function PatientHeaderSkeleton() {
+  return (
+    <div className="mb-6 overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
+      <div className="flex flex-col gap-6 px-6 py-6 md:flex-row md:items-start md:justify-between">
+        <div className="flex min-w-0 gap-4">
+          <div className={`h-16 w-16 shrink-0 ${SKELETON_PULSE}`} />
+          <div className="min-w-0 flex-1 space-y-3 py-1">
+            <div className={`h-8 w-48 max-w-full ${SKELETON_PULSE}`} />
+            <div className={`h-4 w-full max-w-md ${SKELETON_PULSE}`} />
+          </div>
+        </div>
+        <div className={`h-10 w-28 shrink-0 ${SKELETON_PULSE}`} />
+      </div>
+    </div>
+  );
+}
+
+function TableSkeleton({ cols, rows = 4 }: { cols: number; rows?: number }) {
+  return (
+    <>
+      {Array.from({ length: rows }).map((_, r) => (
+        <tr key={r} className={DS_TR}>
+          {Array.from({ length: cols }).map((_, c) => (
+            <td key={c} className="px-6 py-4">
+              <div className={`h-4 w-[85%] ${SKELETON_PULSE}`} />
+            </td>
+          ))}
+        </tr>
+      ))}
+    </>
+  );
+}
+
+function CardSkeleton({ lines = 3 }: { lines?: number }) {
+  return (
+    <div className="space-y-3">
+      {Array.from({ length: lines }).map((_, i) => (
+        <div key={i} className={`h-4 w-full ${SKELETON_PULSE}`} />
+      ))}
+    </div>
+  );
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token ?? "";
@@ -212,7 +257,9 @@ export function PatientDetailView({
   const [piRows, setPiRows] = useState<PiCaseRow[]>([]);
   const [surveyRows, setSurveyRows] = useState<SurveyResponseRow[]>([]);
 
-  const [loading, setLoading] = useState(true);
+  const [loadingPatient, setLoadingPatient] = useState(true);
+  const [loadingBatchA, setLoadingBatchA] = useState(false);
+  const [loadingBatchB, setLoadingBatchB] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
@@ -232,44 +279,22 @@ export function PatientDetailView({
   const load = useCallback(async (silent = false) => {
     if (!patientId) return;
     if (!silent) {
-      setLoading(true);
+      setLoadingPatient(true);
+      setLoadingBatchA(false);
+      setLoadingBatchB(false);
       setError(null);
+      setAppointments([]);
+      setBillingRows([]);
+      setMembershipRows([]);
+      setPiRows([]);
+      setSurveyRows([]);
     }
     try {
       const h = await authHeaders();
-      const [
-        ptRes,
-        apRes,
-        brRes,
-        memRes,
-        piRes,
-        surveyRes,
-      ] = await Promise.all([
-        fetch(
-          `${API_BASE}/patients/${encodeURIComponent(patientId)}?clinic_id=${encodeURIComponent(clinicId)}`,
-          { headers: h },
-        ),
-        fetch(
-          `${API_BASE}/appointments?clinic_id=${encodeURIComponent(clinicId)}`,
-          { headers: h },
-        ),
-        fetch(
-          `${API_BASE}/billing-records?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
-          { headers: h },
-        ),
-        fetch(
-          `${API_BASE}/patient-memberships?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
-          { headers: h },
-        ),
-        fetch(
-          `${API_BASE}/pi-cases?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
-          { headers: h },
-        ),
-        fetch(
-          `${API_BASE}/patients/${encodeURIComponent(patientId)}/surveys?clinic_id=${encodeURIComponent(clinicId)}`,
-          { headers: h },
-        ),
-      ]);
+      const ptRes = await fetch(
+        `${API_BASE}/patients/${encodeURIComponent(patientId)}?clinic_id=${encodeURIComponent(clinicId)}`,
+        { headers: h },
+      );
 
       if (!ptRes.ok) {
         if (!silent) {
@@ -291,6 +316,21 @@ export function PatientDetailView({
         lawyer_email: ptJson.lawyer_email ?? "",
       });
       setLegalEdit(false);
+      if (!silent) {
+        setLoadingPatient(false);
+        setLoadingBatchA(true);
+      }
+
+      const [apRes, brRes] = await Promise.all([
+        fetch(
+          `${API_BASE}/appointments?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers: h },
+        ),
+        fetch(
+          `${API_BASE}/billing-records?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
+          { headers: h },
+        ),
+      ]);
 
       const apJson = apRes.ok ? await apRes.json() : [];
       const allAp = Array.isArray(apJson) ? apJson : [];
@@ -302,6 +342,25 @@ export function PatientDetailView({
 
       const brJson = brRes.ok ? await brRes.json() : [];
       setBillingRows(Array.isArray(brJson) ? brJson : []);
+      if (!silent) {
+        setLoadingBatchA(false);
+        setLoadingBatchB(true);
+      }
+
+      const [piRes, memRes, surveyRes] = await Promise.all([
+        fetch(
+          `${API_BASE}/pi-cases?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
+          { headers: h },
+        ),
+        fetch(
+          `${API_BASE}/patient-memberships?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
+          { headers: h },
+        ),
+        fetch(
+          `${API_BASE}/patients/${encodeURIComponent(patientId)}/surveys?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers: h },
+        ),
+      ]);
 
       const memJson = memRes.ok ? await memRes.json() : [];
       setMembershipRows(Array.isArray(memJson) ? memJson : []);
@@ -311,6 +370,7 @@ export function PatientDetailView({
 
       const surveyJson = surveyRes.ok ? await surveyRes.json() : [];
       setSurveyRows(Array.isArray(surveyJson) ? surveyJson : []);
+      if (!silent) setLoadingBatchB(false);
     } catch {
       if (!silent) {
         setError("Could not load patient.");
@@ -318,7 +378,11 @@ export function PatientDetailView({
         setDraft(null);
       }
     } finally {
-      if (!silent) setLoading(false);
+      if (!silent) {
+        setLoadingPatient(false);
+        setLoadingBatchA(false);
+        setLoadingBatchB(false);
+      }
     }
   }, [patientId, clinicId]);
 
@@ -347,6 +411,9 @@ export function PatientDetailView({
       ),
     [surveyRows],
   );
+
+  /** PI / memberships / surveys load in batch B after batch A; hide empty states while A is still running. */
+  const loadingMembershipTabData = loadingBatchA || loadingBatchB;
 
   function setDraftField<K extends keyof PatientRecord>(
     key: K,
@@ -500,10 +567,33 @@ export function PatientDetailView({
     );
   }
 
-  if (loading && !patient) {
+  const rootClass = embedded
+    ? "flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#f8fafc] px-4 pb-8 pt-4"
+    : DS_PAGE_ROOT;
+
+  if (loadingPatient && !patient) {
     return (
-      <div className="rounded-2xl border border-gray-100 bg-white px-6 py-12 text-center text-gray-500 shadow-sm">
-        Loading…
+      <div className={rootClass}>
+        {onBack ? (
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={onBack}
+              className={`text-sm font-medium text-gray-600 transition-colors hover:text-gray-900 ${embedded ? "md:hidden" : ""}`}
+            >
+              {embedded ? "← Back" : "← Patients"}
+            </button>
+          </div>
+        ) : null}
+        <PatientHeaderSkeleton />
+        <div className="mt-6 grid gap-6 md:grid-cols-2">
+          <div className={`rounded-2xl border border-gray-100 bg-white p-6 shadow-sm`}>
+            <CardSkeleton lines={8} />
+          </div>
+          <div className={`rounded-2xl border border-gray-100 bg-white p-6 shadow-sm`}>
+            <CardSkeleton lines={8} />
+          </div>
+        </div>
       </div>
     );
   }
@@ -536,10 +626,6 @@ export function PatientDetailView({
     { id: "billing", label: "Billing" },
     { id: "membership", label: "Memberships & PI Cases" },
   ];
-
-  const rootClass = embedded
-    ? "flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#f8fafc] px-4 pb-8 pt-4"
-    : DS_PAGE_ROOT;
 
   return (
     <div className={rootClass}>
@@ -1117,7 +1203,9 @@ export function PatientDetailView({
                 </tr>
               </thead>
               <tbody>
-                {appointmentTableRows.length === 0 ? (
+                {loadingBatchA ? (
+                  <TableSkeleton cols={4} rows={5} />
+                ) : appointmentTableRows.length === 0 ? (
                   <tr>
                     <td
                       colSpan={4}
@@ -1170,7 +1258,9 @@ export function PatientDetailView({
                 </tr>
               </thead>
               <tbody>
-                {billingRows.length === 0 ? (
+                {loadingBatchA ? (
+                  <TableSkeleton cols={3} rows={4} />
+                ) : billingRows.length === 0 ? (
                   <tr>
                     <td
                       colSpan={3}
@@ -1212,7 +1302,9 @@ export function PatientDetailView({
         <div className="mt-8 space-y-8">
           <div className={DS_CARD}>
             <h2 className={DS_SECTION_HEADER}>Active membership</h2>
-            {!activeMembership ? (
+            {loadingMembershipTabData ? (
+              <CardSkeleton lines={4} />
+            ) : !activeMembership ? (
               <p className="text-sm text-gray-500">No active enrollment.</p>
             ) : (
               <div className="flex flex-wrap items-center gap-6">
@@ -1261,7 +1353,9 @@ export function PatientDetailView({
                   </tr>
                 </thead>
                 <tbody>
-                  {piRows.length === 0 ? (
+                  {loadingMembershipTabData ? (
+                    <TableSkeleton cols={4} rows={4} />
+                  ) : piRows.length === 0 ? (
                     <tr>
                       <td
                         colSpan={4}
@@ -1306,7 +1400,16 @@ export function PatientDetailView({
 
           <div className="mt-8">
             <h2 className={DS_SECTION_HEADER}>Surveys</h2>
-            {completedSurveys.length === 0 ? (
+            {loadingMembershipTabData ? (
+              <div className="mt-4 grid gap-6 sm:grid-cols-2">
+                <div className={`${DS_CARD} min-h-[180px]`}>
+                  <CardSkeleton lines={6} />
+                </div>
+                <div className={`${DS_CARD} min-h-[180px]`}>
+                  <CardSkeleton lines={6} />
+                </div>
+              </div>
+            ) : completedSurveys.length === 0 ? (
               <p className="mt-2 text-sm text-gray-500">
                 No survey responses yet.
               </p>
