@@ -404,14 +404,12 @@ def clinics_onboard(
                     "email": body.location.email.strip(),
                 }
             )
-            .select("id")
             .execute()
         )
         _handle_supabase_error(clinic_ins)
-        crows = clinic_ins.data or []
-        if not crows:
+        if not clinic_ins.data:
             raise HTTPException(status_code=500, detail="Clinic insert returned no row")
-        clinic_id = str(crows[0]["id"])
+        clinic_id = str(clinic_ins.data[0]["id"])
 
         address_one_line = (
             f"{body.location.address_line1.strip()}, {body.location.city.strip()}, "
@@ -453,19 +451,13 @@ def clinics_onboard(
                 clin_payload["bio"] = spec
             if col:
                 clin_payload["color"] = col
-            cin = (
-                supabase.table("clinicians")
-                .insert(clin_payload)
-                .select("id")
-                .execute()
-            )
+            cin = supabase.table("clinicians").insert(clin_payload).execute()
             _handle_supabase_error(cin)
-            cirows = cin.data or []
-            if not cirows:
+            if not cin.data:
                 raise HTTPException(
                     status_code=500, detail="Clinician insert returned no row"
                 )
-            clinician_ids.append(str(cirows[0]["id"]))
+            clinician_ids.append(str(cin.data[0]["id"]))
 
         rule_rows: list[dict[str, Any]] = []
         for cid in clinician_ids:
