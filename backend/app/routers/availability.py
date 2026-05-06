@@ -169,19 +169,23 @@ def replace_clinician_availability(
     clinician = _clinician_row(clinician_id)
     clinic_id = str(clinician.get("clinic_id") or "").strip()
     _require_auth_and_clinic(authorization, clinic_id)
+    rules = [rule.model_dump() for rule in body]
+    print(f"Rules received: {rules}")
 
     insert_rows: list[dict[str, Any]] = []
-    for rule in body:
+    for rule in rules:
+        raw = rule.get("is_active", False)
+        is_active = raw if isinstance(raw, bool) else str(raw).lower() == "true"
         insert_rows.append(
             {
                 "clinic_id": clinic_id,
                 "clinician_id": clinician_id,
-                "day_of_week": rule.day_of_week,
-                "start_time": rule.start_time,
-                "end_time": rule.end_time,
-                "slot_duration_minutes": int(rule.slot_duration_minutes),
-                "buffer_minutes": int(rule.buffer_minutes),
-                "is_active": bool(rule.is_active),
+                "day_of_week": int(rule["day_of_week"]),
+                "start_time": str(rule["start_time"]),
+                "end_time": str(rule["end_time"]),
+                "slot_duration_minutes": int(rule["slot_duration_minutes"]),
+                "buffer_minutes": int(rule["buffer_minutes"]),
+                "is_active": is_active,
             }
         )
 

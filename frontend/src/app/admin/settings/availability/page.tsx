@@ -182,6 +182,7 @@ export default function AvailabilitySettingsPage() {
     setSaving(true);
     setMsg("");
     try {
+      console.log("Saving availability payload:", rows);
       const res = await fetch(`${API_BASE}/clinicians/${encodeURIComponent(selectedClinicianId)}/availability`, {
         method: "PUT",
         headers: await headers(),
