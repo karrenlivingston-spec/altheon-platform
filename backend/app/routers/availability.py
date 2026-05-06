@@ -136,28 +136,40 @@ def get_clinician_availability(
 ):
     try:
         clinician_uuid = str(uuid.UUID(clinician_id))
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid clinician_id") from exc
-    clinician = _clinician_row(clinician_uuid)
-    clinic_id = str(clinician.get("clinic_id") or "").strip()
-    _require_auth_and_clinic(authorization, clinic_id)
-    try:
+        clinician = _clinician_row(clinician_uuid)
+        clinic_id = str(clinician.get("clinic_id") or "").strip()
+        _require_auth_and_clinic(authorization, clinic_id)
         resp = (
             supabase.table("availability_rules")
             .select("*")
             .eq("clinician_id", clinician_uuid)
-            .order("day_of_week")
-            .order("start_time")
+            .order("day_of_week", desc=False)
             .execute()
         )
         _handle_supabase_error(resp)
+        rows = resp.data or []
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            out.append(
+                {
+                    "id": str(row.get("id")) if row.get("id") is not None else None,
+                    "clinician_id": str(row.get("clinician_id")) if row.get("clinician_id") is not None else None,
+                    "clinic_id": str(row.get("clinic_id")) if row.get("clinic_id") is not None else None,
+                    "day_of_week": row.get("day_of_week"),
+                    "start_time": str(row.get("start_time")) if row.get("start_time") is not None else None,
+                    "end_time": str(row.get("end_time")) if row.get("end_time") is not None else None,
+                    "slot_duration_minutes": row.get("slot_duration_minutes"),
+                    "buffer_minutes": row.get("buffer_minutes"),
+                    "is_active": row.get("is_active"),
+                }
+            )
+        print(f"GET availability for {clinician_uuid}: {out}")
+        return out
     except HTTPException:
         raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    rows = resp.data or []
-    print(f"GET availability for {clinician_uuid}: {rows}")
-    return rows
+    except Exception as e:
+        print(f"GET availability error: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.put("/clinicians/{clinician_id}/availability")

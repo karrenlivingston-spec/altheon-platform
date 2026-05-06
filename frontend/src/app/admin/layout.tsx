@@ -114,6 +114,15 @@ function AdminAuthenticatedShellInner({
   const [clinicMenuOpen, setClinicMenuOpen] = useState(false);
 
   function isNavLinkActive(href: string): boolean {
+    if (href === "/admin/settings") {
+      return pathname === "/admin/settings";
+    }
+    if (href === "/admin/settings/availability") {
+      return (
+        pathname === "/admin/settings/availability" ||
+        pathname.startsWith("/admin/settings/availability")
+      );
+    }
     return (
       pathname === href ||
       (href !== "/admin" && pathname.startsWith(href))
