@@ -359,17 +359,32 @@ def create_patient(body: dict = Body(...)):
 def get_patient(patient_id: str, clinic_id: str = Query(...)):
     if not _has_clinic_access(clinic_id, patient_id):
         raise HTTPException(status_code=404, detail="Patient not found")
-    row = _fetch_patient_row(patient_id, restrict_clinic_id=STTPDN_CLINIC_ID)
+    try:
+        resp = (
+            supabase.table("patients")
+            .select("*")
+            .eq("id", patient_id)
+            .eq("clinic_id", clinic_id)
+            .single()
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"GET patient error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    row = resp.data
     if not row:
         raise HTTPException(status_code=404, detail="Patient not found")
-    return _normalize_patient_row(row)
+    return _normalize_patient_row(dict(row))
 
 
 @router.patch("/{patient_id}")
 def patch_patient(patient_id: str, clinic_id: str = Query(...), body: dict = Body(...)):
     if not _has_clinic_access(clinic_id, patient_id):
         raise HTTPException(status_code=404, detail="Patient not found")
-    existing = _fetch_patient_row(patient_id, restrict_clinic_id=STTPDN_CLINIC_ID)
+    existing = _fetch_patient_row(patient_id, restrict_clinic_id=clinic_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Patient not found")
 
@@ -388,13 +403,14 @@ def patch_patient(patient_id: str, clinic_id: str = Query(...), body: dict = Bod
                 supabase.table("patients")
                 .update(update_data)
                 .eq("id", patient_id)
-                .eq("clinic_id", STTPDN_CLINIC_ID)
+                .eq("clinic_id", clinic_id)
                 .execute()
             )
             _handle_supabase_error(upd)
         except HTTPException:
             raise
         except Exception as exc:
+            print(f"PATCH patient error: {exc}")
             raise HTTPException(status_code=500, detail=str(exc)) from exc
         rows = upd.data or []
         if not rows:
