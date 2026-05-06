@@ -35,6 +35,10 @@ _PATIENT_PUBLIC_KEYS = (
     "referring_provider",
     "notes",
     "created_at",
+    "lawyer_name",
+    "law_firm",
+    "lawyer_phone",
+    "lawyer_email",
 )
 
 _PATCHABLE_PATIENT_FIELDS = frozenset(_PATIENT_PUBLIC_KEYS) - frozenset(
