@@ -5,3 +5,4 @@ python-dotenv
 pytz
 python-dateutil
 twilio>=9.0.0
+asyncpg

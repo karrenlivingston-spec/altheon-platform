@@ -2,7 +2,7 @@ from datetime import datetime
 from typing import Any, Optional
 import uuid
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.db import supabase
@@ -130,7 +130,8 @@ def list_clinicians(
 
 
 @router.get("/clinicians/{clinician_id}/availability")
-def get_clinician_availability(
+async def get_clinician_availability(
+    request: Request,
     clinician_id: str,
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
@@ -139,15 +140,31 @@ def get_clinician_availability(
         clinician = _clinician_row(clinician_uuid)
         clinic_id = str(clinician.get("clinic_id") or "").strip()
         _require_auth_and_clinic(authorization, clinic_id)
-        resp = (
-            supabase.table("availability_rules")
-            .select("*")
-            .eq("clinician_id", clinician_uuid)
-            .order("day_of_week", desc=False)
-            .execute()
-        )
-        _handle_supabase_error(resp)
-        rows = resp.data or []
+        pool = getattr(request.app.state, "pool", None)
+
+        if pool is not None:
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    """
+                    SELECT id, clinician_id, clinic_id, day_of_week, start_time, end_time,
+                           slot_duration_minutes, buffer_minutes, is_active
+                    FROM availability_rules
+                    WHERE clinician_id = $1
+                    ORDER BY day_of_week ASC
+                    """,
+                    clinician_uuid,
+                )
+        else:
+            resp = (
+                supabase.table("availability_rules")
+                .select("*")
+                .eq("clinician_id", clinician_uuid)
+                .order("day_of_week", desc=False)
+                .execute()
+            )
+            _handle_supabase_error(resp)
+            rows = resp.data or []
+
         out: list[dict[str, Any]] = []
         for row in rows:
             out.append(
@@ -235,7 +252,8 @@ def replace_clinician_availability(
 
 
 @router.get("/clinicians/{clinician_id}/blocked-time")
-def get_blocked_time(
+async def get_blocked_time(
+    request: Request,
     clinician_id: str,
     from_date: str = Query(...),
     to_date: Optional[str] = Query(default=None),
@@ -252,23 +270,55 @@ def get_blocked_time(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="from_date/to_date must be YYYY-MM-DD") from exc
 
-    query = (
-        supabase.table("blocked_time")
-        .select("*")
-        .eq("clinician_id", clinician_id)
-        .gte("end_time", f"{from_date}T00:00:00")
-    )
-    if to_date:
-        query = query.lte("start_time", f"{to_date}T23:59:59")
-
     try:
+        pool = getattr(request.app.state, "pool", None)
+        if pool is not None:
+            from_ts = f"{from_date}T00:00:00"
+            to_ts = f"{to_date}T23:59:59" if to_date else None
+            async with pool.acquire() as conn:
+                if to_ts:
+                    rows = await conn.fetch(
+                        """
+                        SELECT id, clinician_id, clinic_id, start_time, end_time, reason, created_at, updated_at
+                        FROM blocked_time
+                        WHERE clinician_id = $1
+                          AND end_time >= $2::timestamp
+                          AND start_time <= $3::timestamp
+                        ORDER BY start_time
+                        """,
+                        clinician_id,
+                        from_ts,
+                        to_ts,
+                    )
+                else:
+                    rows = await conn.fetch(
+                        """
+                        SELECT id, clinician_id, clinic_id, start_time, end_time, reason, created_at, updated_at
+                        FROM blocked_time
+                        WHERE clinician_id = $1
+                          AND end_time >= $2::timestamp
+                        ORDER BY start_time
+                        """,
+                        clinician_id,
+                        from_ts,
+                    )
+            return [dict(r) for r in rows]
+
+        query = (
+            supabase.table("blocked_time")
+            .select("*")
+            .eq("clinician_id", clinician_id)
+            .gte("end_time", f"{from_date}T00:00:00")
+        )
+        if to_date:
+            query = query.lte("start_time", f"{to_date}T23:59:59")
         resp = query.order("start_time").execute()
         _handle_supabase_error(resp)
+        return resp.data or []
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return resp.data or []
 
 
 @router.post("/clinicians/{clinician_id}/blocked-time")
