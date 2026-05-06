@@ -15,6 +15,7 @@ import { useClinic } from "@/app/admin/ClinicContext";
 import { supabase } from "@/lib/supabase";
 
 const API_BASE = "https://altheon-platform.onrender.com";
+const SELECTED_CLINICIAN_STORAGE_KEY = "selectedClinicianId";
 
 type Clinician = {
   id: string;
@@ -115,10 +116,19 @@ export default function AvailabilitySettingsPage() {
       { headers: await headers() },
     );
     const data = (res.ok ? await res.json() : []) as Clinician[];
-    setClinicians(Array.isArray(data) ? data : []);
-    if ((Array.isArray(data) ? data : []).length > 0) {
-      setSelectedClinicianId(data[0].id);
+    const list = Array.isArray(data) ? data : [];
+    setClinicians(list);
+
+    if (list.length === 0) {
+      setSelectedClinicianId("");
+      return;
     }
+
+    const saved = localStorage.getItem(SELECTED_CLINICIAN_STORAGE_KEY);
+    const validSaved = saved ? list.find((c) => c.id === saved) : undefined;
+    const defaultId = validSaved ? saved! : list[0]!.id;
+    localStorage.setItem(SELECTED_CLINICIAN_STORAGE_KEY, defaultId);
+    setSelectedClinicianId(defaultId);
   }
 
   function mapApiRulesToState(rulesData: Rule[]): Rule[] {
@@ -279,7 +289,11 @@ export default function AvailabilitySettingsPage() {
         <select
           className={`mt-2 h-10 max-w-sm ${DS_INPUT}`}
           value={selectedClinicianId}
-          onChange={(e) => setSelectedClinicianId(e.target.value)}
+          onChange={(e) => {
+            const newClinicianId = e.target.value;
+            localStorage.setItem(SELECTED_CLINICIAN_STORAGE_KEY, newClinicianId);
+            setSelectedClinicianId(newClinicianId);
+          }}
         >
           {clinicians.map((c) => (
             <option key={c.id} value={c.id}>
