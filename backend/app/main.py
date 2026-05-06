@@ -7,7 +7,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-import asyncpg
 from fastapi import Body, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -32,7 +31,6 @@ from app.routes.legal import router as legal_router
 load_dotenv()
 
 app = FastAPI(title="Altheon API", version="0.1.0")
-app.state.pool = None
 
 app.add_middleware(
     CORSMiddleware,
@@ -61,31 +59,6 @@ app.include_router(
 )
 app.include_router(legal_router)
 app.include_router(surveys.router)
-
-
-@app.on_event("startup")
-async def startup_db_pool() -> None:
-    dsn = os.environ.get("SUPABASE_DB_URL")
-    if not dsn:
-        print("DB pool disabled: SUPABASE_DB_URL not set")
-        return
-    app.state.pool = await asyncpg.create_pool(
-        dsn=dsn,
-        min_size=1,
-        max_size=3,
-        command_timeout=30,
-        max_inactive_connection_lifetime=300,
-    )
-    print("DB pool initialized")
-
-
-@app.on_event("shutdown")
-async def shutdown_db_pool() -> None:
-    pool = getattr(app.state, "pool", None)
-    if pool is not None:
-        await pool.close()
-        app.state.pool = None
-        print("DB pool closed")
 
 
 @app.get("/")
