@@ -62,6 +62,16 @@ function toHm(v: string): string {
   return /^\d{2}:\d{2}$/.test(t) ? t : "09:00";
 }
 
+function to12h(hm: string): string {
+  const [hRaw, mRaw] = hm.split(":");
+  const h = Number(hRaw);
+  const m = Number(mRaw);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return hm;
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 || 12;
+  return `${String(h12).padStart(2, "0")}:${String(m).padStart(2, "0")} ${ampm}`;
+}
+
 function toYmd(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
@@ -81,7 +91,8 @@ export default function AvailabilitySettingsPage() {
   const [clinicianId, setClinicianId] = useState("");
   const [rules, setRules] = useState<Rule[]>(defaultRules());
   const [blocked, setBlocked] = useState<Blocked[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [initialLoading, setInitialLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showAddBlock, setShowAddBlock] = useState(false);
   const [startDate, setStartDate] = useState(toYmd(new Date()));
@@ -123,7 +134,16 @@ export default function AvailabilitySettingsPage() {
     const rulesData = (rulesRes.ok ? await rulesRes.json() : []) as Rule[];
     const blockData = (blockRes.ok ? await blockRes.json() : []) as Blocked[];
     const byDay = new Map<number, Rule>();
-    for (const r of rulesData || []) byDay.set(Number(r.day_of_week), r);
+    for (const r of rulesData || []) {
+      byDay.set(Number(r.day_of_week), {
+        day_of_week: Number(r.day_of_week),
+        start_time: toHm(String(r.start_time || "")),
+        end_time: toHm(String(r.end_time || "")),
+        slot_duration_minutes: Number(r.slot_duration_minutes || 60),
+        buffer_minutes: Number(r.buffer_minutes || 0),
+        is_active: Boolean(r.is_active),
+      });
+    }
     const next = defaultRules().map((d) => {
       const got = byDay.get(d.day_of_week);
       if (!got) return d;
@@ -143,9 +163,9 @@ export default function AvailabilitySettingsPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      setInitialLoading(true);
       await loadClinicians();
-      if (!cancelled) setLoading(false);
+      if (!cancelled) setInitialLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -156,9 +176,9 @@ export default function AvailabilitySettingsPage() {
     if (!clinicianId) return;
     let cancelled = false;
     (async () => {
-      setLoading(true);
+      setRefreshing(true);
       await loadAvailability(clinicianId);
-      if (!cancelled) setLoading(false);
+      if (!cancelled) setRefreshing(false);
     })();
     return () => {
       cancelled = true;
@@ -225,7 +245,7 @@ export default function AvailabilitySettingsPage() {
     }
   }
 
-  if (loading) {
+  if (initialLoading) {
     return <div className="p-6 text-sm text-slate-500">Loading availability…</div>;
   }
 
@@ -249,6 +269,9 @@ export default function AvailabilitySettingsPage() {
             </option>
           ))}
         </select>
+        {refreshing ? (
+          <p className="mt-2 text-xs text-slate-500">Loading provider availability…</p>
+        ) : null}
       </section>
 
       <section className={`${DS_CARD} mt-6`}>
@@ -339,6 +362,9 @@ export default function AvailabilitySettingsPage() {
                     <option key={v} value={v}>{v} min</option>
                   ))}
                 </select>
+                <div className="col-span-6 -mt-1 text-[11px] text-slate-400">
+                  {to12h(r.start_time)} - {to12h(r.end_time)}
+                </div>
               </div>
             );
           })}

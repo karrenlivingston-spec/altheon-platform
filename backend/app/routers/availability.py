@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Any, Optional
+import uuid
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
@@ -133,14 +134,18 @@ def get_clinician_availability(
     clinician_id: str,
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
-    clinician = _clinician_row(clinician_id)
+    try:
+        clinician_uuid = str(uuid.UUID(clinician_id))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid clinician_id") from exc
+    clinician = _clinician_row(clinician_uuid)
     clinic_id = str(clinician.get("clinic_id") or "").strip()
     _require_auth_and_clinic(authorization, clinic_id)
     try:
         resp = (
             supabase.table("availability_rules")
             .select("*")
-            .eq("clinician_id", clinician_id)
+            .eq("clinician_id", clinician_uuid)
             .order("day_of_week")
             .order("start_time")
             .execute()
@@ -150,7 +155,9 @@ def get_clinician_availability(
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return resp.data or []
+    rows = resp.data or []
+    print(f"GET availability for {clinician_uuid}: {rows}")
+    return rows
 
 
 @router.put("/clinicians/{clinician_id}/availability")
