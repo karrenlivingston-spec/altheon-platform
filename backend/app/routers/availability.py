@@ -69,50 +69,6 @@ def _require_auth_and_clinic(authorization: Optional[str], clinic_id: str) -> st
     return user_id
 
 
-def _availability_columns() -> set[str]:
-    try:
-        resp = (
-            supabase.table("information_schema.columns")
-            .select("column_name")
-            .eq("table_schema", "public")
-            .eq("table_name", "availability_rules")
-            .execute()
-        )
-        _handle_supabase_error(resp)
-    except Exception:
-        return set()
-    cols: set[str] = set()
-    for row in resp.data or []:
-        c = str(row.get("column_name") or "").strip()
-        if c:
-            cols.add(c)
-    if cols:
-        return cols
-    # Fallback when information_schema is not exposed by PostgREST policies.
-    return {
-        "clinician_id",
-        "clinic_id",
-        "day_of_week",
-        "start_time",
-        "end_time",
-        "slot_duration_minutes",
-        "buffer_minutes",
-        "is_active",
-    }
-
-
-def _duration_column(columns: set[str]) -> Optional[str]:
-    for candidate in (
-        "slot_duration_minutes",
-        "session_duration",
-        "duration_minutes",
-        "slot_length_minutes",
-    ):
-        if candidate in columns:
-            return candidate
-    return None
-
-
 def _clinician_row(clinician_id: str) -> dict[str, Any]:
     try:
         resp = (
@@ -206,29 +162,21 @@ def replace_clinician_availability(
     clinician = _clinician_row(clinician_id)
     clinic_id = str(clinician.get("clinic_id") or "").strip()
     _require_auth_and_clinic(authorization, clinic_id)
-    rules = [r.model_dump() for r in body]
-    print(f"Saving availability for clinician: {clinician_id}")
-    print(f"Rules received: {rules}")
-
-    columns = _availability_columns()
-    duration_col = _duration_column(columns)
 
     insert_rows: list[dict[str, Any]] = []
-    for rule in rules:
-        row: dict[str, Any] = {
-            "clinician_id": clinician_id,
-            "day_of_week": rule["day_of_week"],
-            "start_time": rule["start_time"],
-            "end_time": rule["end_time"],
-            "is_active": bool(rule["is_active"]),
-        }
-        if "clinic_id" in columns:
-            row["clinic_id"] = clinic_id
-        if "buffer_minutes" in columns:
-            row["buffer_minutes"] = int(rule.get("buffer_minutes") or 0)
-        if duration_col:
-            row[duration_col] = int(rule.get("slot_duration_minutes") or 60)
-        insert_rows.append(row)
+    for rule in body:
+        insert_rows.append(
+            {
+                "clinic_id": clinic_id,
+                "clinician_id": clinician_id,
+                "day_of_week": rule.day_of_week,
+                "start_time": rule.start_time,
+                "end_time": rule.end_time,
+                "slot_duration_minutes": int(rule.slot_duration_minutes),
+                "buffer_minutes": int(rule.buffer_minutes),
+                "is_active": bool(rule.is_active),
+            }
+        )
 
     try:
         del_resp = (
@@ -241,9 +189,10 @@ def replace_clinician_availability(
         if insert_rows:
             ins_resp = supabase.table("availability_rules").insert(insert_rows).execute()
             _handle_supabase_error(ins_resp)
-    except Exception as e:
-        print(f"Availability save error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
         out = (
