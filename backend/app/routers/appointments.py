@@ -1,10 +1,10 @@
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel
+from fastapi import APIRouter, Header, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from app.constants import STTPDN_CLINIC_ID
 from app.db import supabase
@@ -39,33 +39,269 @@ def list_appointments(clinic_id: str = Query(...)):
     return resp.data or []
 
 
+class AppointmentStatusPatchBody(BaseModel):
+    status: str = Field(...)
+
+
+class PatientFlowStats(BaseModel):
+    total: int
+    new_patients: int
+    scheduled: int
+    checked_in: int
+    completed: int
+    cancelled: int
+    no_show: int
+    rescheduled: int
+
+
+def _extract_bearer_token(authorization: Optional[str]) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    parts = authorization.strip().split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1].strip():
+        raise HTTPException(status_code=401, detail="Invalid Authorization header")
+    return parts[1].strip()
+
+
+def _resolve_bearer_user_id(authorization: Optional[str]) -> str:
+    token = _extract_bearer_token(authorization)
+    try:
+        auth_response = supabase.auth.get_user(token)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
+
+    user_obj = getattr(auth_response, "user", None)
+    if user_obj is None and isinstance(auth_response, dict):
+        user_obj = auth_response.get("user")
+
+    user_id = str(getattr(user_obj, "id", None) or "").strip()
+    if not user_id and isinstance(user_obj, dict):
+        user_id = str(user_obj.get("id") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return user_id
+
+
+def _assert_user_has_clinic_access(user_id: str, clinic_id: str) -> None:
+    try:
+        access = (
+            supabase.table("clinic_users")
+            .select("user_id")
+            .eq("user_id", user_id)
+            .eq("clinic_id", clinic_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(access)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    if not access.data:
+        raise HTTPException(status_code=403, detail="No clinic access for user")
+
+
+@router.get("/patient-flow")
+def get_patient_flow(
+    clinic_id: str = Query(...),
+    date_ymd: Optional[str] = Query(default=None, alias="date"),
+):
+    target_date_str = (date_ymd or datetime.now(ZoneInfo("America/New_York")).date().isoformat()).strip()
+    try:
+        target_date = date.fromisoformat(target_date_str)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD") from exc
+
+    clinic_tz = ZoneInfo("America/New_York")
+    day_start_local = datetime.combine(target_date, time(0, 0), tzinfo=clinic_tz)
+    day_end_local = day_start_local + timedelta(days=1)
+    day_start_utc = day_start_local.astimezone(timezone.utc)
+    day_end_utc = day_end_local.astimezone(timezone.utc)
+
+    try:
+        ap_resp = (
+            supabase.table("appointments")
+            .select(
+                "id,clinic_id,patient_id,clinician_id,location_id,treatment_type_id,"
+                "start_time,end_time,status,source,"
+                "patients(id,first_name,last_name,phone,created_at),"
+                "clinicians(id,first_name,last_name,color,title),"
+                "treatment_types(name,duration_minutes)"
+            )
+            .eq("clinic_id", clinic_id)
+            .gte("start_time", day_start_utc.isoformat())
+            .lt("start_time", day_end_utc.isoformat())
+            .order("start_time")
+            .execute()
+        )
+        _handle_supabase_error(ap_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    rows = ap_resp.data or []
+    patient_ids = sorted(
+        {
+            str(r.get("patient_id") or "").strip()
+            for r in rows
+            if str(r.get("patient_id") or "").strip()
+        }
+    )
+    first_appt_by_patient: dict[str, datetime] = {}
+    if patient_ids:
+        try:
+            hist_resp = (
+                supabase.table("appointments")
+                .select("patient_id,start_time")
+                .eq("clinic_id", clinic_id)
+                .in_("patient_id", patient_ids)
+                .order("start_time")
+                .execute()
+            )
+            _handle_supabase_error(hist_resp)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        for hr in hist_resp.data or []:
+            pid = str(hr.get("patient_id") or "").strip()
+            if not pid or pid in first_appt_by_patient:
+                continue
+            start_raw = str(hr.get("start_time") or "").strip()
+            if not start_raw:
+                continue
+            try:
+                dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            first_appt_by_patient[pid] = dt.astimezone(clinic_tz)
+
+    stats = {
+        "total": len(rows),
+        "new_patients": 0,
+        "scheduled": 0,
+        "checked_in": 0,
+        "completed": 0,
+        "cancelled": 0,
+        "no_show": 0,
+        "rescheduled": 0,
+    }
+    out_rows: list[dict[str, Any]] = []
+    for r in rows:
+        status = str(r.get("status") or "scheduled").strip().lower()
+        if status == "confirmed":
+            stats["scheduled"] += 1
+        elif status in stats:
+            stats[status] += 1
+
+        start_raw = str(r.get("start_time") or "").strip()
+        try:
+            dt = datetime.fromisoformat(start_raw.replace("Z", "+00:00"))
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            local = dt.astimezone(clinic_tz)
+            start_display = local.strftime("%H:%M")
+        except ValueError:
+            start_display = ""
+
+        patient = r.get("patients") or {}
+        clinician = r.get("clinicians") or {}
+        treatment = r.get("treatment_types") or {}
+        pid = str(patient.get("id") or r.get("patient_id") or "").strip()
+        first_dt = first_appt_by_patient.get(pid)
+        is_new_patient = bool(first_dt and first_dt.date().isoformat() == target_date_str)
+        if is_new_patient:
+            stats["new_patients"] += 1
+
+        out_rows.append(
+            {
+                "id": r.get("id"),
+                "start_time": start_display,
+                "duration_minutes": int(treatment.get("duration_minutes") or 0),
+                "status": status,
+                "source": r.get("source") or "manual",
+                "is_new_patient": is_new_patient,
+                "location_id": r.get("location_id"),
+                "patient": {
+                    "id": pid or r.get("patient_id"),
+                    "first_name": patient.get("first_name"),
+                    "last_name": patient.get("last_name"),
+                    "phone": patient.get("phone"),
+                },
+                "clinician": {
+                    "id": clinician.get("id") or r.get("clinician_id"),
+                    "first_name": clinician.get("first_name"),
+                    "last_name": clinician.get("last_name"),
+                    "title": clinician.get("title"),
+                    "color": clinician.get("color"),
+                },
+                "treatment_type": {
+                    "name": treatment.get("name"),
+                    "duration_minutes": int(treatment.get("duration_minutes") or 0),
+                },
+            }
+        )
+
+    return {
+        "date": target_date_str,
+        "stats": PatientFlowStats(**stats).model_dump(),
+        "appointments": out_rows,
+    }
+
+
 @router.patch("/{appointment_id}/status")
 def update_appointment_status(
     appointment_id: str,
-    body: dict,
-    clinic_id: str = Query(...),
+    body: AppointmentStatusPatchBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
+    user_id = _resolve_bearer_user_id(authorization)
+    allowed = {"checked_in", "completed", "no_show", "cancelled"}
+    status = (body.status or "").strip().lower()
+    if status not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid status. Use checked_in, completed, no_show, or cancelled.",
+        )
+
+    try:
+        appt = (
+            supabase.table("appointments")
+            .select("id,clinic_id")
+            .eq("id", appointment_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(appt)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    rows = appt.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    clinic_id = str(rows[0].get("clinic_id") or "").strip()
+    if not clinic_id:
+        raise HTTPException(status_code=500, detail="Appointment has no clinic_id")
+    _assert_user_has_clinic_access(user_id, clinic_id)
+
     logger.debug(
-        "PATCH /appointments/%s/status clinic_id=%s body=%s",
+        "PATCH /appointments/%s/status clinic_id=%s body=%s user_id=%s",
         appointment_id,
         clinic_id,
         body,
+        user_id,
     )
-    status = body.get("status")
-    if status not in ["scheduled", "checked_in", "completed", "cancelled"]:
-        logger.debug(
-            "PATCH appointment status rejected invalid status=%r appointment_id=%s",
-            status,
-            appointment_id,
-        )
-        raise HTTPException(status_code=400, detail="Invalid status")
 
     try:
         result = (
             supabase.table("appointments")
-            .update({"status": status})
+            .update({"status": status, "updated_at": datetime.now(timezone.utc).isoformat()})
             .eq("id", appointment_id)
-            .eq("clinic_id", clinic_id)
             .execute()
         )
         err = getattr(result, "error", None)

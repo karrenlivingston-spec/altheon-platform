@@ -9,157 +9,26 @@ import {
   getThisWeekRangeEasternYmd,
   isYmdInInclusiveRange,
 } from "@/components/adminEastern";
-
+import PatientFlow from "@/components/scheduling/PatientFlow";
+import { useClinic } from "@/app/admin/ClinicContext";
 import {
   DS_CARD,
-  DS_CARD_HOVER,
-  DS_FILTER_BAR,
-  DS_INPUT,
   DS_PAGE_ROOT,
   DS_PAGE_SUBTITLE,
   DS_PAGE_TITLE,
-  DS_PRIMARY_BTN,
-  DS_SECONDARY_BTN,
   DS_SECTION_HEADER,
 } from "@/app/admin/designSystem";
 
-import { useClinic } from "@/app/admin/ClinicContext";
-import { supabase } from "@/lib/supabase";
-
 const API_BASE = "https://altheon-platform.onrender.com";
-
-type ClinicianRow = {
-  id: string;
-  first_name: string | null;
-  last_name: string | null;
-};
-
-const FLOW_CARD_BORDER_ACCENTS = [
-  "border-l-4 border-l-[#1A6B8A]",
-  "border-l-4 border-l-[#7C3AED]",
-  "border-l-4 border-l-[#0EA5A4]",
-  "border-l-4 border-l-[#CA8A04]",
-  "border-l-4 border-l-[#DB2777]",
-  "border-l-4 border-l-[#2563EB]",
-] as const;
-
-const WEEK_CELL_ACCENTS = [
-  "border-l-2 border-l-[#0EA5A4] bg-gray-50",
-  "border-l-2 border-l-[#7C3AED] bg-gray-50",
-  "border-l-2 border-l-[#1A6B8A] bg-gray-50",
-  "border-l-2 border-l-[#CA8A04] bg-gray-50",
-  "border-l-2 border-l-[#DB2777] bg-gray-50",
-  "border-l-2 border-l-[#2563EB] bg-gray-50",
-] as const;
-
-function hashClinicianIndex(id: string, modulo: number): number {
-  let h = 0;
-  for (let i = 0; i < id.length; i++) {
-    h = (h + id.charCodeAt(i)) % 2147483647;
-  }
-  return modulo > 0 ? Math.abs(h) % modulo : 0;
-}
 
 type AppointmentRow = {
   id: string;
-  patient_id?: string;
-  clinician_id: string;
   start_time: string;
   status: string;
   patients?: { first_name?: string; last_name?: string } | null;
+  clinicians?: { first_name?: string; last_name?: string } | null;
   treatment_types?: { name?: string } | null;
 };
-
-type PatientListRow = {
-  id: string;
-  first_name?: string;
-  last_name?: string;
-};
-
-type BillingTarget = {
-  id: string;
-  patient_name: string;
-  patient_id: string;
-  appointment_date: string;
-  clinician: string;
-};
-
-type QuickBillLineItem = {
-  localId: string;
-  cpt_code: string;
-  description: string;
-  units: number;
-  rate_cents: number;
-  is_timed: boolean;
-  payment_type: string;
-};
-
-const BILL_MODAL_INPUT = `mt-1 h-9 ${DS_INPUT}`;
-
-function formatClinicianName(c: Pick<ClinicianRow, "first_name" | "last_name">): string {
-  const last = (c.last_name ?? "").trim();
-  const first = (c.first_name ?? "").trim();
-  if (last) return `Dr. ${last}`;
-  if (first) return `Dr. ${first}`;
-  return "Clinician";
-}
-
-function clinicianLabel(id: string, clinicians: ClinicianRow[]): string {
-  const row = clinicians.find((c) => c.id === id);
-  if (row) return formatClinicianName(row);
-  return id || "—";
-}
-
-function patientName(row: AppointmentRow): string {
-  const p = row.patients;
-  const full = `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim();
-  return full || "—";
-}
-
-function serviceName(row: AppointmentRow): string {
-  return row.treatment_types?.name ?? "—";
-}
-
-function normalizeFullName(s: string): string {
-  return s.trim().toLowerCase().replace(/\s+/g, " ");
-}
-
-function patientIdForBilling(
-  row: AppointmentRow,
-  patientsList: PatientListRow[],
-): string {
-  if (row.patient_id) return row.patient_id;
-  const target = normalizeFullName(patientName(row));
-  if (!target || target === "—") return "";
-  const hit = patientsList.find((p) => {
-    const full = normalizeFullName(
-      `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim(),
-    );
-    return full === target;
-  });
-  return hit?.id ?? "";
-}
-
-function flowCardClinicianBorderClass(clinicianId: string): string {
-  if (!clinicianId) return "border-l-4 border-l-gray-300";
-  const idx = hashClinicianIndex(clinicianId, FLOW_CARD_BORDER_ACCENTS.length);
-  return FLOW_CARD_BORDER_ACCENTS[idx] ?? "border-l-4 border-l-gray-300";
-}
-
-function weekCellAccentClass(clinicianId: string): string {
-  if (!clinicianId) return "border-l-2 border-l-gray-300 bg-gray-50";
-  const idx = hashClinicianIndex(clinicianId, WEEK_CELL_ACCENTS.length);
-  return WEEK_CELL_ACCENTS[idx] ?? "border-l-2 border-l-gray-300 bg-gray-50";
-}
-
-function filterPillClass(isActive: boolean): string {
-  const base =
-    "cursor-pointer rounded-full px-3 py-1.5 text-sm font-medium transition-colors duration-150";
-  if (isActive) {
-    return `${base} bg-green-600 text-white`;
-  }
-  return `${base} bg-gray-100 text-gray-600 hover:bg-gray-200`;
-}
 
 function dayLabel(ymd: string): string {
   const [y, m, d] = ymd.split("-").map(Number);
@@ -171,52 +40,34 @@ function dayLabel(ymd: string): string {
   }).format(new Date(Date.UTC(y, m - 1, d, 15, 0, 0)));
 }
 
+function patientName(row: AppointmentRow): string {
+  return `${row.patients?.first_name ?? ""} ${row.patients?.last_name ?? ""}`.trim() || "—";
+}
+
+function clinicianName(row: AppointmentRow): string {
+  const last = (row.clinicians?.last_name ?? "").trim();
+  const first = (row.clinicians?.first_name ?? "").trim();
+  if (last) return `Dr. ${last}`;
+  if (first) return `Dr. ${first}`;
+  return "Clinician";
+}
+
+function tabClass(active: boolean): string {
+  return active
+    ? "rounded-lg bg-[#0B1A2B] px-4 py-2 text-sm font-medium text-white"
+    : "rounded-lg px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-100";
+}
+
 export default function AdminAppointmentsPage() {
   const { clinicId } = useClinic();
+  const [activeTab, setActiveTab] = useState<"calendar" | "patient_flow">("calendar");
   const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
-  const [patientsList, setPatientsList] = useState<PatientListRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [updatingIds, setUpdatingIds] = useState<Record<string, boolean>>({});
-  /** `null` = All clinicians */
-  const [selectedClinicianId, setSelectedClinicianId] = useState<string | null>(
-    null,
-  );
-  const [clinicians, setClinicians] = useState<ClinicianRow[]>([]);
-
-  const [billingModalOpen, setBillingModalOpen] = useState(false);
-  const [billingTarget, setBillingTarget] = useState<BillingTarget | null>(null);
-  const [billBillingType, setBillBillingType] = useState("cash");
-  const [billInsurance, setBillInsurance] = useState("");
-  const [billClaim, setBillClaim] = useState("");
-  const [billNotes, setBillNotes] = useState("");
-  const [billLineItems, setBillLineItems] = useState<QuickBillLineItem[]>([]);
-  const [draftCpt, setDraftCpt] = useState("");
-  const [draftDesc, setDraftDesc] = useState("");
-  const [draftUnits, setDraftUnits] = useState("1");
-  const [draftRate, setDraftRate] = useState("0");
-  const [draftTimed, setDraftTimed] = useState(false);
-  const [draftPayType, setDraftPayType] = useState("cash");
-  const [billSubmitBusy, setBillSubmitBusy] = useState(false);
-  const [billModalError, setBillModalError] = useState<string | null>(null);
-
-  const [toastMessage, setToastMessage] = useState("");
-  const [toastVisible, setToastVisible] = useState(false);
-
-  async function refreshAppointments() {
-    try {
-      const res = await fetch(
-        `${API_BASE}/appointments?clinic_id=${encodeURIComponent(clinicId)}`,
-      );
-      const data = res.ok ? await res.json() : [];
-      setAppointments(Array.isArray(data) ? data : []);
-    } catch {
-      setAppointments([]);
-    }
-  }
 
   useEffect(() => {
     let cancelled = false;
-    async function fetchData() {
+    (async () => {
+      setLoading(true);
       try {
         const res = await fetch(
           `${API_BASE}/appointments?clinic_id=${encodeURIComponent(clinicId)}`,
@@ -226,794 +77,115 @@ export default function AdminAppointmentsPage() {
           setAppointments(Array.isArray(data) ? data : []);
         }
       } catch {
-        if (!cancelled) {
-          setAppointments([]);
-        }
+        if (!cancelled) setAppointments([]);
       } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    }
-
-    void fetchData();
-
-    const interval = setInterval(() => {
-      void fetchData();
-    }, 60000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [clinicId]);
-
-  useEffect(() => {
-    setSelectedClinicianId(null);
-    let cancelled = false;
-    (async () => {
-      const { data, error } = await supabase
-        .from("clinicians")
-        .select("id, first_name, last_name")
-        .eq("clinic_id", clinicId)
-        .order("last_name", { ascending: true })
-        .order("first_name", { ascending: true });
-      if (cancelled) return;
-      if (error) {
-        setClinicians([]);
-        return;
-      }
-      setClinicians(Array.isArray(data) ? (data as ClinicianRow[]) : []);
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [clinicId]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch(
-          `${API_BASE}/patients?clinic_id=${encodeURIComponent(clinicId)}`,
-        );
-        const data = res.ok ? await res.json() : [];
-        if (!cancelled) {
-          setPatientsList(Array.isArray(data) ? data : []);
-        }
-      } catch {
-        if (!cancelled) {
-          setPatientsList([]);
-        }
+        if (!cancelled) setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
   }, [clinicId]);
-
-  useEffect(() => {
-    if (!toastVisible || !toastMessage) return;
-    const t = window.setTimeout(() => {
-      setToastVisible(false);
-      setToastMessage("");
-    }, 3000);
-    return () => window.clearTimeout(t);
-  }, [toastVisible, toastMessage]);
-
-  const filteredAppointments = useMemo(() => {
-    if (!selectedClinicianId) return appointments;
-    return appointments.filter((a) => a.clinician_id === selectedClinicianId);
-  }, [appointments, selectedClinicianId]);
 
   const todayYmd = useMemo(() => getEasternYMD(new Date()), []);
   const { mon: weekMon, sun: weekSun } = useMemo(
     () => getThisWeekRangeEasternYmd(new Date()),
     [],
   );
-
-  const todayAppointments = useMemo(
-    () =>
-      filteredAppointments
-        .filter((a) => getEasternYMD(new Date(a.start_time)) === todayYmd)
-        .sort(
-          (a, b) =>
-            new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
-        ),
-    [filteredAppointments, todayYmd],
-  );
-
-  const scheduled = todayAppointments.filter((a) => {
-    const s = a.status.toLowerCase();
-    return s === "scheduled" || s === "cancelled";
-  });
-  const checkedIn = todayAppointments.filter((a) => a.status === "checked_in");
-  const completed = todayAppointments.filter((a) => a.status === "completed");
-
-  const weekAppointments = useMemo(
-    () =>
-      filteredAppointments.filter((a) =>
-        isYmdInInclusiveRange(
-          getEasternYMD(new Date(a.start_time)),
-          weekMon,
-          weekSun,
-        ),
-      ),
-    [filteredAppointments, weekMon, weekSun],
-  );
-
   const weekDays = useMemo(
     () => Array.from({ length: 7 }, (_, idx) => addDaysToYmd(weekMon, idx)),
     [weekMon],
   );
-
-  async function patchStatus(appointmentId: string, status: string) {
-    setUpdatingIds((prev) => ({ ...prev, [appointmentId]: true }));
-    try {
-      const res = await fetch(
-        `${API_BASE}/appointments/${encodeURIComponent(appointmentId)}/status?clinic_id=${encodeURIComponent(clinicId)}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status }),
-        },
-      );
-      if (!res.ok) {
-        return;
-      }
-      setAppointments((prev) =>
-        prev.map((a) => (a.id === appointmentId ? { ...a, status } : a)),
-      );
-      await refreshAppointments();
-    } finally {
-      setUpdatingIds((prev) => {
-        const next = { ...prev };
-        delete next[appointmentId];
-        return next;
-      });
-    }
-  }
-
-  function resetQuickBillForm() {
-    setBillBillingType("cash");
-    setBillInsurance("");
-    setBillClaim("");
-    setBillNotes("");
-    setBillLineItems([]);
-    setDraftCpt("");
-    setDraftDesc("");
-    setDraftUnits("1");
-    setDraftRate("0");
-    setDraftTimed(false);
-    setDraftPayType("cash");
-    setBillModalError(null);
-  }
-
-  function closeBillingModal() {
-    setBillingModalOpen(false);
-    setBillingTarget(null);
-    resetQuickBillForm();
-  }
-
-  function openBillingForAppointment(row: AppointmentRow) {
-    const patient_id = patientIdForBilling(row, patientsList);
-    resetQuickBillForm();
-    setBillingTarget({
-      id: row.id,
-      patient_name: patientName(row),
-      patient_id,
-      appointment_date: getEasternYMD(new Date(row.start_time)),
-      clinician: clinicianLabel(row.clinician_id, clinicians),
-    });
-    setBillingModalOpen(true);
-  }
-
-  function appendQuickBillLineItem() {
-    const cpt = draftCpt.trim();
-    if (!cpt) {
-      setBillModalError("CPT code is required to add a line item.");
-      return;
-    }
-    const units = Math.max(1, parseInt(String(draftUnits), 10) || 1);
-    const rateDollars = parseFloat(String(draftRate)) || 0;
-    const rate_cents = Math.round(rateDollars * 100);
-    const item: QuickBillLineItem = {
-      localId: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      cpt_code: cpt,
-      description: draftDesc.trim(),
-      units,
-      rate_cents,
-      is_timed: draftTimed,
-      payment_type: draftPayType,
-    };
-    setBillLineItems((prev) => [...prev, item]);
-    setDraftCpt("");
-    setDraftDesc("");
-    setDraftUnits("1");
-    setDraftRate("0");
-    setDraftTimed(false);
-    setDraftPayType("cash");
-    setBillModalError(null);
-  }
-
-  function removeQuickBillLineItem(localId: string) {
-    setBillLineItems((prev) => prev.filter((x) => x.localId !== localId));
-  }
-
-  async function submitQuickBill() {
-    if (!billingTarget) return;
-    if (!billingTarget.patient_id) {
-      setBillModalError(
-        "Patient ID could not be resolved. Open Billing to create this record manually.",
-      );
-      return;
-    }
-    if (billLineItems.length === 0) {
-      setBillModalError("Add at least one line item before submitting.");
-      return;
-    }
-    setBillSubmitBusy(true);
-    setBillModalError(null);
-    try {
-      const body: Record<string, unknown> = {
-        clinic_id: clinicId,
-        patient_id: billingTarget.patient_id,
-        appointment_id: billingTarget.id,
-        date_of_service: billingTarget.appointment_date,
-        billing_type: billBillingType,
-      };
-      if (billBillingType === "insurance" || billBillingType === "mixed") {
-        if (billInsurance.trim()) body.insurance_carrier = billInsurance.trim();
-        if (billClaim.trim()) body.claim_number = billClaim.trim();
-      }
-      if (billNotes.trim()) body.notes = billNotes.trim();
-
-      const res = await fetch(`${API_BASE}/billing-records`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) {
-        const t = await res.text().catch(() => "");
-        setBillModalError(
-          t ? `Create failed (${res.status}): ${t.slice(0, 240)}` : `Create failed (${res.status})`,
-        );
-        return;
-      }
-      const created = (await res.json()) as { id?: string };
-      const recordId = created?.id;
-      if (!recordId) {
-        setBillModalError("Billing record created but no id returned.");
-        return;
-      }
-      for (const li of billLineItems) {
-        const liRes = await fetch(
-          `${API_BASE}/billing-records/${encodeURIComponent(recordId)}/line-items`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              cpt_code: li.cpt_code,
-              description: li.description || null,
-              units: li.units,
-              rate_cents: li.rate_cents,
-              is_timed: li.is_timed,
-              payment_type: li.payment_type,
-            }),
-          },
-        );
-        if (!liRes.ok) {
-          const t = await liRes.text().catch(() => "");
-          setBillModalError(
-            t
-              ? `Record created but line item failed (${liRes.status}): ${t.slice(0, 200)}`
-              : `Record created but a line item failed (${liRes.status})`,
-          );
-          return;
-        }
-      }
-      closeBillingModal();
-      setToastMessage("Billing record created");
-      setToastVisible(true);
-    } catch (e) {
-      setBillModalError(e instanceof Error ? e.message : "Request failed");
-    } finally {
-      setBillSubmitBusy(false);
-    }
-  }
-
-  function renderCard(row: AppointmentRow, column: "scheduled" | "checked_in" | "completed") {
-    const busy = !!updatingIds[row.id];
-    const canCancel = column !== "completed";
-    const isCancelledScheduled =
-      column === "scheduled" && row.status.toLowerCase() === "cancelled";
-
-    const accent = flowCardClinicianBorderClass(row.clinician_id);
-    const cardShell = [
-      "rounded-xl border border-gray-100 bg-white p-4 shadow-sm transition-all duration-150 ease-out hover:-translate-y-[1px] hover:shadow-md",
-      accent,
-      column === "completed" ? "opacity-90" : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-    if (isCancelledScheduled) {
-      return (
-        <div key={row.id} className={cardShell}>
-          <div className="space-y-1">
-            <p className="text-base font-semibold text-gray-500 line-through">
-              {patientName(row)}
-            </p>
-            <p className="text-sm font-medium text-gray-700">
-              {formatTimeEastern(row.start_time)}
-            </p>
-            <p className="text-xs text-gray-500">
-              {clinicianLabel(row.clinician_id, clinicians)}
-            </p>
-            <p className="text-xs text-gray-500">{serviceName(row)}</p>
-          </div>
-          <p className="mt-3 text-xs font-medium text-gray-500">Cancelled</p>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              className={`${DS_SECONDARY_BTN} px-3 py-1.5 text-xs`}
-              onClick={() => openBillingForAppointment(row)}
-            >
-              + Bill
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div key={row.id} className={cardShell}>
-        <div className="space-y-1">
-          <p className="text-base font-semibold text-gray-900">
-            {patientName(row)}
-          </p>
-          <p className="text-sm font-medium text-gray-700">
-            {formatTimeEastern(row.start_time)}
-          </p>
-          <p className="text-xs text-gray-500">
-            {clinicianLabel(row.clinician_id, clinicians)}
-          </p>
-          <p className="text-xs text-gray-500">{serviceName(row)}</p>
-        </div>
-        {column === "completed" ? (
-          <>
-            <p className="mt-1 text-xs font-medium text-gray-600">✓ Completed</p>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                className={`${DS_SECONDARY_BTN} px-3 py-1.5 text-xs`}
-                onClick={() => openBillingForAppointment(row)}
-              >
-                + Bill
-              </button>
-            </div>
-          </>
-        ) : (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {column === "scheduled" ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void patchStatus(row.id, "checked_in")}
-                className={`${DS_PRIMARY_BTN} px-3 py-1.5 text-xs disabled:opacity-60`}
-              >
-                Check In
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void patchStatus(row.id, "completed")}
-                className={`${DS_PRIMARY_BTN} px-3 py-1.5 text-xs disabled:opacity-60`}
-              >
-                Complete
-              </button>
-            )}
-            {canCancel ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => void patchStatus(row.id, "cancelled")}
-                className="text-sm text-gray-400 transition hover:text-red-500 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-            ) : null}
-            <button
-              type="button"
-              className={`${DS_SECONDARY_BTN} px-3 py-1.5 text-xs`}
-              onClick={() => openBillingForAppointment(row)}
-            >
-              + Bill
-            </button>
-          </div>
-        )}
-      </div>
-    );
-  }
+  const weekAppointments = useMemo(
+    () =>
+      appointments.filter((a) =>
+        isYmdInInclusiveRange(getEasternYMD(new Date(a.start_time)), weekMon, weekSun),
+      ),
+    [appointments, weekMon, weekSun],
+  );
 
   return (
     <div className={`${DS_PAGE_ROOT} mx-auto max-w-7xl`}>
-      <h1 className={DS_PAGE_TITLE}>Appointments</h1>
-      <p className={DS_PAGE_SUBTITLE}>Today&apos;s flow and week view</p>
+      <h1 className={DS_PAGE_TITLE}>Scheduling</h1>
+      <p className={DS_PAGE_SUBTITLE}>Calendar and patient flow</p>
 
-      <div className={`${DS_FILTER_BAR} mt-8 flex flex-wrap items-center gap-2`}>
+      <div className="mt-6 flex items-center gap-2 rounded-xl border border-slate-200 bg-white p-2">
         <button
           type="button"
-          className={filterPillClass(selectedClinicianId === null)}
-          onClick={() => setSelectedClinicianId(null)}
+          className={tabClass(activeTab === "calendar")}
+          onClick={() => setActiveTab("calendar")}
         >
-          All
+          Calendar
         </button>
-        {clinicians.map((c) => (
-          <button
-            key={c.id}
-            type="button"
-            className={filterPillClass(selectedClinicianId === c.id)}
-            onClick={() => setSelectedClinicianId(c.id)}
-          >
-            {formatClinicianName(c)}
-          </button>
-        ))}
+        <button
+          type="button"
+          className={tabClass(activeTab === "patient_flow")}
+          onClick={() => setActiveTab("patient_flow")}
+        >
+          Patient Flow
+        </button>
       </div>
 
-      <section className="mt-8">
-        <h2 className={DS_SECTION_HEADER}>Patient Flow Board</h2>
-        <div>
+      {activeTab === "patient_flow" ? (
+        <section className="mt-6">
+          <PatientFlow />
+        </section>
+      ) : (
+        <section className="mt-8">
+          <h2 className={DS_SECTION_HEADER}>Week Calendar</h2>
           {loading ? (
-            <p className="text-sm text-gray-500">Loading…</p>
+            <div className="mt-4 rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-500">
+              Loading…
+            </div>
           ) : (
-            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-              <FlowColumn
-                label="Scheduled"
-                count={scheduled.length}
-                emptyMessage="No appointments scheduled"
-                items={scheduled.map((row) => renderCard(row, "scheduled"))}
-              />
-              <FlowColumn
-                label="Checked In"
-                count={checkedIn.length}
-                emptyMessage="No patients checked in yet"
-                items={checkedIn.map((row) => renderCard(row, "checked_in"))}
-              />
-              <FlowColumn
-                label="Completed"
-                count={completed.length}
-                emptyMessage="No completed appointments yet"
-                items={completed.map((row) => renderCard(row, "completed"))}
-              />
+            <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-7">
+              {weekDays.map((ymd) => {
+                const rows = weekAppointments
+                  .filter((a) => getEasternYMD(new Date(a.start_time)) === ymd)
+                  .sort(
+                    (a, b) =>
+                      new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
+                  );
+                const isToday = ymd === todayYmd;
+                return (
+                  <div
+                    key={ymd}
+                    className={[`${DS_CARD} p-4`, isToday ? "ring-2 ring-green-500/25" : ""]
+                      .filter(Boolean)
+                      .join(" ")}
+                  >
+                    <p className="mb-3 text-sm font-semibold text-slate-900">{dayLabel(ymd)}</p>
+                    <div className="space-y-2">
+                      {rows.length === 0 ? (
+                        <p className="text-xs text-slate-400">No appointments</p>
+                      ) : (
+                        rows.map((row) => (
+                          <div
+                            key={row.id}
+                            className="rounded-lg border-l-2 border-l-slate-300 bg-slate-50 p-2"
+                          >
+                            <p className="text-xs text-slate-500">{formatTimeEastern(row.start_time)}</p>
+                            <p className="truncate text-xs font-medium text-slate-800">
+                              {patientName(row)}
+                            </p>
+                            <p className="truncate text-[11px] text-slate-500">
+                              {clinicianName(row)} · {row.treatment_types?.name ?? "Visit"}
+                            </p>
+                            <p className="text-[11px] uppercase tracking-wide text-slate-400">
+                              {row.status}
+                            </p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
-        </div>
-      </section>
-
-      <section className="mt-8">
-        <h2 className={DS_SECTION_HEADER}>Week Calendar</h2>
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-7">
-          {weekDays.map((ymd) => {
-            const dayRows = weekAppointments
-              .filter((a) => getEasternYMD(new Date(a.start_time)) === ymd)
-              .sort(
-                (a, b) =>
-                  new Date(a.start_time).getTime() - new Date(b.start_time).getTime(),
-              );
-            const isToday = ymd === todayYmd;
-
-            return (
-              <div
-                key={ymd}
-                className={[
-                  `${DS_CARD} p-5`,
-                  isToday ? "ring-2 ring-green-500/25" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-              >
-                <p className="mb-3 text-sm font-semibold text-gray-900">{dayLabel(ymd)}</p>
-                <div className="space-y-2">
-                  {dayRows.length === 0 ? (
-                    <p className="text-xs text-gray-400">
-                      No appointments scheduled
-                    </p>
-                  ) : (
-                    dayRows.map((row) => {
-                      const st = row.status.toLowerCase();
-                      const cancelled = st === "cancelled";
-                      const checkedInBlock = st === "checked_in";
-                      const completedBlock = st === "completed";
-                      const fullName = patientName(row);
-                      const firstNameOnly =
-                        fullName.trim().split(/\s+/).filter(Boolean)[0] ??
-                        fullName;
-                      const cellAccent = weekCellAccentClass(row.clinician_id);
-
-                      return (
-                        <div
-                          key={row.id}
-                          title={fullName}
-                          className={[
-                            "overflow-hidden rounded-lg p-1.5 text-xs",
-                            cellAccent,
-                            cancelled ? "opacity-50" : "",
-                          ].join(" ")}
-                        >
-                          <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-1 gap-y-0.5">
-                            <span className="shrink-0 text-xs text-gray-400">
-                              {formatTimeEastern(row.start_time)}
-                            </span>
-                            {checkedInBlock ? (
-                              <span className="shrink-0 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-medium leading-tight text-amber-700">
-                                Checked In
-                              </span>
-                            ) : completedBlock ? (
-                              <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium leading-tight text-gray-600">
-                                ✓ Done
-                              </span>
-                            ) : null}
-                          </div>
-                          <p
-                            className={`mt-0.5 min-w-0 truncate text-xs font-medium text-gray-800 ${cancelled ? "line-through" : ""}`}
-                          >
-                            {firstNameOnly}
-                          </p>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {billingModalOpen && billingTarget ? (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => closeBillingModal()}
-          role="presentation"
-        >
-          <div
-            className={`max-h-[90vh] w-full max-w-lg overflow-y-auto ${DS_CARD} shadow-xl`}
-            role="dialog"
-            aria-modal
-            aria-labelledby="quick-bill-title"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <h2
-              id="quick-bill-title"
-              className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900"
-            >
-              New Billing Record
-            </h2>
-            <p className="mt-3 text-sm text-gray-600">
-              {billingTarget.patient_name} · {billingTarget.appointment_date}
-            </p>
-            <p className="mt-1 text-xs text-gray-500">
-              {billingTarget.clinician}
-            </p>
-
-            <div className="mt-5 space-y-4">
-              <label className="block text-sm font-medium text-gray-700">
-                Billing Type
-                <select
-                  className={BILL_MODAL_INPUT}
-                  value={billBillingType}
-                  onChange={(e) => setBillBillingType(e.target.value)}
-                >
-                  <option value="cash">Cash</option>
-                  <option value="insurance">Insurance</option>
-                  <option value="mixed">Mixed</option>
-                </select>
-              </label>
-              {(billBillingType === "insurance" || billBillingType === "mixed") ? (
-                <>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Insurance Carrier
-                    <input
-                      type="text"
-                      className={BILL_MODAL_INPUT}
-                      value={billInsurance}
-                      onChange={(e) => setBillInsurance(e.target.value)}
-                    />
-                  </label>
-                  <label className="block text-sm font-medium text-gray-700">
-                    Claim Number
-                    <input
-                      type="text"
-                      className={BILL_MODAL_INPUT}
-                      value={billClaim}
-                      onChange={(e) => setBillClaim(e.target.value)}
-                    />
-                  </label>
-                </>
-              ) : null}
-              <label className="block text-sm font-medium text-gray-700">
-                Notes (optional)
-                <textarea
-                  rows={2}
-                  className={`mt-1 min-h-[72px] ${DS_INPUT}`}
-                  value={billNotes}
-                  onChange={(e) => setBillNotes(e.target.value)}
-                />
-              </label>
-            </div>
-
-            <div className="mt-6 border-t border-gray-100 pt-5">
-              <h3 className="text-sm font-semibold text-gray-900">CPT Codes</h3>
-              <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className="block text-sm font-medium text-gray-700 sm:col-span-2">
-                  CPT Code
-                  <input
-                    type="text"
-                    className={BILL_MODAL_INPUT}
-                    value={draftCpt}
-                    onChange={(e) => setDraftCpt(e.target.value)}
-                    placeholder="97140"
-                  />
-                </label>
-                <label className="block text-sm font-medium text-gray-700 sm:col-span-2">
-                  Description
-                  <input
-                    type="text"
-                    className={BILL_MODAL_INPUT}
-                    value={draftDesc}
-                    onChange={(e) => setDraftDesc(e.target.value)}
-                  />
-                </label>
-                <label className="block text-sm font-medium text-gray-700">
-                  Units
-                  <input
-                    type="number"
-                    min={1}
-                    className={BILL_MODAL_INPUT}
-                    value={draftUnits}
-                    onChange={(e) => setDraftUnits(e.target.value)}
-                  />
-                </label>
-                <label className="block text-sm font-medium text-gray-700">
-                  Rate ($)
-                  <input
-                    type="number"
-                    min={0}
-                    step="0.01"
-                    className={BILL_MODAL_INPUT}
-                    value={draftRate}
-                    onChange={(e) => setDraftRate(e.target.value)}
-                  />
-                </label>
-                <label className="flex items-center gap-2 text-sm font-medium text-gray-700 sm:col-span-2">
-                  <input
-                    type="checkbox"
-                    checked={draftTimed}
-                    onChange={(e) => setDraftTimed(e.target.checked)}
-                    className="h-4 w-4 rounded border-gray-300 text-[#16A34A] focus:ring-green-500"
-                  />
-                  Is Timed
-                </label>
-                <label className="block text-sm font-medium text-gray-700 sm:col-span-2">
-                  Payment Type
-                  <select
-                    className={BILL_MODAL_INPUT}
-                    value={draftPayType}
-                    onChange={(e) => setDraftPayType(e.target.value)}
-                  >
-                    <option value="cash">Cash</option>
-                    <option value="insurance">Insurance</option>
-                  </select>
-                </label>
-                <div className="sm:col-span-2">
-                  <button
-                    type="button"
-                    onClick={() => appendQuickBillLineItem()}
-                    className={DS_SECONDARY_BTN}
-                  >
-                    Add
-                  </button>
-                </div>
-              </div>
-
-              {billLineItems.length > 0 ? (
-                <ul className="mt-4 divide-y divide-gray-100 rounded-lg border border-gray-100">
-                  {billLineItems.map((li) => (
-                    <li
-                      key={li.localId}
-                      className="flex flex-wrap items-center gap-2 px-3 py-2 text-xs text-gray-700"
-                    >
-                      <span className="font-mono font-medium">{li.cpt_code}</span>
-                      <span className="min-w-0 flex-1 truncate text-gray-600">
-                        {li.description || "—"}
-                      </span>
-                      <span>{li.units}u</span>
-                      <span>${(li.rate_cents / 100).toFixed(2)}</span>
-                      <button
-                        type="button"
-                        onClick={() => removeQuickBillLineItem(li.localId)}
-                        className="ml-auto text-sm text-gray-400 transition hover:text-red-600"
-                        aria-label="Remove line item"
-                      >
-                        ×
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-
-            {billModalError ? (
-              <p className="mt-4 rounded-lg border border-red-100 bg-red-50/80 px-3 py-2 text-sm text-red-800">
-                {billModalError}
-              </p>
-            ) : null}
-
-            <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-5">
-              <button
-                type="button"
-                onClick={() => closeBillingModal()}
-                className={DS_SECONDARY_BTN}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={billSubmitBusy}
-                onClick={() => void submitQuickBill()}
-                className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
-              >
-                {billSubmitBusy ? "Saving…" : "Create Billing Record"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {toastVisible && toastMessage ? (
-        <div
-          className="fixed bottom-6 right-6 z-50 rounded-lg bg-[#16A34A] px-4 py-3 text-sm font-medium text-white shadow-lg"
-          role="status"
-        >
-          {toastMessage}
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function FlowColumn({
-  label,
-  count,
-  items,
-  emptyMessage,
-}: {
-  label: string;
-  count: number;
-  items: React.ReactNode[];
-  emptyMessage: string;
-}) {
-  const countLine =
-    count === 1 ? "1 patient" : `${count} patients`;
-
-  return (
-    <div className={`flex min-h-[400px] flex-col ${DS_CARD}`}>
-      <div className="mb-4 border-b border-gray-100 pb-2">
-        <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
-          {label}
-        </p>
-        <p className="text-sm text-gray-600">{countLine}</p>
-      </div>
-      {items.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center py-12 text-center">
-          <div className="mb-3 h-8 w-8 rounded-full bg-gray-200" />
-          <p className="text-sm text-gray-500">{emptyMessage}</p>
-        </div>
-      ) : (
-        <div className="space-y-4">{items}</div>
+        </section>
       )}
     </div>
   );
 }
+
