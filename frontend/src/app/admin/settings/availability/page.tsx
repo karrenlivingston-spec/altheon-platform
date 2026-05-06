@@ -88,7 +88,7 @@ function fmtRange(startIso: string, endIso: string): string {
 export default function AvailabilitySettingsPage() {
   const { clinicId } = useClinic();
   const [clinicians, setClinicians] = useState<Clinician[]>([]);
-  const [clinicianId, setClinicianId] = useState("");
+  const [selectedClinicianId, setSelectedClinicianId] = useState("");
   const [rules, setRules] = useState<Rule[]>(defaultRules());
   const [blocked, setBlocked] = useState<Blocked[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
@@ -117,11 +117,12 @@ export default function AvailabilitySettingsPage() {
     const data = (res.ok ? await res.json() : []) as Clinician[];
     setClinicians(Array.isArray(data) ? data : []);
     if ((Array.isArray(data) ? data : []).length > 0) {
-      setClinicianId((prev) => prev || data[0].id);
+      setSelectedClinicianId(data[0].id);
     }
   }
 
-  async function loadAvailability(cid: string) {
+  async function fetchAvailability(cid: string) {
+    console.log("Fetching availability for:", cid);
     const [rulesRes, blockRes] = await Promise.all([
       fetch(`${API_BASE}/clinicians/${encodeURIComponent(cid)}/availability`, {
         headers: await headers(),
@@ -132,28 +133,17 @@ export default function AvailabilitySettingsPage() {
       ),
     ]);
     const rulesData = (rulesRes.ok ? await rulesRes.json() : []) as Rule[];
+    console.log("Availability response:", rulesData);
     const blockData = (blockRes.ok ? await blockRes.json() : []) as Blocked[];
-    const byDay = new Map<number, Rule>();
-    for (const r of rulesData || []) {
-      byDay.set(Number(r.day_of_week), {
-        day_of_week: Number(r.day_of_week),
-        start_time: toHm(String(r.start_time || "")),
-        end_time: toHm(String(r.end_time || "")),
-        slot_duration_minutes: Number(r.slot_duration_minutes || 60),
-        buffer_minutes: Number(r.buffer_minutes || 0),
-        is_active: Boolean(r.is_active),
-      });
-    }
-    const next = defaultRules().map((d) => {
-      const got = byDay.get(d.day_of_week);
-      if (!got) return d;
+    const next: Rule[] = [0, 1, 2, 3, 4, 5, 6].map((dayNum) => {
+      const rule = (rulesData || []).find((r) => Number(r.day_of_week) === dayNum);
       return {
-        day_of_week: d.day_of_week,
-        start_time: toHm(got.start_time),
-        end_time: toHm(got.end_time),
-        slot_duration_minutes: Number(got.slot_duration_minutes || 60),
-        buffer_minutes: Number(got.buffer_minutes || 0),
-        is_active: Boolean(got.is_active),
+        day_of_week: dayNum,
+        is_active: rule ? Boolean(rule.is_active) : false,
+        start_time: rule ? String(rule.start_time || "").slice(0, 5) : "09:00",
+        end_time: rule ? String(rule.end_time || "").slice(0, 5) : "17:00",
+        slot_duration_minutes: rule ? Number(rule.slot_duration_minutes || 60) : 60,
+        buffer_minutes: rule ? Number(rule.buffer_minutes || 10) : 10,
       };
     });
     setRules(next);
@@ -173,26 +163,26 @@ export default function AvailabilitySettingsPage() {
   }, [clinicId]);
 
   useEffect(() => {
-    if (!clinicianId) return;
+    if (!selectedClinicianId) return;
     let cancelled = false;
     (async () => {
       setRefreshing(true);
-      await loadAvailability(clinicianId);
+      await fetchAvailability(selectedClinicianId);
       if (!cancelled) setRefreshing(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [clinicianId]);
+  }, [selectedClinicianId]);
 
   const rows = useMemo(() => [...rules].sort((a, b) => a.day_of_week - b.day_of_week), [rules]);
 
   async function saveSchedule() {
-    if (!clinicianId) return;
+    if (!selectedClinicianId) return;
     setSaving(true);
     setMsg("");
     try {
-      const res = await fetch(`${API_BASE}/clinicians/${encodeURIComponent(clinicianId)}/availability`, {
+      const res = await fetch(`${API_BASE}/clinicians/${encodeURIComponent(selectedClinicianId)}/availability`, {
         method: "PUT",
         headers: await headers(),
         body: JSON.stringify(rows),
@@ -208,13 +198,13 @@ export default function AvailabilitySettingsPage() {
   }
 
   async function addBlock() {
-    if (!clinicianId) return;
+    if (!selectedClinicianId) return;
     const body = {
       start_time: `${startDate}T00:00:00`,
       end_time: `${endDate}T23:59:59`,
       reason,
     };
-    const res = await fetch(`${API_BASE}/clinicians/${encodeURIComponent(clinicianId)}/blocked-time`, {
+    const res = await fetch(`${API_BASE}/clinicians/${encodeURIComponent(selectedClinicianId)}/blocked-time`, {
       method: "POST",
       headers: await headers(),
       body: JSON.stringify(body),
@@ -225,7 +215,7 @@ export default function AvailabilitySettingsPage() {
     }
     setShowAddBlock(false);
     setReason("");
-    await loadAvailability(clinicianId);
+    await fetchAvailability(selectedClinicianId);
   }
 
   async function removeBlock(id: string) {
@@ -235,7 +225,7 @@ export default function AvailabilitySettingsPage() {
         method: "DELETE",
         headers: await headers(),
       });
-      await loadAvailability(clinicianId);
+      await fetchAvailability(selectedClinicianId);
     } finally {
       setBusyDelete((p) => {
         const next = { ...p };
@@ -260,8 +250,8 @@ export default function AvailabilitySettingsPage() {
         </label>
         <select
           className={`mt-2 h-10 max-w-sm ${DS_INPUT}`}
-          value={clinicianId}
-          onChange={(e) => setClinicianId(e.target.value)}
+          value={selectedClinicianId}
+          onChange={(e) => setSelectedClinicianId(e.target.value)}
         >
           {clinicians.map((c) => (
             <option key={c.id} value={c.id}>
