@@ -9,9 +9,11 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@11labs/react": "^0.2.0",
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@elevenlabs/client": "^1.5.0",
     "@supabase/supabase-js": "^2.105.1",
     "date-fns": "^4.1.0",
     "date-fns-tz": "^3.2.0",
