@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import Any, Optional
 import uuid
+import traceback
 
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
@@ -134,23 +135,33 @@ def list_treatment_types(
     clinic_id: str = Query(...),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
-    print("treatment-types hit")
-    _require_auth_and_clinic(authorization, clinic_id)
     try:
+        print("treatment-types hit")
+        _require_auth_and_clinic(authorization, clinic_id)
+        print("treatment-types query table=treatment_types")
+        print("treatment-types selecting columns=id,name,duration_minutes,requires_evaluation")
+        print("treatment-types filter=clinic_id only")
         resp = (
             supabase.table("treatment_types")
-            .select("id,name,duration_minutes,is_active,clinic_id")
+            .select("id,name,duration_minutes,requires_evaluation")
             .eq("clinic_id", clinic_id)
-            .eq("is_active", True)
             .order("name")
             .execute()
         )
+        print(
+            "treatment-types raw response:",
+            {
+                "data": resp.data,
+                "error": str(getattr(resp, "error", None)),
+                "count": len(resp.data or []),
+            },
+        )
         _handle_supabase_error(resp)
-    except HTTPException:
+        return resp.data or []
+    except Exception as e:
+        print(f"treatment-types error: {e}")
+        traceback.print_exc()
         raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    return resp.data or []
 
 
 @router.get("/clinicians/{clinician_id}/availability")
