@@ -13,7 +13,7 @@ import {
 } from "@dnd-kit/core";
 import { formatInTimeZone, toDate } from "date-fns-tz";
 import type { CSSProperties } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   addDaysToYmd,
@@ -126,6 +126,12 @@ function clinicianLabel(c: ClinicianRow): string {
 
 function patientFull(a: CalendarAppointment): string {
   return `${a.patient.first_name ?? ""} ${a.patient.last_name ?? ""}`.trim() || "Patient";
+}
+
+function safeDate(value: string | Date | null | undefined): Date | null {
+  if (!value) return null;
+  const d = new Date(value);
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 function statusDotClass(status: string): string {
@@ -738,7 +744,11 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
           <div className="max-w-sm rounded-xl bg-white p-5 shadow-xl">
             <p className="font-semibold text-slate-900">{patientFull(detailAppt)}</p>
             <p className="mt-1 text-sm text-slate-600">
-              {formatInTimeZone(new Date(detailAppt.start_time), NY, "h:mm a")} ·{" "}
+              {(() => {
+                const d = safeDate(detailAppt.start_time);
+                return d ? formatInTimeZone(d, NY, "h:mm a") : "Invalid time";
+              })()}{" "}
+              ·{" "}
               {detailAppt.treatment_type.name}
             </p>
             <p className="mt-1 text-xs text-slate-500">
@@ -1060,7 +1070,7 @@ function BlockedOverlay({
   );
 }
 
-function BookPatientModal({
+const BookPatientModal = memo(function BookPatientModal({
   clinicId,
   clinicians,
   locationId,
@@ -1439,11 +1449,15 @@ function BookPatientModal({
                     .filter((s) => s >= "07:00" && s <= "19:00")
                     .map((s) => (
                       <option key={s} value={s}>
-                        {formatInTimeZone(
-                          toDate(`${selectedDate}T${s}:00`, { timeZone: NY }),
-                          NY,
-                          "h:mm a",
-                        )}
+                        {(() => {
+                          try {
+                            const optionDate = toDate(`${selectedDate}T${s}:00`, { timeZone: NY });
+                            if (Number.isNaN(optionDate.getTime())) return s;
+                            return formatInTimeZone(optionDate, NY, "h:mm a");
+                          } catch {
+                            return s;
+                          }
+                        })()}
                       </option>
                     ))}
                 </select>
@@ -1496,7 +1510,7 @@ function BookPatientModal({
       </div>
     </div>
   );
-}
+});
 
 function ReadOnlyField({ label, value }: { label: string; value: string }) {
   return (
@@ -1539,7 +1553,11 @@ function WeekGrid({
           const isToday = ymd === todayYmd;
           const dayAppts = appointments
             .filter((a) => easternYmdOfIso(a.start_time) === ymd)
-            .sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+            .sort((a, b) => {
+              const at = safeDate(a.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+              const bt = safeDate(b.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+              return at - bt;
+            });
           return (
             <WeekDayColumn
               key={ymd}
@@ -1610,6 +1628,8 @@ function WeekDraggableCard({
     id: `appt-${appt.id}`,
   });
   const color = appt.clinician.color || "#0EA5A4";
+  const startDate = safeDate(appt.start_time);
+  if (!startDate) return null;
   return (
     <div
       ref={setNodeRef}
@@ -1630,7 +1650,7 @@ function WeekDraggableCard({
       }}
     >
       <p className="text-[11px] text-slate-500">
-        {formatInTimeZone(new Date(appt.start_time), NY, "h:mm a")}
+        {formatInTimeZone(startDate, NY, "h:mm a")}
       </p>
       <div className="flex items-center gap-1">
         <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
@@ -1662,7 +1682,11 @@ function MonthGrid({
       m.set(d, list);
     }
     for (const [, list] of m) {
-      list.sort((a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime());
+      list.sort((a, b) => {
+        const at = safeDate(a.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        const bt = safeDate(b.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+        return at - bt;
+      });
     }
     return m;
   }, [appointments]);
