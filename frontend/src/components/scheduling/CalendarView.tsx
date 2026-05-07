@@ -13,7 +13,7 @@ import {
 } from "@dnd-kit/core";
 import { formatInTimeZone, toDate } from "date-fns-tz";
 import type { CSSProperties } from "react";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   addDaysToYmd,
@@ -232,6 +232,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
   } | null>(null);
   const [treatmentTypes, setTreatmentTypes] = useState<TreatmentTypeOption[]>([]);
   const [detailAppt, setDetailAppt] = useState<CalendarAppointment | null>(null);
+  const treatmentTypesLoadedForOpenRef = useRef(false);
 
   const loadTreatmentTypes = useCallback(async () => {
     if (!clinicId) return;
@@ -251,6 +252,27 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
     } catch (err) {
       console.error("[CalendarView] treatment types fetch failed:", err);
       setTreatmentTypes([]);
+    }
+  }, [clinicId]);
+
+  const loadClinicians = useCallback(async () => {
+    if (!clinicId) return;
+    const url = `${API_BASE}/clinicians?clinic_id=${encodeURIComponent(clinicId)}`;
+    console.log("[CalendarView] fetching clinicians:", url);
+    try {
+      const h = await authHeaders();
+      const res = await fetch(url, { headers: h });
+      const data = res.ok ? await res.json() : [];
+      console.log("[CalendarView] clinicians response:", {
+        status: res.status,
+        ok: res.ok,
+        count: Array.isArray(data) ? data.length : 0,
+        data,
+      });
+      setClinicians(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("[CalendarView] clinicians fetch failed:", err);
+      setClinicians([]);
     }
   }, [clinicId]);
 
@@ -348,8 +370,10 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
   }, [toast]);
 
   useEffect(() => {
-    void loadTreatmentTypes();
-  }, [loadTreatmentTypes]);
+    if (!bookModalOpen) return;
+    treatmentTypesLoadedForOpenRef.current = false;
+    void loadClinicians();
+  }, [bookModalOpen, loadClinicians]);
 
   const periodLabel = useMemo(() => {
     if (view === "day") {
@@ -652,12 +676,17 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
       {bookModalOpen ? (
         <BookPatientModal
           clinicId={clinicId}
-          clinicians={activeClinicians.length > 0 ? activeClinicians : clinicians}
+          clinicians={clinicians}
           locationId={activeLocationId}
           treatmentTypes={treatmentTypes}
-          onStep2Open={() => void loadTreatmentTypes()}
+          onStep2Open={() => {
+            if (treatmentTypesLoadedForOpenRef.current) return;
+            treatmentTypesLoadedForOpenRef.current = true;
+            void loadTreatmentTypes();
+          }}
           onClose={() => {
             setBookModalOpen(false);
+            treatmentTypesLoadedForOpenRef.current = false;
           }}
           onBooked={async () => {
             setBookModalOpen(false);
