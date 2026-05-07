@@ -10,6 +10,11 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.constants import STTPDN_CLINIC_ID
 from app.db import supabase
+from app.google_calendar import (
+    create_calendar_event,
+    delete_calendar_event,
+    update_calendar_event,
+)
 from app.sms import send_sms
 
 router = APIRouter()
@@ -676,7 +681,7 @@ def update_appointment_status(
     try:
         appt = (
             supabase.table("appointments")
-            .select("id,clinic_id")
+            .select("id,clinic_id,google_event_id")
             .eq("id", appointment_id)
             .limit(1)
             .execute()
@@ -690,6 +695,7 @@ def update_appointment_status(
     if not rows:
         raise HTTPException(status_code=404, detail="Appointment not found")
     clinic_id = str(rows[0].get("clinic_id") or "").strip()
+    google_event_id = str(rows[0].get("google_event_id") or "").strip()
     if not clinic_id:
         raise HTTPException(status_code=500, detail="Appointment has no clinic_id")
     _assert_user_has_clinic_access(user_id, clinic_id)
@@ -724,6 +730,15 @@ def update_appointment_status(
                 status,
             )
             raise HTTPException(status_code=404, detail="Appointment not found")
+        if status == "cancelled" and google_event_id:
+            try:
+                delete_calendar_event(google_event_id)
+            except Exception:
+                logger.exception(
+                    "google calendar delete failed appointment_id=%s event_id=%s",
+                    appointment_id,
+                    google_event_id,
+                )
         return result.data[0]
     except HTTPException:
         raise
@@ -855,6 +870,18 @@ def _duration_minutes_from_reschedule_row(row: dict[str, Any]) -> int:
         return mins if mins > 0 else 30
     except Exception:
         return 30
+
+
+def _patient_name_from_row(row: dict[str, Any]) -> str:
+    fn = str(row.get("first_name") or "").strip()
+    ln = str(row.get("last_name") or "").strip()
+    return f"{fn} {ln}".strip() or "Patient"
+
+
+def _clinician_name_from_row(row: dict[str, Any]) -> str:
+    fn = str(row.get("first_name") or "").strip()
+    ln = str(row.get("last_name") or "").strip()
+    return f"{fn} {ln}".strip() or "Unknown"
 
 
 @router.post("/reschedule")
@@ -1021,6 +1048,61 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
     print(f"New appointment booked: {new_appointment_id}")
 
     try:
+        new_appt = (
+            supabase.table("appointments")
+            .select(
+                "id,start_time,end_time,google_event_id,"
+                "patients(first_name,last_name),"
+                "clinicians(first_name,last_name),"
+                "treatment_types(name)"
+            )
+            .eq("id", new_appointment_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(new_appt)
+        nrow = (new_appt.data or [None])[0]
+        if nrow:
+            pat = nrow.get("patients") or {}
+            cli = nrow.get("clinicians") or {}
+            trt = nrow.get("treatment_types") or {}
+            patient_name = _patient_name_from_row(pat if isinstance(pat, dict) else {})
+            clinician_name = _clinician_name_from_row(
+                cli if isinstance(cli, dict) else {}
+            )
+            treatment_name = str(trt.get("name") or treatment_type_id).strip()
+            existing_google_event_id = str(nrow.get("google_event_id") or "").strip()
+
+            if existing_google_event_id:
+                update_calendar_event(
+                    existing_google_event_id,
+                    patient_name,
+                    clinician_name,
+                    treatment_name,
+                    nrow.get("start_time"),
+                    nrow.get("end_time"),
+                )
+            else:
+                created_google_event_id = create_calendar_event(
+                    appointment_id=new_appointment_id,
+                    patient_name=patient_name,
+                    clinician_name=clinician_name,
+                    treatment_type=treatment_name,
+                    start_datetime_utc=nrow.get("start_time"),
+                    end_datetime_utc=nrow.get("end_time"),
+                    location=None,
+                )
+                if created_google_event_id:
+                    supabase.table("appointments").update(
+                        {"google_event_id": created_google_event_id}
+                    ).eq("id", new_appointment_id).execute()
+    except Exception:
+        logger.exception(
+            "google calendar sync failed for reschedule appointment_id=%s",
+            new_appointment_id,
+        )
+
+    try:
         pt_msg = (
             supabase.table("patients")
             .select("first_name, phone")
@@ -1169,6 +1251,52 @@ def create_appointment(payload: CreateAppointmentRequest):
         raise HTTPException(status_code=500, detail="Failed to create appointment")
 
     appointment_id = str(appointment_rows[0]["id"])
+
+    try:
+        appt_with_details = (
+            supabase.table("appointments")
+            .select(
+                "id,start_time,end_time,"
+                "patients(first_name,last_name),"
+                "clinicians(first_name,last_name),"
+                "treatment_types(name)"
+            )
+            .eq("id", appointment_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(appt_with_details)
+        crow = (appt_with_details.data or [None])[0]
+        if crow:
+            pat = crow.get("patients") or {}
+            cli = crow.get("clinicians") or {}
+            trt = crow.get("treatment_types") or {}
+            patient_name = _patient_name_from_row(
+                pat if isinstance(pat, dict) else {}
+            ) or f"{payload.patient_first_name} {payload.patient_last_name}".strip()
+            clinician_name = _clinician_name_from_row(
+                cli if isinstance(cli, dict) else {}
+            ) or payload.clinician_id
+            treatment_name = str(trt.get("name") or payload.treatment_type_id).strip()
+
+            google_event_id = create_calendar_event(
+                appointment_id=appointment_id,
+                patient_name=patient_name,
+                clinician_name=clinician_name,
+                treatment_type=treatment_name,
+                start_datetime_utc=crow.get("start_time") or payload.start_time,
+                end_datetime_utc=crow.get("end_time") or payload.end_time,
+                location=None,
+            )
+            if google_event_id:
+                supabase.table("appointments").update(
+                    {"google_event_id": google_event_id}
+                ).eq("id", appointment_id).execute()
+    except Exception:
+        logger.exception(
+            "google calendar sync failed for create appointment_id=%s",
+            appointment_id,
+        )
 
     try:
         pt_msg = (
