@@ -1146,10 +1146,6 @@ function BookPatientModal({
     };
   }, [clinicId, search]);
 
-  const slotStartIso = toDate(`${selectedDate}T${selectedTime}:00`, {
-    timeZone: NY,
-  }).toISOString();
-
   async function continueWithNewPatient() {
     if (
       !newPatient.first_name.trim() ||
@@ -1209,6 +1205,54 @@ function BookPatientModal({
       onError("Select a location before booking.");
       return;
     }
+
+    const dateStr = selectedDate;
+    const timeStr = selectedTime;
+    const [year, month, day] = dateStr.split("-").map(Number);
+    if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
+      onError("Invalid date or time selected. Please check your inputs.");
+      return;
+    }
+
+    // Accept either "HH:MM" or "h:MM AM/PM" from the picker.
+    let hours = 0;
+    let minutes = 0;
+    if (timeStr.includes(" ")) {
+      const [timePart, periodRaw] = timeStr.split(" ");
+      const [hoursStr, minutesStr] = timePart.split(":");
+      hours = parseInt(hoursStr, 10);
+      minutes = parseInt(minutesStr, 10);
+      const period = (periodRaw || "").toUpperCase();
+      if (period === "PM" && hours !== 12) hours += 12;
+      if (period === "AM" && hours === 12) hours = 0;
+    } else {
+      const [hoursStr, minutesStr] = timeStr.split(":");
+      hours = parseInt(hoursStr, 10);
+      minutes = parseInt(minutesStr, 10);
+    }
+
+    if (
+      !Number.isFinite(hours) ||
+      !Number.isFinite(minutes) ||
+      hours < 0 ||
+      hours > 23 ||
+      minutes < 0 ||
+      minutes > 59
+    ) {
+      onError("Invalid date or time selected. Please check your inputs.");
+      return;
+    }
+
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const localISO = `${year}-${pad(month)}-${pad(day)}T${pad(hours)}:${pad(minutes)}:00`;
+    const easternOffsetHours = 4; // EDT
+    const utcDate = new Date(`${localISO}-0${easternOffsetHours}:00`);
+    if (Number.isNaN(utcDate.getTime())) {
+      onError("Invalid date or time selected. Please check your inputs.");
+      return;
+    }
+    const start_time = utcDate.toISOString();
+
     setConfirming(true);
     try {
       const h = await authHeaders();
@@ -1221,7 +1265,7 @@ function BookPatientModal({
           clinic_id: clinicId,
           location_id: locationId,
           treatment_type_id: treatmentTypeId,
-          start_time: slotStartIso,
+          start_time,
           source: "manual",
         }),
       });
