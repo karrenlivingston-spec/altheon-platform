@@ -857,16 +857,18 @@ def _duration_minutes_from_reschedule_row(row: dict[str, Any]) -> int:
 
 @router.post("/reschedule")
 def reschedule_appointment(payload: RescheduleAppointmentRequest):
-    """Reschedule the patient's latest scheduled/confirmed visit; clinician, treatment, and location carry over."""
-    phone = payload.patient_phone.strip()
-    if not phone:
+    """Cancel the patient's next upcoming visit and book a new one; clinician, treatment, and location carry over."""
+    patient_phone = payload.patient_phone.strip()
+    if not patient_phone:
         raise HTTPException(status_code=400, detail="patient_phone is required")
+
+    print(f"Looking up patient by phone: {patient_phone}")
 
     try:
         patient_lookup = (
             supabase.table("patients")
             .select("id")
-            .eq("phone", phone)
+            .eq("phone", patient_phone)
             .limit(1)
             .execute()
         )
@@ -880,17 +882,20 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
     if not prow:
         raise HTTPException(status_code=404, detail="Patient not found for phone")
     patient_id = str(prow[0]["id"])
+    print(f"Found patient: {patient_id}")
 
+    now_iso = datetime.now(timezone.utc).isoformat()
     try:
         existing = (
             supabase.table("appointments")
             .select(
                 "id, clinic_id, treatment_type_id, clinician_id, location_id, "
-                "start_time, end_time, treatment_types(duration_minutes)"
+                "start_time, end_time, notes, treatment_types(duration_minutes)"
             )
             .eq("patient_id", patient_id)
             .in_("status", ["scheduled", "confirmed"])
-            .order("start_time", desc=True)
+            .gte("start_time", now_iso)
+            .order("start_time", desc=False)
             .limit(1)
             .execute()
         )
@@ -904,15 +909,23 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
     if not erows:
         raise HTTPException(
             status_code=404,
-            detail="No scheduled or confirmed appointment found to reschedule",
+            detail="No upcoming scheduled or confirmed appointment found to reschedule",
         )
     row = erows[0]
-    appointment_id = str(row.get("id") or "")
+    old_appointment_id = str(row.get("id") or "").strip()
+    print(f"Found existing appointment: {old_appointment_id}")
+    if not old_appointment_id:
+        print("ERROR: old_appointment_id is None or empty before cancel; aborting")
+        raise HTTPException(
+            status_code=500,
+            detail="Could not resolve existing appointment id to cancel",
+        )
+
     clinician_id = str(row.get("clinician_id") or "")
     treatment_type_id = str(row.get("treatment_type_id") or "")
     location_id = str(row.get("location_id") or "")
     clinic_id = str(row.get("clinic_id") or "")
-    if not appointment_id or not clinician_id or not treatment_type_id or not location_id or not clinic_id:
+    if not clinician_id or not treatment_type_id or not location_id or not clinic_id:
         raise HTTPException(
             status_code=500,
             detail="Existing appointment is missing required booking fields",
@@ -941,28 +954,64 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    print("Cancelling old appointment...")
     try:
-        upd = (
+        cancel_updated_at = datetime.now(timezone.utc).isoformat()
+        cancel_result = (
             supabase.table("appointments")
-            .update(
-                {
-                    "start_time": start_iso,
-                    "end_time": end_iso,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }
-            )
-            .eq("id", appointment_id)
+            .update({"status": "cancelled", "updated_at": cancel_updated_at})
+            .eq("id", old_appointment_id)
             .execute()
         )
-        _handle_supabase_error(upd)
+        _handle_supabase_error(cancel_result)
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    urows = upd.data or []
-    if not urows:
-        raise HTTPException(status_code=500, detail="Failed to reschedule appointment")
+    print(f"Old appointment cancelled: {cancel_result.data}")
+
+    cancel_rows = cancel_result.data or []
+    if not cancel_rows:
+        print(
+            f"ERROR: cancel returned no rows for old_appointment_id={old_appointment_id!r}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to cancel existing appointment (no row updated)",
+        )
+
+    print("Booking new appointment...")
+    try:
+        ins = (
+            supabase.table("appointments")
+            .insert(
+                {
+                    "clinic_id": clinic_id,
+                    "patient_id": patient_id,
+                    "clinician_id": clinician_id,
+                    "location_id": location_id,
+                    "treatment_type_id": treatment_type_id,
+                    "start_time": start_iso,
+                    "end_time": end_iso,
+                    "notes": row.get("notes"),
+                    "source": "ai",
+                    "status": "scheduled",
+                }
+            )
+            .execute()
+        )
+        _handle_supabase_error(ins)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    ins_rows = ins.data or []
+    if not ins_rows:
+        raise HTTPException(status_code=500, detail="Failed to create rescheduled appointment")
+    new_appointment_id = str(ins_rows[0]["id"])
+    print(f"New appointment booked: {new_appointment_id}")
 
     try:
         pt_msg = (
@@ -974,7 +1023,7 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
         )
         _handle_supabase_error(pt_msg)
         pr = (pt_msg.data or [{}])[0]
-        phone_out = pr.get("phone") or phone
+        phone_out = pr.get("phone") or patient_phone
         fname = (pr.get("first_name") or "").strip()
         if phone_out:
             body = _format_confirmation_sms(start_iso, fname)
@@ -982,19 +1031,19 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
                 _to_e164_us(str(phone_out)),
                 body,
                 patient_id=str(patient_id),
-                appointment_id=appointment_id,
+                appointment_id=new_appointment_id,
                 message_type="confirmation",
             )
     except Exception:
         logger.exception(
             "reschedule confirmation SMS failed appointment_id=%s patient_id=%s",
-            appointment_id,
+            new_appointment_id,
             patient_id,
         )
 
     return {
         "success": True,
-        "appointment_id": appointment_id,
+        "appointment_id": new_appointment_id,
         "patient_id": patient_id,
     }
 

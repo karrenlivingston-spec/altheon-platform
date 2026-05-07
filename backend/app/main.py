@@ -205,10 +205,12 @@ def patient_lookup(phone: str, clinic_id: str):
         access_rows = access_resp.data or []
         if not access_rows:
             return {"found": False}
+
+        patient_id = patient["id"]
         appt_resp = (
             supabase.table("appointments")
             .select("start_time")
-            .eq("patient_id", patient["id"])
+            .eq("patient_id", patient_id)
             .eq("clinic_id", clinic_id)
             .in_("status", ["scheduled", "confirmed"])
             .order("start_time", desc=True)
@@ -222,11 +224,42 @@ def patient_lookup(phone: str, clinic_id: str):
             if start_time:
                 last_visit = start_time[:10]
 
+        now_iso = datetime.now(timezone.utc).isoformat()
+        upcoming_appointment = None
+        try:
+            upcoming_resp = (
+                supabase.table("appointments")
+                .select("id, start_time, clinician_id, treatment_type_id, status")
+                .eq("patient_id", patient_id)
+                .eq("clinic_id", clinic_id)
+                .in_("status", ["scheduled", "confirmed"])
+                .gte("start_time", now_iso)
+                .order("start_time", desc=False)
+                .limit(1)
+                .execute()
+            )
+            upcoming_rows = upcoming_resp.data or []
+            if upcoming_rows:
+                ur = upcoming_rows[0]
+                upcoming_appointment = {
+                    "id": str(ur.get("id") or ""),
+                    "start_time": ur.get("start_time"),
+                    "clinician_id": str(ur.get("clinician_id") or ""),
+                    "treatment_type_id": str(ur.get("treatment_type_id") or ""),
+                }
+        except Exception:
+            upcoming_appointment = None
+
         return {
             "found": True,
-            "first_name": patient.get("first_name"),
-            "last_name": patient.get("last_name"),
-            "last_visit": last_visit,
+            "patient": {
+                "id": str(patient_id),
+                "first_name": patient.get("first_name"),
+                "last_name": patient.get("last_name"),
+                "phone": patient.get("phone"),
+                "last_visit": last_visit,
+            },
+            "upcoming_appointment": upcoming_appointment,
         }
     except Exception:
         return {"found": False}
