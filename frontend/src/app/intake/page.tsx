@@ -3,11 +3,33 @@
 import { useConversation } from "@11labs/react";
 import Image from "next/image";
 import { Mic, PhoneOff } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 const STTPDN_CLINIC_ID_FALLBACK =
   process.env.NEXT_PUBLIC_INTAKE_CLINIC_ID ??
   "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
+
+const EARLY_DISCONNECT_COPY =
+  "Something went wrong. Please try again or ask the front desk for help.";
+
+/** True when the event is from Aria (agent), not user/VAD/ping (best-effort across SDK event shapes). */
+function isAriaAgentMessage(event: unknown): boolean {
+  if (event == null || typeof event !== "object") return false;
+  const e = event as Record<string, unknown>;
+  const type = String(e.type ?? "");
+  if (
+    /user_transcript|user_transcription|vad_score|ping|pong|client_tool|conversation_initiation_metadata/i.test(
+      type,
+    )
+  ) {
+    return false;
+  }
+  if (/agent_response|agent_audio|tentative_agent|agent_chat_response/i.test(type)) {
+    return true;
+  }
+  if ("agent_response_event" in e || "audio_event" in e) return true;
+  return false;
+}
 
 function statusLabel(status: string): string {
   switch (status) {
@@ -24,37 +46,81 @@ function statusLabel(status: string): string {
 
 export default function IntakePage() {
   const [complete, setComplete] = useState(false);
+  const [conversationStarted, setConversationStarted] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const conversationStartedRef = useRef(false);
 
   const agentId = useMemo(
     () => (process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID ?? "").trim(),
     [],
   );
 
-  const onConversationEnd = useCallback(() => {
+  useEffect(() => {
+    console.log(
+      "[intake] mount — NEXT_PUBLIC_ELEVENLABS_AGENT_ID:",
+      agentId || "(empty or undefined)",
+    );
+  }, [agentId]);
+
+  const resetConversationTracking = useCallback(() => {
+    conversationStartedRef.current = false;
+    setConversationStarted(false);
+  }, []);
+
+  const onConversationSuccessEnd = useCallback(() => {
+    if (!conversationStartedRef.current) {
+      return;
+    }
     setComplete(true);
     setBanner(null);
   }, []);
 
   const onConversationError = useCallback((message: string) => {
-    setBanner(message || "Something went wrong. Please try again or ask the front desk.");
+    const line =
+      message?.trim() ||
+      "Something went wrong. Please try again or ask the front desk.";
+    setBanner(line);
   }, []);
 
   const { startSession, endSession, status, isSpeaking } = useConversation({
+    onMessage: (event) => {
+      if (conversationStartedRef.current) return;
+      if (!isAriaAgentMessage(event)) return;
+      conversationStartedRef.current = true;
+      setConversationStarted(true);
+      console.log("[intake] first message from Aria (conversationStarted = true)", event);
+    },
     onDisconnect: (details: { reason: string; message?: unknown }) => {
+      console.log("[intake] onDisconnect reason:", details.reason, "details:", details);
       if (details.reason === "error") {
-        onConversationError(
+        const msg =
           typeof details.message === "string"
             ? details.message
-            : "Connection error",
+            : "Connection error";
+        console.error(
+          "[intake] onDisconnect (reason=error), message:",
+          msg,
         );
+        onConversationError(msg);
+        resetConversationTracking();
         return;
       }
-      onConversationEnd();
+      if (!conversationStartedRef.current) {
+        console.warn(
+          "[intake] disconnect before any agent message — showing error, not completion",
+        );
+        setBanner(EARLY_DISCONNECT_COPY);
+        resetConversationTracking();
+        return;
+      }
+      onConversationSuccessEnd();
     },
     onError: (message) => {
-      onConversationError(typeof message === "string" ? message : "Connection error");
+      const m = typeof message === "string" ? message : "Connection error";
+      console.error("[intake] useConversation onError callback:", m);
+      onConversationError(m);
     },
   });
 
@@ -63,10 +129,16 @@ export default function IntakePage() {
       setBanner("Intake voice is not configured. Please ask the front desk for help.");
       return;
     }
+    setComplete(false);
+    resetConversationTracking();
     setBanner(null);
     setBusy(true);
     try {
       await navigator.mediaDevices.getUserMedia({ audio: true });
+      console.log("[intake] startSession", {
+        agentId,
+        connectionType: "webrtc",
+      });
       await startSession({
         agentId,
         connectionType: "webrtc",
@@ -79,6 +151,7 @@ export default function IntakePage() {
         e instanceof Error
           ? e.message
           : "Could not start. Check microphone permission and try again.";
+      console.error("[intake] startSession failed:", e);
       setBanner(msg);
     } finally {
       setBusy(false);
@@ -89,14 +162,17 @@ export default function IntakePage() {
     setBusy(true);
     try {
       await endSession();
-    } catch {
+    } catch (err) {
+      console.error("[intake] endSession failed:", err);
       setBanner("Could not end the session cleanly. You can close this page.");
     } finally {
       setBusy(false);
     }
   };
 
-  if (complete) {
+  const sessionEndedSuccessfully = complete && conversationStarted;
+
+  if (sessionEndedSuccessfully) {
     return (
       <div
         className="flex min-h-screen flex-col items-center justify-center px-6 py-12 text-center"
