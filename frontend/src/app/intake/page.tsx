@@ -1,16 +1,31 @@
 "use client";
 
+/**
+ * ElevenAgents React SDK (@elevenlabs/react): session identity belongs on
+ * ConversationProvider; startSession() only kicks off the async pipeline (returns void).
+ * VoiceConversation requests getUserMedia internally — do not pre-call getUserMedia here.
+ * @see node_modules/@elevenlabs/react/README.md Quick Start
+ */
+
 import { ConversationProvider, useConversation } from "@elevenlabs/react";
 import Image from "next/image";
 import { Mic, PhoneOff } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 const STTPDN_CLINIC_ID_FALLBACK =
   process.env.NEXT_PUBLIC_INTAKE_CLINIC_ID ??
   "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 
+/** Default public agent for STTPDN intake when env is unset (per product request). */
+const STTPDN_INTAKE_AGENT_DEFAULT = "agent_8201kr28yvzqfws937kzq7tkdb93";
+
 const EARLY_DISCONNECT_COPY =
   "Something went wrong. Please try again or ask the front desk for help.";
+
+function resolveAgentId(): string {
+  const fromEnv = (process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID ?? "").trim();
+  return fromEnv || STTPDN_INTAKE_AGENT_DEFAULT;
+}
 
 /** True when the event is from Aria (agent), not user/VAD/ping (best-effort across SDK event shapes). */
 function isAriaAgentMessage(event: unknown): boolean {
@@ -37,6 +52,8 @@ function statusLabel(status: string): string {
       return "Connecting…";
     case "connected":
       return "You're connected — speak naturally";
+    case "error":
+      return "Connection issue — see message below";
     default:
       return "Tap to speak with Aria";
   }
@@ -46,21 +63,9 @@ function IntakePageInner() {
   const [complete, setComplete] = useState(false);
   const [conversationStarted, setConversationStarted] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [ending, setEnding] = useState(false);
 
   const conversationStartedRef = useRef(false);
-
-  const agentId = useMemo(
-    () => (process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID ?? "").trim(),
-    [],
-  );
-
-  useEffect(() => {
-    console.log(
-      "[intake] mount — NEXT_PUBLIC_ELEVENLABS_AGENT_ID:",
-      agentId || "(empty or undefined)",
-    );
-  }, [agentId]);
 
   const resetConversationTracking = useCallback(() => {
     conversationStartedRef.current = false;
@@ -75,14 +80,20 @@ function IntakePageInner() {
     setBanner(null);
   }, []);
 
-  const onConversationError = useCallback((message: string) => {
+  const onConversationError = useCallback((msg: string) => {
     const line =
-      message?.trim() ||
+      msg?.trim() ||
       "Something went wrong. Please try again or ask the front desk.";
     setBanner(line);
   }, []);
 
-  const { startSession, endSession, status, isSpeaking } = useConversation({
+  const {
+    startSession,
+    endSession,
+    status,
+    isSpeaking,
+    message: conversationErrorDetail,
+  } = useConversation({
     onMessage: (event) => {
       if (conversationStartedRef.current) return;
       if (!isAriaAgentMessage(event)) return;
@@ -90,17 +101,14 @@ function IntakePageInner() {
       setConversationStarted(true);
       console.log("[intake] first message from Aria (conversationStarted = true)", event);
     },
-    onDisconnect: (details: { reason: string; message?: unknown }) => {
-      console.log("[intake] onDisconnect reason:", details.reason, "details:", details);
+    onDisconnect: (details) => {
+      console.log("[intake] onDisconnect reason:", details.reason, "full details:", details);
       if (details.reason === "error") {
         const msg =
           typeof details.message === "string"
             ? details.message
             : "Connection error";
-        console.error(
-          "[intake] onDisconnect (reason=error), message:",
-          msg,
-        );
+        console.error("[intake] onDisconnect (reason=error), message:", msg);
         onConversationError(msg);
         resetConversationTracking();
         return;
@@ -115,56 +123,58 @@ function IntakePageInner() {
       }
       onConversationSuccessEnd();
     },
-    onError: (message) => {
+    onError: (message, context) => {
       const m = typeof message === "string" ? message : "Connection error";
-      console.error("[intake] useConversation onError callback:", m);
+      console.error("[intake] useConversation onError:", m, "context:", context);
       onConversationError(m);
+    },
+    onStatusChange: ({ status: s }) => {
+      console.log("[intake] onStatusChange:", s);
     },
   });
 
-  const handleStart = async () => {
-    if (!agentId) {
-      setBanner("Intake voice is not configured. Please ask the front desk for help.");
-      return;
+  useEffect(() => {
+    if (status === "error" && conversationErrorDetail) {
+      console.error("[intake] conversation status error:", conversationErrorDetail);
+      setBanner(conversationErrorDetail);
     }
+  }, [status, conversationErrorDetail]);
+
+  const handleStart = () => {
     setComplete(false);
     resetConversationTracking();
     setBanner(null);
-    setBusy(true);
+    console.log(
+      "[intake] startSession() — using provider agentId + connectionType webrtc; optional session callbacks only",
+    );
     try {
-      await navigator.mediaDevices.getUserMedia({ audio: true });
-      console.log("[intake] startSession", {
-        agentId,
-        connectionType: "webrtc",
-      });
-      await startSession({
-        agentId,
-        connectionType: "webrtc",
-        dynamicVariables: {
-          clinic_id: STTPDN_CLINIC_ID_FALLBACK,
+      startSession({
+        onConnect: (props) => {
+          console.log("[intake] onConnect (session)", props);
+        },
+        onError: (msg, ctx) => {
+          console.error("[intake] startSession one-shot onError:", msg, ctx);
         },
       });
     } catch (e) {
-      const msg =
+      console.error("[intake] startSession threw synchronously:", e);
+      setBanner(
         e instanceof Error
           ? e.message
-          : "Could not start. Check microphone permission and try again.";
-      console.error("[intake] startSession failed:", e);
-      setBanner(msg);
-    } finally {
-      setBusy(false);
+          : "Could not start. Please try again or ask the front desk.",
+      );
     }
   };
 
-  const handleEnd = async () => {
-    setBusy(true);
+  const handleEnd = () => {
+    setEnding(true);
     try {
-      await endSession();
+      endSession();
     } catch (err) {
-      console.error("[intake] endSession failed:", err);
+      console.error("[intake] endSession threw:", err);
       setBanner("Could not end the session cleanly. You can close this page.");
     } finally {
-      setBusy(false);
+      setEnding(false);
     }
   };
 
@@ -193,7 +203,8 @@ function IntakePageInner() {
     );
   }
 
-  const connected = status === "connected" || status === "connecting";
+  const showEndButton = status === "connected";
+  const showStartButton = !showEndButton;
 
   return (
     <div
@@ -238,11 +249,11 @@ function IntakePageInner() {
                 aria-hidden
               />
             ) : null}
-            {!connected ? (
+            {showStartButton ? (
               <button
                 type="button"
-                disabled={busy}
-                onClick={() => void handleStart()}
+                disabled={status === "connecting"}
+                onClick={() => handleStart()}
                 className="relative flex h-36 w-36 items-center justify-center rounded-full bg-[#16A34A] text-white shadow-[0_12px_40px_rgba(22,163,74,0.45)] ring-4 ring-[#16A34A]/30 transition hover:bg-[#15803d] hover:shadow-[0_14px_48px_rgba(22,163,74,0.5)] focus:outline-none focus-visible:ring-4 focus-visible:ring-white/40 disabled:opacity-50"
                 aria-label="Start speaking with Aria"
               >
@@ -251,8 +262,8 @@ function IntakePageInner() {
             ) : (
               <button
                 type="button"
-                disabled={busy}
-                onClick={() => void handleEnd()}
+                disabled={ending}
+                onClick={() => handleEnd()}
                 className="relative flex h-36 w-36 flex-col items-center justify-center gap-1 rounded-full border-2 border-white/25 bg-white/10 text-white backdrop-blur-sm transition hover:bg-white/15 focus:outline-none focus-visible:ring-4 focus-visible:ring-[#16A34A]/50 disabled:opacity-50"
                 aria-label="End conversation"
               >
@@ -265,11 +276,6 @@ function IntakePageInner() {
           </div>
 
           <p className="max-w-sm text-sm text-[#9dd4cb]">{statusLabel(status)}</p>
-          {!agentId ? (
-            <p className="text-xs text-[#fcd34d]/90">
-              Missing NEXT_PUBLIC_ELEVENLABS_AGENT_ID — voice cannot start until it is set.
-            </p>
-          ) : null}
         </div>
       </div>
     </div>
@@ -277,8 +283,26 @@ function IntakePageInner() {
 }
 
 export default function IntakePage() {
+  const agentId = resolveAgentId();
+
+  useEffect(() => {
+    const fromEnv = (process.env.NEXT_PUBLIC_ELEVENLABS_AGENT_ID ?? "").trim();
+    console.log("[intake] resolved agentId:", agentId);
+    console.log(
+      "[intake] NEXT_PUBLIC_ELEVENLABS_AGENT_ID:",
+      fromEnv || "(unset — using default STTPDN intake agent)",
+    );
+    console.log("[intake] ConversationProvider session defaults: connectionType=webrtc");
+  }, [agentId]);
+
   return (
-    <ConversationProvider>
+    <ConversationProvider
+      agentId={agentId}
+      connectionType="webrtc"
+      dynamicVariables={{
+        clinic_id: STTPDN_CLINIC_ID_FALLBACK,
+      }}
+    >
       <IntakePageInner />
     </ConversationProvider>
   );
