@@ -4,7 +4,7 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Header, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.constants import STTPDN_CLINIC_ID
 from app.db import supabase
@@ -748,6 +748,31 @@ class CreateAppointmentRequest(BaseModel):
     notes: Optional[str] = None
 
 
+class RescheduleAppointmentRequest(BaseModel):
+    patient_phone: str = Field(...)
+    new_date: str = Field(..., description="YYYY-MM-DD")
+    new_time: str = Field(..., description="HH:MM (24-hour)")
+
+    @field_validator("new_date")
+    @classmethod
+    def _validate_new_date(cls, v: str) -> str:
+        s = v.strip()
+        date.fromisoformat(s)
+        return s
+
+    @field_validator("new_time")
+    @classmethod
+    def _validate_new_time(cls, v: str) -> str:
+        s = v.strip()
+        parts = s.split(":")
+        if len(parts) != 2:
+            raise ValueError("new_time must be HH:MM")
+        h, m = int(parts[0]), int(parts[1])
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            raise ValueError("invalid new_time")
+        return f"{h:02d}:{m:02d}"
+
+
 def _handle_supabase_error(response: Any) -> None:
     error = getattr(response, "error", None)
     if error:
@@ -807,6 +832,171 @@ def _is_blocked_time(clinician_id: str, start_time: str, end_time: str) -> bool:
     )
     _handle_supabase_error(query)
     return bool(query.data)
+
+
+def _duration_minutes_from_reschedule_row(row: dict[str, Any]) -> int:
+    treatment = row.get("treatment_types") or {}
+    if isinstance(treatment, list):
+        treatment = treatment[0] if treatment else {}
+    if isinstance(treatment, dict):
+        d = int(treatment.get("duration_minutes") or 0)
+        if d > 0:
+            return d
+    try:
+        s = datetime.fromisoformat(str(row.get("start_time")).replace("Z", "+00:00"))
+        e = datetime.fromisoformat(str(row.get("end_time")).replace("Z", "+00:00"))
+        if s.tzinfo is None:
+            s = s.replace(tzinfo=timezone.utc)
+        if e.tzinfo is None:
+            e = e.replace(tzinfo=timezone.utc)
+        mins = int((e - s).total_seconds() // 60)
+        return mins if mins > 0 else 30
+    except Exception:
+        return 30
+
+
+@router.post("/reschedule")
+def reschedule_appointment(payload: RescheduleAppointmentRequest):
+    """Reschedule the patient's latest scheduled/confirmed visit; clinician, treatment, and location carry over."""
+    phone = payload.patient_phone.strip()
+    if not phone:
+        raise HTTPException(status_code=400, detail="patient_phone is required")
+
+    try:
+        patient_lookup = (
+            supabase.table("patients")
+            .select("id")
+            .eq("phone", phone)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(patient_lookup)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    prow = patient_lookup.data or []
+    if not prow:
+        raise HTTPException(status_code=404, detail="Patient not found for phone")
+    patient_id = str(prow[0]["id"])
+
+    try:
+        existing = (
+            supabase.table("appointments")
+            .select(
+                "id, clinic_id, treatment_type_id, clinician_id, location_id, "
+                "start_time, end_time, treatment_types(duration_minutes)"
+            )
+            .eq("patient_id", patient_id)
+            .in_("status", ["scheduled", "confirmed"])
+            .order("start_time", desc=True)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(existing)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    erows = existing.data or []
+    if not erows:
+        raise HTTPException(
+            status_code=404,
+            detail="No scheduled or confirmed appointment found to reschedule",
+        )
+    row = erows[0]
+    appointment_id = str(row.get("id") or "")
+    clinician_id = str(row.get("clinician_id") or "")
+    treatment_type_id = str(row.get("treatment_type_id") or "")
+    location_id = str(row.get("location_id") or "")
+    clinic_id = str(row.get("clinic_id") or "")
+    if not appointment_id or not clinician_id or not treatment_type_id or not location_id or not clinic_id:
+        raise HTTPException(
+            status_code=500,
+            detail="Existing appointment is missing required booking fields",
+        )
+
+    clinic_tz = ZoneInfo("America/New_York")
+    d = date.fromisoformat(payload.new_date)
+    hh, mm = payload.new_time.split(":")
+    local_start = datetime.combine(
+        d, time(int(hh), int(mm)), tzinfo=clinic_tz
+    )
+    utc_start = local_start.astimezone(timezone.utc)
+    dur = _duration_minutes_from_reschedule_row(row)
+    utc_end = utc_start + timedelta(minutes=dur)
+    start_iso = utc_start.isoformat()
+    end_iso = utc_end.isoformat()
+
+    try:
+        if _is_blocked_time(clinician_id, start_iso, end_iso):
+            raise HTTPException(
+                status_code=409,
+                detail="Selected slot falls within blocked time",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    try:
+        upd = (
+            supabase.table("appointments")
+            .update(
+                {
+                    "start_time": start_iso,
+                    "end_time": end_iso,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+            .eq("id", appointment_id)
+            .execute()
+        )
+        _handle_supabase_error(upd)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    urows = upd.data or []
+    if not urows:
+        raise HTTPException(status_code=500, detail="Failed to reschedule appointment")
+
+    try:
+        pt_msg = (
+            supabase.table("patients")
+            .select("first_name, phone")
+            .eq("id", patient_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(pt_msg)
+        pr = (pt_msg.data or [{}])[0]
+        phone_out = pr.get("phone") or phone
+        fname = (pr.get("first_name") or "").strip()
+        if phone_out:
+            body = _format_confirmation_sms(start_iso, fname)
+            send_sms(
+                _to_e164_us(str(phone_out)),
+                body,
+                patient_id=str(patient_id),
+                appointment_id=appointment_id,
+                message_type="confirmation",
+            )
+    except Exception:
+        logger.exception(
+            "reschedule confirmation SMS failed appointment_id=%s patient_id=%s",
+            appointment_id,
+            patient_id,
+        )
+
+    return {
+        "success": True,
+        "appointment_id": appointment_id,
+        "patient_id": patient_id,
+    }
 
 
 @router.post("")
