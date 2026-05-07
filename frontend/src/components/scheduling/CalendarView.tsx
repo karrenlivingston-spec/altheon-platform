@@ -76,8 +76,6 @@ type BlockedRow = {
 };
 
 type ViewMode = "day" | "week" | "month";
-type SlotTarget = { ymd: string; clinicianId: string; slotIndex: number };
-type SlotActionMode = "choose" | "block";
 type PatientOption = {
   id: string;
   first_name?: string | null;
@@ -197,9 +195,10 @@ function overlapsRange(
 
 type CalendarViewProps = {
   clinicId: string;
+  openBookingNonce?: number;
 };
 
-export default function CalendarView({ clinicId }: CalendarViewProps) {
+export default function CalendarView({ clinicId, openBookingNonce = 0 }: CalendarViewProps) {
   const [view, setView] = useState<ViewMode>("week");
   const [anchorYmd, setAnchorYmd] = useState(() => getEasternYMD(new Date()));
   const [providerId, setProviderId] = useState<string>("");
@@ -220,15 +219,12 @@ export default function CalendarView({ clinicId }: CalendarViewProps) {
     appt: CalendarAppointment;
     newYmd: string;
   } | null>(null);
-  const [slotTarget, setSlotTarget] = useState<SlotTarget | null>(null);
-  const [slotActionMode, setSlotActionMode] = useState<SlotActionMode>("choose");
   const [bookModalOpen, setBookModalOpen] = useState(false);
   const [toast, setToast] = useState<{
     kind: "success" | "error";
     message: string;
   } | null>(null);
   const [treatmentTypes, setTreatmentTypes] = useState<TreatmentTypeOption[]>([]);
-  const [blockReason, setBlockReason] = useState("");
   const [detailAppt, setDetailAppt] = useState<CalendarAppointment | null>(null);
 
   const todayYmd = useMemo(() => getEasternYMD(new Date()), []);
@@ -416,27 +412,6 @@ export default function CalendarView({ clinicId }: CalendarViewProps) {
     await loadData();
   }
 
-  function findApptAtSlot(
-    clinicianId: string,
-    ymd: string,
-    slotIndex: number,
-    excludeId?: string,
-  ): CalendarAppointment | null {
-    const slotStart = toDate(`${ymd}T${pad2(GRID_START_HOUR + Math.floor((slotIndex * SLOT_MINUTES) / 60))}:${pad2((slotIndex * SLOT_MINUTES) % 60)}:00`, {
-      timeZone: NY,
-    });
-    const slotEnd = new Date(slotStart.getTime() + SLOT_MINUTES * 60 * 1000);
-    for (const a of filteredAppointments) {
-      if (excludeId && a.id === excludeId) continue;
-      if (a.clinician.id !== clinicianId) continue;
-      if (easternYmdOfIso(a.start_time) !== ymd) continue;
-      const as = new Date(a.start_time);
-      const ae = new Date(a.end_time);
-      if (overlapsRange(as, ae, slotStart, slotEnd)) return a;
-    }
-    return null;
-  }
-
   function findOverlappingAppt(
     list: CalendarAppointment[],
     clinicianId: string,
@@ -529,15 +504,15 @@ export default function CalendarView({ clinicId }: CalendarViewProps) {
     </button>
   );
 
-  const selectedSlotClinician = useMemo(() => {
-    if (!slotTarget) return null;
-    return clinicians.find((c) => c.id === slotTarget.clinicianId) ?? null;
-  }, [slotTarget, clinicians]);
-
   const activeLocationId = useMemo(() => {
     if (locationId) return locationId;
     return locations[0]?.id ?? "";
   }, [locationId, locations]);
+
+  useEffect(() => {
+    if (openBookingNonce <= 0) return;
+    setBookModalOpen(true);
+  }, [openBookingNonce]);
 
   return (
     <div className="space-y-4">
@@ -636,9 +611,6 @@ export default function CalendarView({ clinicId }: CalendarViewProps) {
           onDragEnd={handleDragEnd}
           sensors={sensors}
           activeDrag={activeDrag}
-          setSlotTarget={setSlotTarget}
-          setSlotActionMode={setSlotActionMode}
-          findApptAtSlot={findApptAtSlot}
         />
       ) : view === "week" ? (
         <WeekGrid
@@ -667,39 +639,17 @@ export default function CalendarView({ clinicId }: CalendarViewProps) {
         />
       )}
 
-      {slotTarget && slotActionMode === "choose" ? (
-        <SlotActionPopover
-          slot={slotTarget}
-          clinicianLabel={
-            selectedSlotClinician ? clinicianLabel(selectedSlotClinician) : "Clinician"
-          }
-          onClose={() => setSlotTarget(null)}
-          onBlock={() => setSlotActionMode("block")}
-          onBook={() => setBookModalOpen(true)}
-        />
-      ) : null}
-
-      {bookModalOpen && slotTarget ? (
+      {bookModalOpen ? (
         <BookPatientModal
           clinicId={clinicId}
-          slot={slotTarget}
-          clinicianName={
-            selectedSlotClinician ? clinicianLabel(selectedSlotClinician) : "Clinician"
-          }
-          clinicianId={slotTarget.clinicianId}
+          clinicians={activeClinicians.length > 0 ? activeClinicians : clinicians}
           locationId={activeLocationId}
           treatmentTypes={treatmentTypes}
-          onBackToActions={() => {
-            setBookModalOpen(false);
-            setSlotActionMode("choose");
-          }}
           onClose={() => {
             setBookModalOpen(false);
-            setSlotTarget(null);
           }}
           onBooked={async () => {
             setBookModalOpen(false);
-            setSlotTarget(null);
             setToast({ kind: "success", message: "Appointment booked" });
             await loadData();
           }}
@@ -829,9 +779,6 @@ function DayGrid({
   onDragEnd,
   sensors,
   activeDrag,
-  setSlotTarget,
-  setSlotActionMode,
-  findApptAtSlot,
 }: {
   dayYmd: string;
   todayYmd: string;
@@ -843,14 +790,6 @@ function DayGrid({
   onDragEnd: (e: DragEndEvent) => void;
   sensors: ReturnType<typeof useSensors>;
   activeDrag: CalendarAppointment | null;
-  setSlotTarget: (v: SlotTarget | null) => void;
-  setSlotActionMode: (v: SlotActionMode) => void;
-  findApptAtSlot: (
-    clinicianId: string,
-    ymd: string,
-    slotIndex: number,
-    excludeId?: string,
-  ) => CalendarAppointment | null;
 }) {
   const gridHeight = NUM_SLOTS * ROW_H;
   const nowLinePx = useMemo(() => {
@@ -922,13 +861,7 @@ function DayGrid({
                       id={`slot|${dayYmd}|${clin.id}|${slotIndex}`}
                       slotIndex={slotIndex}
                       isHighlighted={false}
-                      onEmptyClick={() => {
-                        if (!findApptAtSlot(clin.id, dayYmd, slotIndex))
-                          {
-                            setSlotTarget({ ymd: dayYmd, clinicianId: clin.id, slotIndex });
-                            setSlotActionMode("choose");
-                          }
-                      }}
+                      onEmptyClick={undefined}
                     />
                   ))}
                   {nowLinePx !== null ? (
@@ -969,15 +902,17 @@ function DroppableSlotCell({
   id: string;
   slotIndex: number;
   isHighlighted: boolean;
-  onEmptyClick: () => void;
+  onEmptyClick?: () => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id });
+  const hasClick = typeof onEmptyClick === "function";
   return (
-    <button
-      type="button"
+    <div
       ref={setNodeRef}
       onClick={onEmptyClick}
-      className="absolute right-0 left-0 box-border border-b border-[rgba(0,0,0,0.06)] text-left"
+      className={`absolute right-0 left-0 box-border border-b border-[rgba(0,0,0,0.06)] text-left ${
+        hasClick ? "cursor-pointer" : "cursor-default"
+      }`}
       style={{
         top: slotIndex * ROW_H,
         height: ROW_H,
@@ -1120,74 +1055,19 @@ function BlockedOverlay({
   );
 }
 
-function SlotActionPopover({
-  slot,
-  clinicianLabel,
-  onClose,
-  onBook,
-  onBlock,
-}: {
-  slot: SlotTarget;
-  clinicianLabel: string;
-  onClose: () => void;
-  onBook: () => void;
-  onBlock: () => void;
-}) {
-  const slotIso = slotStartToUtcIso(slot.ymd, slot.slotIndex);
-  const slotLabel = formatInTimeZone(new Date(slotIso), NY, "EEEE, MMM d · h:mm a");
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-4 shadow-xl">
-        <p className="text-sm font-semibold text-slate-900">Selected slot</p>
-        <p className="mt-1 text-sm text-slate-600">{slotLabel}</p>
-        <p className="text-xs text-slate-500">{clinicianLabel}</p>
-        <div className="mt-4 grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            className="rounded-lg bg-[#16A34A] px-3 py-2 text-sm font-medium text-white"
-            onClick={onBook}
-          >
-            Book Patient
-          </button>
-          <button
-            type="button"
-            className="rounded-lg border border-black/10 px-3 py-2 text-sm text-slate-700"
-            onClick={onBlock}
-          >
-            Block Time
-          </button>
-        </div>
-        <button
-          type="button"
-          className="mt-2 w-full rounded-lg border border-black/10 px-3 py-2 text-sm"
-          onClick={onClose}
-        >
-          Cancel
-        </button>
-      </div>
-    </div>
-  );
-}
-
 function BookPatientModal({
   clinicId,
-  slot,
-  clinicianName,
-  clinicianId,
+  clinicians,
   locationId,
   treatmentTypes,
-  onBackToActions,
   onClose,
   onBooked,
   onError,
 }: {
   clinicId: string;
-  slot: SlotTarget;
-  clinicianName: string;
-  clinicianId: string;
+  clinicians: ClinicianRow[];
   locationId: string;
   treatmentTypes: TreatmentTypeOption[];
-  onBackToActions: () => void;
   onClose: () => void;
   onBooked: () => void | Promise<void>;
   onError: (message: string) => void;
@@ -1206,6 +1086,9 @@ function BookPatientModal({
   const [creatingPatient, setCreatingPatient] = useState(false);
   const [showNewPatient, setShowNewPatient] = useState(false);
   const [treatmentTypeId, setTreatmentTypeId] = useState("");
+  const [selectedDate, setSelectedDate] = useState(() => getEasternYMD(new Date()));
+  const [selectedTime, setSelectedTime] = useState("09:00");
+  const [selectedClinicianId, setSelectedClinicianId] = useState(() => clinicians[0]?.id ?? "");
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
@@ -1213,6 +1096,12 @@ function BookPatientModal({
       setTreatmentTypeId(treatmentTypes[0].id);
     }
   }, [treatmentTypes, treatmentTypeId]);
+
+  useEffect(() => {
+    if (!selectedClinicianId && clinicians.length > 0) {
+      setSelectedClinicianId(clinicians[0].id);
+    }
+  }, [clinicians, selectedClinicianId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1244,12 +1133,9 @@ function BookPatientModal({
     };
   }, [clinicId, search]);
 
-  const slotStartIso = slotStartToUtcIso(slot.ymd, slot.slotIndex);
-  const slotDateTimeLabel = formatInTimeZone(
-    new Date(slotStartIso),
-    NY,
-    "EEEE, MMM d yyyy · h:mm a",
-  );
+  const slotStartIso = toDate(`${selectedDate}T${selectedTime}:00`, {
+    timeZone: NY,
+  }).toISOString();
 
   async function continueWithNewPatient() {
     if (
@@ -1302,6 +1188,10 @@ function BookPatientModal({
       onError("Select a treatment type.");
       return;
     }
+    if (!selectedClinicianId) {
+      onError("Select a clinician.");
+      return;
+    }
     if (!locationId) {
       onError("Select a location before booking.");
       return;
@@ -1314,7 +1204,7 @@ function BookPatientModal({
         headers: h,
         body: JSON.stringify({
           patient_id: selectedPatient.id,
-          clinician_id: clinicianId,
+          clinician_id: selectedClinicianId,
           clinic_id: clinicId,
           location_id: locationId,
           treatment_type_id: treatmentTypeId,
@@ -1450,8 +1340,57 @@ function BookPatientModal({
           <div className="space-y-3">
             <div className="grid gap-3 sm:grid-cols-2">
               <ReadOnlyField label="Patient" value={`${selectedPatient?.first_name ?? ""} ${selectedPatient?.last_name ?? ""}`.trim()} />
-              <ReadOnlyField label="Clinician" value={clinicianName} />
-              <ReadOnlyField label="Date + Time" value={slotDateTimeLabel} />
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Clinician
+                </label>
+                <select
+                  className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                  value={selectedClinicianId}
+                  onChange={(e) => setSelectedClinicianId(e.target.value)}
+                >
+                  {clinicians.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {clinicianLabel(c)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Date
+                </label>
+                <input
+                  type="date"
+                  className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                  value={selectedDate}
+                  onChange={(e) => setSelectedDate(e.target.value)}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Time
+                </label>
+                <select
+                  className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                  value={selectedTime}
+                  onChange={(e) => setSelectedTime(e.target.value)}
+                >
+                  {Array.from({ length: 24 }, (_, i) => i).flatMap((h) =>
+                    [0, 30].map((m) => `${pad2(h)}:${pad2(m)}`),
+                  )
+                    .filter((s) => s >= "07:00" && s <= "19:00")
+                    .map((s) => (
+                      <option key={s} value={s}>
+                        {formatInTimeZone(
+                          toDate(`${selectedDate}T${s}:00`, { timeZone: NY }),
+                          NY,
+                          "h:mm a",
+                        )}
+                      </option>
+                    ))}
+                </select>
+              </div>
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
                   Treatment Type
@@ -1481,7 +1420,7 @@ function BookPatientModal({
                 <button
                   type="button"
                   className="rounded-lg border border-black/10 px-4 py-2 text-sm"
-                  onClick={onBackToActions}
+                  onClick={onClose}
                 >
                   Cancel
                 </button>
@@ -1510,46 +1449,6 @@ function ReadOnlyField({ label, value }: { label: string; value: string }) {
       </label>
       <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-slate-800">
         {value || "—"}
-      </div>
-    </div>
-  );
-}
-
-function BlockPopoverPanel({
-  blockPopover,
-  blockReason,
-  setBlockReason,
-  onClose,
-  onSubmit,
-}: {
-  blockPopover: { ymd: string; clinicianId: string; slotIndex: number };
-  blockReason: string;
-  setBlockReason: (s: string) => void;
-  onClose: () => void;
-  onSubmit: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
-      <div className="w-full max-w-sm rounded-xl bg-white p-4 shadow-xl">
-        <p className="text-sm font-medium text-slate-900">Block this time?</p>
-        <input
-          className="mt-2 w-full rounded-lg border border-black/10 px-3 py-2 text-sm"
-          placeholder="Reason"
-          value={blockReason}
-          onChange={(e) => setBlockReason(e.target.value)}
-        />
-        <div className="mt-3 flex justify-end gap-2">
-          <button type="button" className="rounded-lg border px-3 py-1.5 text-sm" onClick={onClose}>
-            Cancel
-          </button>
-          <button
-            type="button"
-            className="rounded-lg bg-slate-800 px-3 py-1.5 text-sm text-white"
-            onClick={() => onSubmit()}
-          >
-            Block
-          </button>
-        </div>
       </div>
     </div>
   );
