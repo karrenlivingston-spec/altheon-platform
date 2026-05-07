@@ -129,6 +129,29 @@ def list_clinicians(
     return resp.data or []
 
 
+@router.get("/treatment-types")
+def list_treatment_types(
+    clinic_id: str = Query(...),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    _require_auth_and_clinic(authorization, clinic_id)
+    try:
+        resp = (
+            supabase.table("treatment_types")
+            .select("id,name,duration_minutes,is_active,clinic_id")
+            .eq("clinic_id", clinic_id)
+            .eq("is_active", True)
+            .order("name")
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return resp.data or []
+
+
 @router.get("/clinicians/{clinician_id}/availability")
 def get_clinician_availability(
     clinician_id: str,

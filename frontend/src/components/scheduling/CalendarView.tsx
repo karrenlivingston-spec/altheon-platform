@@ -76,6 +76,19 @@ type BlockedRow = {
 };
 
 type ViewMode = "day" | "week" | "month";
+type SlotTarget = { ymd: string; clinicianId: string; slotIndex: number };
+type SlotActionMode = "choose" | "block";
+type PatientOption = {
+  id: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  phone?: string | null;
+};
+type TreatmentTypeOption = {
+  id: string;
+  name?: string | null;
+  duration_minutes?: number | null;
+};
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -207,11 +220,14 @@ export default function CalendarView({ clinicId }: CalendarViewProps) {
     appt: CalendarAppointment;
     newYmd: string;
   } | null>(null);
-  const [blockPopover, setBlockPopover] = useState<{
-    ymd: string;
-    clinicianId: string;
-    slotIndex: number;
+  const [slotTarget, setSlotTarget] = useState<SlotTarget | null>(null);
+  const [slotActionMode, setSlotActionMode] = useState<SlotActionMode>("choose");
+  const [bookModalOpen, setBookModalOpen] = useState(false);
+  const [toast, setToast] = useState<{
+    kind: "success" | "error";
+    message: string;
   } | null>(null);
+  const [treatmentTypes, setTreatmentTypes] = useState<TreatmentTypeOption[]>([]);
   const [blockReason, setBlockReason] = useState("");
   const [detailAppt, setDetailAppt] = useState<CalendarAppointment | null>(null);
 
@@ -301,6 +317,33 @@ export default function CalendarView({ clinicId }: CalendarViewProps) {
     const t = setTimeout(() => setUndo(null), 5000);
     return () => clearTimeout(t);
   }, [undo]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!clinicId) return;
+      try {
+        const h = await authHeaders();
+        const res = await fetch(
+          `${API_BASE}/treatment-types?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers: h },
+        );
+        const data = res.ok ? await res.json() : [];
+        if (!cancelled) setTreatmentTypes(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setTreatmentTypes([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clinicId]);
 
   const periodLabel = useMemo(() => {
     if (view === "day") {
@@ -486,6 +529,16 @@ export default function CalendarView({ clinicId }: CalendarViewProps) {
     </button>
   );
 
+  const selectedSlotClinician = useMemo(() => {
+    if (!slotTarget) return null;
+    return clinicians.find((c) => c.id === slotTarget.clinicianId) ?? null;
+  }, [slotTarget, clinicians]);
+
+  const activeLocationId = useMemo(() => {
+    if (locationId) return locationId;
+    return locations[0]?.id ?? "";
+  }, [locationId, locations]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-4 rounded-xl border border-black/10 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.08)] lg:flex-row lg:items-center lg:justify-between">
@@ -583,10 +636,8 @@ export default function CalendarView({ clinicId }: CalendarViewProps) {
           onDragEnd={handleDragEnd}
           sensors={sensors}
           activeDrag={activeDrag}
-          blockPopover={blockPopover}
-          setBlockPopover={setBlockPopover}
-          blockReason={blockReason}
-          setBlockReason={setBlockReason}
+          setSlotTarget={setSlotTarget}
+          setSlotActionMode={setSlotActionMode}
           findApptAtSlot={findApptAtSlot}
         />
       ) : view === "week" ? (
@@ -615,6 +666,48 @@ export default function CalendarView({ clinicId }: CalendarViewProps) {
           }}
         />
       )}
+
+      {slotTarget && slotActionMode === "choose" ? (
+        <SlotActionPopover
+          slot={slotTarget}
+          clinicianLabel={
+            selectedSlotClinician ? clinicianLabel(selectedSlotClinician) : "Clinician"
+          }
+          onClose={() => setSlotTarget(null)}
+          onBlock={() => setSlotActionMode("block")}
+          onBook={() => setBookModalOpen(true)}
+        />
+      ) : null}
+
+      {bookModalOpen && slotTarget ? (
+        <BookPatientModal
+          clinicId={clinicId}
+          slot={slotTarget}
+          clinicianName={
+            selectedSlotClinician ? clinicianLabel(selectedSlotClinician) : "Clinician"
+          }
+          clinicianId={slotTarget.clinicianId}
+          locationId={activeLocationId}
+          treatmentTypes={treatmentTypes}
+          onBackToActions={() => {
+            setBookModalOpen(false);
+            setSlotActionMode("choose");
+          }}
+          onClose={() => {
+            setBookModalOpen(false);
+            setSlotTarget(null);
+          }}
+          onBooked={async () => {
+            setBookModalOpen(false);
+            setSlotTarget(null);
+            setToast({ kind: "success", message: "Appointment booked" });
+            await loadData();
+          }}
+          onError={(message) => {
+            setToast({ kind: "error", message });
+          }}
+        />
+      ) : null}
 
       {swapDialog ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
@@ -711,6 +804,16 @@ export default function CalendarView({ clinicId }: CalendarViewProps) {
           </div>
         </div>
       ) : null}
+
+      {toast ? (
+        <div
+          className={`fixed right-4 bottom-4 z-[70] rounded-lg px-4 py-2 text-sm font-medium text-white shadow-lg ${
+            toast.kind === "success" ? "bg-[#16A34A]" : "bg-[#DC2626]"
+          }`}
+        >
+          {toast.message}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -726,10 +829,8 @@ function DayGrid({
   onDragEnd,
   sensors,
   activeDrag,
-  blockPopover,
-  setBlockPopover,
-  blockReason,
-  setBlockReason,
+  setSlotTarget,
+  setSlotActionMode,
   findApptAtSlot,
 }: {
   dayYmd: string;
@@ -742,10 +843,8 @@ function DayGrid({
   onDragEnd: (e: DragEndEvent) => void;
   sensors: ReturnType<typeof useSensors>;
   activeDrag: CalendarAppointment | null;
-  blockPopover: { ymd: string; clinicianId: string; slotIndex: number } | null;
-  setBlockPopover: (v: { ymd: string; clinicianId: string; slotIndex: number } | null) => void;
-  blockReason: string;
-  setBlockReason: (s: string) => void;
+  setSlotTarget: (v: SlotTarget | null) => void;
+  setSlotActionMode: (v: SlotActionMode) => void;
   findApptAtSlot: (
     clinicianId: string,
     ymd: string,
@@ -825,7 +924,10 @@ function DayGrid({
                       isHighlighted={false}
                       onEmptyClick={() => {
                         if (!findApptAtSlot(clin.id, dayYmd, slotIndex))
-                          setBlockPopover({ ymd: dayYmd, clinicianId: clin.id, slotIndex });
+                          {
+                            setSlotTarget({ ymd: dayYmd, clinicianId: clin.id, slotIndex });
+                            setSlotActionMode("choose");
+                          }
                       }}
                     />
                   ))}
@@ -854,39 +956,6 @@ function DayGrid({
           <ApptCardContent appt={activeDrag} compact={false} className="scale-[1.03] opacity-90 shadow-xl" />
         ) : null}
       </DragOverlay>
-
-      {blockPopover ? (
-        <BlockPopoverPanel
-          blockPopover={blockPopover}
-          blockReason={blockReason}
-          setBlockReason={setBlockReason}
-          onClose={() => setBlockPopover(null)}
-          onSubmit={async () => {
-            const p = blockPopover;
-            if (!p) return;
-            const start = slotStartToUtcIso(p.ymd, p.slotIndex);
-            const end = new Date(new Date(start).getTime() + 30 * 60 * 1000).toISOString();
-            const h = await authHeaders();
-            const res = await fetch(
-              `${API_BASE}/clinicians/${encodeURIComponent(p.clinicianId)}/blocked-time`,
-              {
-                method: "POST",
-                headers: h,
-                body: JSON.stringify({
-                  start_time: start,
-                  end_time: end,
-                  reason: blockReason.trim() || "Blocked",
-                }),
-              },
-            );
-            if (res.ok) {
-              setBlockPopover(null);
-              setBlockReason("");
-              onRefresh();
-            }
-          }}
-        />
-      ) : null}
     </DndContext>
   );
 }
@@ -1047,6 +1116,401 @@ function BlockedOverlay({
       >
         ×
       </button>
+    </div>
+  );
+}
+
+function SlotActionPopover({
+  slot,
+  clinicianLabel,
+  onClose,
+  onBook,
+  onBlock,
+}: {
+  slot: SlotTarget;
+  clinicianLabel: string;
+  onClose: () => void;
+  onBook: () => void;
+  onBlock: () => void;
+}) {
+  const slotIso = slotStartToUtcIso(slot.ymd, slot.slotIndex);
+  const slotLabel = formatInTimeZone(new Date(slotIso), NY, "EEEE, MMM d · h:mm a");
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4">
+      <div className="w-full max-w-sm rounded-xl bg-white p-4 shadow-xl">
+        <p className="text-sm font-semibold text-slate-900">Selected slot</p>
+        <p className="mt-1 text-sm text-slate-600">{slotLabel}</p>
+        <p className="text-xs text-slate-500">{clinicianLabel}</p>
+        <div className="mt-4 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            className="rounded-lg bg-[#16A34A] px-3 py-2 text-sm font-medium text-white"
+            onClick={onBook}
+          >
+            Book Patient
+          </button>
+          <button
+            type="button"
+            className="rounded-lg border border-black/10 px-3 py-2 text-sm text-slate-700"
+            onClick={onBlock}
+          >
+            Block Time
+          </button>
+        </div>
+        <button
+          type="button"
+          className="mt-2 w-full rounded-lg border border-black/10 px-3 py-2 text-sm"
+          onClick={onClose}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function BookPatientModal({
+  clinicId,
+  slot,
+  clinicianName,
+  clinicianId,
+  locationId,
+  treatmentTypes,
+  onBackToActions,
+  onClose,
+  onBooked,
+  onError,
+}: {
+  clinicId: string;
+  slot: SlotTarget;
+  clinicianName: string;
+  clinicianId: string;
+  locationId: string;
+  treatmentTypes: TreatmentTypeOption[];
+  onBackToActions: () => void;
+  onClose: () => void;
+  onBooked: () => void | Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [step, setStep] = useState<1 | 2>(1);
+  const [search, setSearch] = useState("");
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [results, setResults] = useState<PatientOption[]>([]);
+  const [selectedPatient, setSelectedPatient] = useState<PatientOption | null>(null);
+  const [newPatient, setNewPatient] = useState({
+    first_name: "",
+    last_name: "",
+    phone: "",
+    date_of_birth: "",
+  });
+  const [creatingPatient, setCreatingPatient] = useState(false);
+  const [showNewPatient, setShowNewPatient] = useState(false);
+  const [treatmentTypeId, setTreatmentTypeId] = useState("");
+  const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    if (treatmentTypes.length > 0 && !treatmentTypeId) {
+      setTreatmentTypeId(treatmentTypes[0].id);
+    }
+  }, [treatmentTypes, treatmentTypeId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!search.trim()) {
+      setResults([]);
+      return;
+    }
+    const t = setTimeout(() => {
+      (async () => {
+        setSearchLoading(true);
+        try {
+          const h = await authHeaders();
+          const res = await fetch(
+            `${API_BASE}/patients?clinic_id=${encodeURIComponent(clinicId)}&search=${encodeURIComponent(search.trim())}`,
+            { headers: h },
+          );
+          const json = res.ok ? await res.json() : [];
+          if (!cancelled) setResults(Array.isArray(json) ? json : []);
+        } catch {
+          if (!cancelled) setResults([]);
+        } finally {
+          if (!cancelled) setSearchLoading(false);
+        }
+      })();
+    }, 250);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [clinicId, search]);
+
+  const slotStartIso = slotStartToUtcIso(slot.ymd, slot.slotIndex);
+  const slotDateTimeLabel = formatInTimeZone(
+    new Date(slotStartIso),
+    NY,
+    "EEEE, MMM d yyyy · h:mm a",
+  );
+
+  async function continueWithNewPatient() {
+    if (
+      !newPatient.first_name.trim() ||
+      !newPatient.last_name.trim() ||
+      !newPatient.phone.trim() ||
+      !newPatient.date_of_birth.trim()
+    ) {
+      onError("Please complete all new patient fields.");
+      return;
+    }
+    setCreatingPatient(true);
+    try {
+      const h = await authHeaders();
+      const res = await fetch(
+        `${API_BASE}/patients`,
+        {
+          method: "POST",
+          headers: h,
+          body: JSON.stringify({
+            clinic_id: clinicId,
+            first_name: newPatient.first_name.trim(),
+            last_name: newPatient.last_name.trim(),
+            phone: newPatient.phone.trim(),
+            date_of_birth: newPatient.date_of_birth.trim(),
+          }),
+        },
+      );
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json?.id) {
+        onError(typeof json?.detail === "string" ? json.detail : `Error ${res.status}`);
+        return;
+      }
+      setSelectedPatient(json as PatientOption);
+      setShowNewPatient(false);
+      setStep(2);
+    } catch {
+      onError("Could not create patient.");
+    } finally {
+      setCreatingPatient(false);
+    }
+  }
+
+  async function confirmBooking() {
+    if (!selectedPatient?.id) {
+      onError("Select a patient first.");
+      return;
+    }
+    if (!treatmentTypeId) {
+      onError("Select a treatment type.");
+      return;
+    }
+    if (!locationId) {
+      onError("Select a location before booking.");
+      return;
+    }
+    setConfirming(true);
+    try {
+      const h = await authHeaders();
+      const res = await fetch(`${API_BASE}/appointments`, {
+        method: "POST",
+        headers: h,
+        body: JSON.stringify({
+          patient_id: selectedPatient.id,
+          clinician_id: clinicianId,
+          clinic_id: clinicId,
+          location_id: locationId,
+          treatment_type_id: treatmentTypeId,
+          start_time: slotStartIso,
+          source: "manual",
+        }),
+      });
+      if (!res.ok) {
+        const msg = await res.text().catch(() => "");
+        onError(msg || `Error ${res.status}`);
+        return;
+      }
+      await onBooked();
+    } catch {
+      onError("Could not book appointment.");
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-xl rounded-xl bg-white p-5 shadow-xl">
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="text-base font-semibold text-slate-900">Book Patient</h3>
+          <button
+            type="button"
+            className="rounded p-1 text-slate-500 hover:bg-slate-100"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
+
+        {step === 1 ? (
+          <div className="space-y-3">
+            <label className="text-xs font-medium uppercase tracking-wide text-slate-500">
+              Search patient by name or phone
+            </label>
+            <input
+              className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Start typing..."
+            />
+            <div className="max-h-48 overflow-auto rounded-lg border border-gray-100">
+              {searchLoading ? (
+                <div className="p-3 text-sm text-slate-500">Searching…</div>
+              ) : results.length === 0 ? (
+                <div className="p-3 text-sm text-slate-500">No matches yet.</div>
+              ) : (
+                results.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className="flex w-full items-center justify-between border-b border-gray-100 px-3 py-2 text-left text-sm hover:bg-green-50 last:border-b-0"
+                    onClick={() => {
+                      setSelectedPatient(p);
+                      setShowNewPatient(false);
+                      setStep(2);
+                    }}
+                  >
+                    <span>{`${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() || "Patient"}</span>
+                    <span className="text-xs text-slate-500">{p.phone || "—"}</span>
+                  </button>
+                ))
+              )}
+              <button
+                type="button"
+                className="w-full px-3 py-2 text-left text-sm font-medium text-[#16A34A] hover:bg-green-50"
+                onClick={() => setShowNewPatient(true)}
+              >
+                + New Patient
+              </button>
+            </div>
+
+            {showNewPatient ? (
+              <div className="grid gap-2 sm:grid-cols-2">
+                <input
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                  placeholder="First Name"
+                  value={newPatient.first_name}
+                  onChange={(e) =>
+                    setNewPatient((p) => ({ ...p, first_name: e.target.value }))
+                  }
+                />
+                <input
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                  placeholder="Last Name"
+                  value={newPatient.last_name}
+                  onChange={(e) =>
+                    setNewPatient((p) => ({ ...p, last_name: e.target.value }))
+                  }
+                />
+                <input
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                  placeholder="Phone"
+                  value={newPatient.phone}
+                  onChange={(e) =>
+                    setNewPatient((p) => ({ ...p, phone: e.target.value }))
+                  }
+                />
+                <input
+                  type="date"
+                  className="rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                  value={newPatient.date_of_birth}
+                  onChange={(e) =>
+                    setNewPatient((p) => ({ ...p, date_of_birth: e.target.value }))
+                  }
+                />
+                <div className="sm:col-span-2 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    className="rounded-lg border border-black/10 px-3 py-2 text-sm"
+                    onClick={() => setShowNewPatient(false)}
+                    disabled={creatingPatient}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-lg bg-[#16A34A] px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+                    onClick={() => void continueWithNewPatient()}
+                    disabled={creatingPatient}
+                  >
+                    {creatingPatient ? "Creating…" : "Continue"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <ReadOnlyField label="Patient" value={`${selectedPatient?.first_name ?? ""} ${selectedPatient?.last_name ?? ""}`.trim()} />
+              <ReadOnlyField label="Clinician" value={clinicianName} />
+              <ReadOnlyField label="Date + Time" value={slotDateTimeLabel} />
+              <div>
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Treatment Type
+                </label>
+                <select
+                  className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                  value={treatmentTypeId}
+                  onChange={(e) => setTreatmentTypeId(e.target.value)}
+                >
+                  {treatmentTypes.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name || t.id}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="flex flex-wrap justify-between gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-black/10 px-4 py-2 text-sm"
+                onClick={() => setStep(1)}
+              >
+                Back
+              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="rounded-lg border border-black/10 px-4 py-2 text-sm"
+                  onClick={onBackToActions}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="rounded-lg bg-[#16A34A] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+                  onClick={() => void confirmBooking()}
+                  disabled={confirming}
+                >
+                  {confirming ? "Booking…" : "Confirm Booking"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ReadOnlyField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+        {label}
+      </label>
+      <div className="rounded-lg border border-gray-100 bg-gray-50 px-3 py-2 text-sm text-slate-800">
+        {value || "—"}
+      </div>
     </div>
   );
 }

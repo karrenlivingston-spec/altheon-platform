@@ -285,15 +285,18 @@ def list_patient_surveys(patient_id: str, clinic_id: str = Query(...)):
 
 
 @router.get("")
-def list_patients(clinic_id: str = Query(...)):
+def list_patients(clinic_id: str = Query(...), search: Optional[str] = Query(default=None)):
     """Return patients for the requested clinic (clinic_id on patient row)."""
     try:
-        resp = (
-            supabase.table("patients")
-            .select("*")
-            .eq("clinic_id", clinic_id)
-            .execute()
-        )
+        q = supabase.table("patients").select("*").eq("clinic_id", clinic_id)
+        search_s = (search or "").strip()
+        if search_s:
+            esc = search_s.replace("%", "\\%").replace(",", " ")
+            like = f"%{esc}%"
+            q = q.or_(
+                f"first_name.ilike.{like},last_name.ilike.{like},phone.ilike.{like}"
+            )
+        resp = q.execute()
         _handle_supabase_error(resp)
     except HTTPException:
         raise

@@ -19,6 +19,8 @@ from app.sms import send_sms
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+# SQL migration (run manually):
+# ALTER TABLE appointments ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'aria';
 
 
 @router.get("")
@@ -757,12 +759,14 @@ class CreateAppointmentRequest(BaseModel):
     location_id: str
     treatment_type_id: str
     start_time: str
-    end_time: str
-    patient_first_name: str
-    patient_last_name: str
-    patient_phone: str
+    end_time: Optional[str] = None
+    patient_id: Optional[str] = None
+    patient_first_name: Optional[str] = None
+    patient_last_name: Optional[str] = None
+    patient_phone: Optional[str] = None
     patient_email: Optional[str] = None
     notes: Optional[str] = None
+    source: Optional[str] = None
 
 
 class RescheduleAppointmentRequest(BaseModel):
@@ -1139,48 +1143,64 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
 
 @router.post("")
 def create_appointment(payload: CreateAppointmentRequest):
-    try:
-        patient_lookup = (
-            supabase.table("patients")
-            .select("id")
-            .eq("phone", payload.patient_phone)
-            .limit(1)
-            .execute()
-        )
-        _handle_supabase_error(patient_lookup)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    patient_data = patient_lookup.data or []
-    if patient_data:
-        patient_id = patient_data[0]["id"]
-    else:
+    source = (payload.source or "ai").strip().lower() or "ai"
+    patient_id = (payload.patient_id or "").strip()
+    if not patient_id:
+        phone = (payload.patient_phone or "").strip()
+        if not phone:
+            raise HTTPException(
+                status_code=400,
+                detail="patient_phone is required when patient_id is not provided",
+            )
         try:
-            patient_insert = (
+            patient_lookup = (
                 supabase.table("patients")
-                .insert(
-                    {
-                        "first_name": payload.patient_first_name,
-                        "last_name": payload.patient_last_name,
-                        "phone": payload.patient_phone,
-                        "email": payload.patient_email,
-                        "clinic_id": STTPDN_CLINIC_ID,
-                    }
-                )
+                .select("id")
+                .eq("phone", phone)
+                .limit(1)
                 .execute()
             )
-            _handle_supabase_error(patient_insert)
+            _handle_supabase_error(patient_lookup)
         except HTTPException:
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        inserted_patients = patient_insert.data or []
-        if not inserted_patients:
-            raise HTTPException(status_code=500, detail="Failed to create patient")
-        patient_id = inserted_patients[0]["id"]
+        patient_data = patient_lookup.data or []
+        if patient_data:
+            patient_id = str(patient_data[0]["id"])
+        else:
+            first_name = (payload.patient_first_name or "").strip()
+            last_name = (payload.patient_last_name or "").strip()
+            if not first_name or not last_name:
+                raise HTTPException(
+                    status_code=400,
+                    detail="patient_first_name and patient_last_name are required for new patient booking",
+                )
+            try:
+                patient_insert = (
+                    supabase.table("patients")
+                    .insert(
+                        {
+                            "first_name": first_name,
+                            "last_name": last_name,
+                            "phone": phone,
+                            "email": payload.patient_email,
+                            "clinic_id": STTPDN_CLINIC_ID,
+                        }
+                    )
+                    .execute()
+                )
+                _handle_supabase_error(patient_insert)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+            inserted_patients = patient_insert.data or []
+            if not inserted_patients:
+                raise HTTPException(status_code=500, detail="Failed to create patient")
+            patient_id = str(inserted_patients[0]["id"])
 
     try:
         access_lookup = (
@@ -1210,8 +1230,30 @@ def create_appointment(payload: CreateAppointmentRequest):
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    start_iso = payload.start_time
+    if payload.end_time:
+        end_iso = payload.end_time
+    else:
+        try:
+            tt = (
+                supabase.table("treatment_types")
+                .select("duration_minutes")
+                .eq("id", payload.treatment_type_id)
+                .limit(1)
+                .execute()
+            )
+            _handle_supabase_error(tt)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        trows = tt.data or []
+        duration_minutes = int((trows[0] or {}).get("duration_minutes") or 60) if trows else 60
+        start_dt = _parse_iso_utc(start_iso)
+        end_iso = (start_dt + timedelta(minutes=duration_minutes)).isoformat()
+
     try:
-        if _is_blocked_time(payload.clinician_id, payload.start_time, payload.end_time):
+        if _is_blocked_time(payload.clinician_id, start_iso, end_iso):
             raise HTTPException(
                 status_code=409,
                 detail="Selected slot falls within blocked time",
@@ -1231,10 +1273,10 @@ def create_appointment(payload: CreateAppointmentRequest):
                     "clinician_id": payload.clinician_id,
                     "location_id": payload.location_id,
                     "treatment_type_id": payload.treatment_type_id,
-                    "start_time": payload.start_time,
-                    "end_time": payload.end_time,
+                    "start_time": start_iso,
+                    "end_time": end_iso,
                     "notes": payload.notes,
-                    "source": "ai",
+                    "source": source,
                     "status": "scheduled",
                 }
             )
@@ -1284,8 +1326,8 @@ def create_appointment(payload: CreateAppointmentRequest):
                 patient_name=patient_name,
                 clinician_name=clinician_name,
                 treatment_type=treatment_name,
-                start_datetime_utc=crow.get("start_time") or payload.start_time,
-                end_datetime_utc=crow.get("end_time") or payload.end_time,
+                start_datetime_utc=crow.get("start_time") or start_iso,
+                end_datetime_utc=crow.get("end_time") or end_iso,
                 location=None,
             )
             if google_event_id:
@@ -1311,7 +1353,7 @@ def create_appointment(payload: CreateAppointmentRequest):
         phone_out = prow.get("phone") or payload.patient_phone
         fname = (prow.get("first_name") or payload.patient_first_name or "").strip()
         if phone_out:
-            body = _format_confirmation_sms(payload.start_time, fname)
+            body = _format_confirmation_sms(start_iso, fname)
             send_sms(
                 _to_e164_us(str(phone_out)),
                 body,
