@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
@@ -865,53 +866,62 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
 
     print(f"Looking up patient by phone: {patient_phone}")
 
+    clean_input = re.sub(r"\D", "", patient_phone)
+    if not clean_input:
+        raise HTTPException(status_code=400, detail="patient_phone has no digits")
+
+    clinic_id_for_lookup = STTPDN_CLINIC_ID
     try:
-        patient_lookup = (
+        all_patients = (
             supabase.table("patients")
-            .select("id")
-            .eq("phone", patient_phone)
-            .limit(1)
+            .select("id, phone, first_name, last_name")
+            .eq("clinic_id", clinic_id_for_lookup)
             .execute()
         )
-        _handle_supabase_error(patient_lookup)
+        _handle_supabase_error(all_patients)
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    prow = patient_lookup.data or []
-    if not prow:
-        raise HTTPException(status_code=404, detail="Patient not found for phone")
-    patient_id = str(prow[0]["id"])
+    patient = next(
+        (
+            p
+            for p in (all_patients.data or [])
+            if re.sub(r"\D", "", str(p.get("phone") or "")) == clean_input
+        ),
+        None,
+    )
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    patient_id = str(patient["id"])
     print(f"Found patient: {patient_id}")
 
     try:
-        existing = (
+        result = (
             supabase.table("appointments")
-            .select(
-                "*, treatment_types(duration_minutes)"
-            )
+            .select("*")
             .eq("patient_id", patient_id)
             .in_("status", ["scheduled", "confirmed"])
             .order("start_time", desc=False)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(existing)
+        _handle_supabase_error(result)
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    erows = existing.data or []
+    erows = result.data or []
     if not erows:
         raise HTTPException(
             status_code=404,
-            detail="No active appointment found",
+            detail="No active appointment found for this patient",
         )
     row = erows[0]
     old_appointment_id = str(row.get("id") or "").strip()
-    print(f"Found existing appointment: {old_appointment_id}")
+    print(f"Found appointment to reschedule: {result.data[0]['id']}")
     if not old_appointment_id:
         print("ERROR: old_appointment_id is None or empty before cancel; aborting")
         raise HTTPException(
