@@ -134,6 +134,7 @@ def list_treatment_types(
     clinic_id: str = Query(...),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
+    print("treatment-types hit")
     _require_auth_and_clinic(authorization, clinic_id)
     try:
         resp = (

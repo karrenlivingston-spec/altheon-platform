@@ -227,6 +227,27 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
   const [treatmentTypes, setTreatmentTypes] = useState<TreatmentTypeOption[]>([]);
   const [detailAppt, setDetailAppt] = useState<CalendarAppointment | null>(null);
 
+  const loadTreatmentTypes = useCallback(async () => {
+    if (!clinicId) return;
+    const url = `${API_BASE}/treatment-types?clinic_id=${encodeURIComponent(clinicId)}`;
+    console.log("[CalendarView] fetching treatment types:", url);
+    try {
+      const h = await authHeaders();
+      const res = await fetch(url, { headers: h });
+      const data = res.ok ? await res.json() : [];
+      console.log("[CalendarView] treatment types response:", {
+        status: res.status,
+        ok: res.ok,
+        count: Array.isArray(data) ? data.length : 0,
+        data,
+      });
+      setTreatmentTypes(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("[CalendarView] treatment types fetch failed:", err);
+      setTreatmentTypes([]);
+    }
+  }, [clinicId]);
+
   const todayYmd = useMemo(() => getEasternYMD(new Date()), []);
 
   const range = useMemo(() => {
@@ -321,25 +342,8 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
   }, [toast]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!clinicId) return;
-      try {
-        const h = await authHeaders();
-        const res = await fetch(
-          `${API_BASE}/treatment-types?clinic_id=${encodeURIComponent(clinicId)}`,
-          { headers: h },
-        );
-        const data = res.ok ? await res.json() : [];
-        if (!cancelled) setTreatmentTypes(Array.isArray(data) ? data : []);
-      } catch {
-        if (!cancelled) setTreatmentTypes([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [clinicId]);
+    void loadTreatmentTypes();
+  }, [loadTreatmentTypes]);
 
   const periodLabel = useMemo(() => {
     if (view === "day") {
@@ -645,6 +649,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
           clinicians={activeClinicians.length > 0 ? activeClinicians : clinicians}
           locationId={activeLocationId}
           treatmentTypes={treatmentTypes}
+          onStep2Open={() => void loadTreatmentTypes()}
           onClose={() => {
             setBookModalOpen(false);
           }}
@@ -1060,6 +1065,7 @@ function BookPatientModal({
   clinicians,
   locationId,
   treatmentTypes,
+  onStep2Open,
   onClose,
   onBooked,
   onError,
@@ -1068,6 +1074,7 @@ function BookPatientModal({
   clinicians: ClinicianRow[];
   locationId: string;
   treatmentTypes: TreatmentTypeOption[];
+  onStep2Open: () => void;
   onClose: () => void;
   onBooked: () => void | Promise<void>;
   onError: (message: string) => void;
@@ -1102,6 +1109,12 @@ function BookPatientModal({
       setSelectedClinicianId(clinicians[0].id);
     }
   }, [clinicians, selectedClinicianId]);
+
+  useEffect(() => {
+    if (step === 2) {
+      onStep2Open();
+    }
+  }, [step, onStep2Open]);
 
   useEffect(() => {
     let cancelled = false;
