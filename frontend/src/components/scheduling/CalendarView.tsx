@@ -498,6 +498,12 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
     setBookModalOpen(true);
   }, [openBookingNonce]);
 
+  useEffect(() => {
+    return () => {
+      setBookModalOpen(false);
+    };
+  }, []);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-4 rounded-xl border border-black/10 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.08)] lg:flex-row lg:items-center lg:justify-between">
