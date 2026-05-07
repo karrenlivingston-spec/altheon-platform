@@ -13,7 +13,7 @@ import {
 } from "@dnd-kit/core";
 import { formatInTimeZone, toDate } from "date-fns-tz";
 import type { CSSProperties } from "react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   addDaysToYmd,
@@ -230,51 +230,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
     kind: "success" | "error";
     message: string;
   } | null>(null);
-  const [treatmentTypes, setTreatmentTypes] = useState<TreatmentTypeOption[]>([]);
   const [detailAppt, setDetailAppt] = useState<CalendarAppointment | null>(null);
-  const treatmentTypesLoadedForOpenRef = useRef(false);
-
-  const loadTreatmentTypes = useCallback(async () => {
-    if (!clinicId) return;
-    const url = `${API_BASE}/treatment-types?clinic_id=${encodeURIComponent(clinicId)}`;
-    console.log("[CalendarView] fetching treatment types:", url);
-    try {
-      const h = await authHeaders();
-      const res = await fetch(url, { headers: h });
-      const data = res.ok ? await res.json() : [];
-      console.log("[CalendarView] treatment types response:", {
-        status: res.status,
-        ok: res.ok,
-        count: Array.isArray(data) ? data.length : 0,
-        data,
-      });
-      setTreatmentTypes(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error("[CalendarView] treatment types fetch failed:", err);
-      setTreatmentTypes([]);
-    }
-  }, [clinicId]);
-
-  const loadClinicians = useCallback(async () => {
-    if (!clinicId) return;
-    const url = `${API_BASE}/clinicians?clinic_id=${encodeURIComponent(clinicId)}`;
-    console.log("[CalendarView] fetching clinicians:", url);
-    try {
-      const h = await authHeaders();
-      const res = await fetch(url, { headers: h });
-      const data = res.ok ? await res.json() : [];
-      console.log("[CalendarView] clinicians response:", {
-        status: res.status,
-        ok: res.ok,
-        count: Array.isArray(data) ? data.length : 0,
-        data,
-      });
-      setClinicians(Array.isArray(data) ? data : []);
-    } catch (err) {
-      console.error("[CalendarView] clinicians fetch failed:", err);
-      setClinicians([]);
-    }
-  }, [clinicId]);
 
   const todayYmd = useMemo(() => getEasternYMD(new Date()), []);
 
@@ -368,12 +324,6 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
     const t = setTimeout(() => setToast(null), 3000);
     return () => clearTimeout(t);
   }, [toast]);
-
-  useEffect(() => {
-    if (!bookModalOpen) return;
-    treatmentTypesLoadedForOpenRef.current = false;
-    void loadClinicians();
-  }, [bookModalOpen, loadClinicians]);
 
   const periodLabel = useMemo(() => {
     if (view === "day") {
@@ -678,15 +628,8 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
           clinicId={clinicId}
           clinicians={clinicians}
           locationId={activeLocationId}
-          treatmentTypes={treatmentTypes}
-          onStep2Open={() => {
-            if (treatmentTypesLoadedForOpenRef.current) return;
-            treatmentTypesLoadedForOpenRef.current = true;
-            void loadTreatmentTypes();
-          }}
           onClose={() => {
             setBookModalOpen(false);
-            treatmentTypesLoadedForOpenRef.current = false;
           }}
           onBooked={async () => {
             setBookModalOpen(false);
@@ -1103,8 +1046,6 @@ const BookPatientModal = memo(function BookPatientModal({
   clinicId,
   clinicians,
   locationId,
-  treatmentTypes,
-  onStep2Open,
   onClose,
   onBooked,
   onError,
@@ -1112,8 +1053,6 @@ const BookPatientModal = memo(function BookPatientModal({
   clinicId: string;
   clinicians: ClinicianRow[];
   locationId: string;
-  treatmentTypes: TreatmentTypeOption[];
-  onStep2Open: () => void;
   onClose: () => void;
   onBooked: () => void | Promise<void>;
   onError: (message: string) => void;
@@ -1131,6 +1070,8 @@ const BookPatientModal = memo(function BookPatientModal({
   });
   const [creatingPatient, setCreatingPatient] = useState(false);
   const [showNewPatient, setShowNewPatient] = useState(false);
+  const [treatmentTypes, setTreatmentTypes] = useState<TreatmentTypeOption[]>([]);
+  const [loadingTreatmentTypes, setLoadingTreatmentTypes] = useState(false);
   const [treatmentTypeId, setTreatmentTypeId] = useState("");
   const [selectedDate, setSelectedDate] = useState(() => getEasternYMD(new Date()));
   const [selectedTime, setSelectedTime] = useState("09:00");
@@ -1144,16 +1085,33 @@ const BookPatientModal = memo(function BookPatientModal({
   }, [treatmentTypes, treatmentTypeId]);
 
   useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoadingTreatmentTypes(true);
+      try {
+        const h = await authHeaders();
+        const res = await fetch(
+          `${API_BASE}/treatment-types?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers: h },
+        );
+        const data = res.ok ? await res.json() : [];
+        if (!cancelled) setTreatmentTypes(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setTreatmentTypes([]);
+      } finally {
+        if (!cancelled) setLoadingTreatmentTypes(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     if (!selectedClinicianId && clinicians.length > 0) {
       setSelectedClinicianId(clinicians[0].id);
     }
   }, [clinicians, selectedClinicianId]);
-
-  useEffect(() => {
-    if (step === 2) {
-      onStep2Open();
-    }
-  }, [step, onStep2Open]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1447,7 +1405,7 @@ const BookPatientModal = memo(function BookPatientModal({
                 >
                   {clinicians.map((c) => (
                     <option key={c.id} value={c.id}>
-                      {clinicianLabel(c)}
+                      {`Dr. ${(c.first_name ?? "").trim()} ${(c.last_name ?? "").trim()}`.trim()}
                     </option>
                   ))}
                 </select>
@@ -1499,6 +1457,7 @@ const BookPatientModal = memo(function BookPatientModal({
                   className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
                   value={treatmentTypeId}
                   onChange={(e) => setTreatmentTypeId(e.target.value)}
+                  disabled={loadingTreatmentTypes}
                 >
                   {treatmentTypes.map((t) => (
                     <option key={t.id} value={t.id}>
