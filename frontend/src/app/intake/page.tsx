@@ -1,6 +1,6 @@
 "use client";
 
-import { useConversation } from "@11labs/react";
+import { ConversationProvider, useConversation } from "@elevenlabs/react";
 import Image from "next/image";
 import { Mic, PhoneOff } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -37,14 +37,12 @@ function statusLabel(status: string): string {
       return "Connecting…";
     case "connected":
       return "You're connected — speak naturally";
-    case "disconnecting":
-      return "Ending session…";
     default:
       return "Tap to speak with Aria";
   }
 }
 
-export default function IntakePage() {
+function IntakePageInner() {
   const [complete, setComplete] = useState(false);
   const [conversationStarted, setConversationStarted] = useState(false);
   const [banner, setBanner] = useState<string | null>(null);
@@ -195,8 +193,7 @@ export default function IntakePage() {
     );
   }
 
-  const connected =
-    status === "connected" || status === "connecting" || status === "disconnecting";
+  const connected = status === "connected" || status === "connecting";
 
   return (
     <div
@@ -254,7 +251,7 @@ export default function IntakePage() {
             ) : (
               <button
                 type="button"
-                disabled={busy || status === "disconnecting"}
+                disabled={busy}
                 onClick={() => void handleEnd()}
                 className="relative flex h-36 w-36 flex-col items-center justify-center gap-1 rounded-full border-2 border-white/25 bg-white/10 text-white backdrop-blur-sm transition hover:bg-white/15 focus:outline-none focus-visible:ring-4 focus-visible:ring-[#16A34A]/50 disabled:opacity-50"
                 aria-label="End conversation"
@@ -276,5 +273,13 @@ export default function IntakePage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function IntakePage() {
+  return (
+    <ConversationProvider>
+      <IntakePageInner />
+    </ConversationProvider>
   );
 }
