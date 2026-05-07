@@ -3,6 +3,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
+import pytz
 from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
@@ -884,17 +885,14 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
     patient_id = str(prow[0]["id"])
     print(f"Found patient: {patient_id}")
 
-    now_iso = datetime.now(timezone.utc).isoformat()
     try:
         existing = (
             supabase.table("appointments")
             .select(
-                "id, clinic_id, treatment_type_id, clinician_id, location_id, "
-                "start_time, end_time, notes, treatment_types(duration_minutes)"
+                "*, treatment_types(duration_minutes)"
             )
             .eq("patient_id", patient_id)
             .in_("status", ["scheduled", "confirmed"])
-            .gte("start_time", now_iso)
             .order("start_time", desc=False)
             .limit(1)
             .execute()
@@ -909,7 +907,7 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
     if not erows:
         raise HTTPException(
             status_code=404,
-            detail="No upcoming scheduled or confirmed appointment found to reschedule",
+            detail="No active appointment found",
         )
     row = erows[0]
     old_appointment_id = str(row.get("id") or "").strip()
@@ -931,13 +929,12 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
             detail="Existing appointment is missing required booking fields",
         )
 
-    clinic_tz = ZoneInfo("America/New_York")
-    d = date.fromisoformat(payload.new_date)
-    hh, mm = payload.new_time.split(":")
-    local_start = datetime.combine(
-        d, time(int(hh), int(mm)), tzinfo=clinic_tz
+    eastern = pytz.timezone("America/New_York")
+    naive_dt = datetime.strptime(
+        f"{payload.new_date} {payload.new_time}", "%Y-%m-%d %H:%M"
     )
-    utc_start = local_start.astimezone(timezone.utc)
+    eastern_dt = eastern.localize(naive_dt)
+    utc_start = eastern_dt.astimezone(timezone.utc)
     dur = _duration_minutes_from_reschedule_row(row)
     utc_end = utc_start + timedelta(minutes=dur)
     start_iso = utc_start.isoformat()
