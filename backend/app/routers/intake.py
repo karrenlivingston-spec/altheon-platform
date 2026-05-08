@@ -167,6 +167,17 @@ def submit_intake(
         raise HTTPException(status_code=500, detail=msg)
 
     intake_id = data[0].get("id")
+
+    try:
+        supabase.table("appointments").update({"status": "checked_in"}).eq(
+            "id", appointment_id
+        ).execute()
+    except Exception as exc:
+        print(
+            f"POST /intake: could not set appointment {appointment_id} to checked_in: {exc}",
+            flush=True,
+        )
+
     return {
         "success": True,
         "intake_id": str(intake_id),
