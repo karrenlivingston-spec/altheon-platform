@@ -66,7 +66,7 @@ class IntakeSubmission(BaseModel):
     symptom_duration: str = ""
     aggravating_factors: str = ""
     relieving_factors: str = ""
-    medical_history_flags: list[Any] = Field(default_factory=list)
+    medical_history_flags: list[Any] | str = Field(default_factory=list)
     allergies: str = ""
     other_conditions: str = ""
     goals: str = ""
@@ -135,6 +135,15 @@ def submit_intake(
             content={"error": "No upcoming appointment found for this patient"},
         )
 
+    if isinstance(body.medical_history_flags, str):
+        medical_history_flags = [
+            part.strip()
+            for part in body.medical_history_flags.split(",")
+            if part.strip()
+        ]
+    else:
+        medical_history_flags = body.medical_history_flags
+
     insert_row = {
         "clinic_id": clinic_id,
         "patient_id": patient_id,
@@ -144,7 +153,7 @@ def submit_intake(
         "symptom_duration": body.symptom_duration,
         "aggravating_factors": body.aggravating_factors,
         "relieving_factors": body.relieving_factors,
-        "medical_history_flags": body.medical_history_flags,
+        "medical_history_flags": medical_history_flags,
         "allergies": body.allergies,
         "other_conditions": body.other_conditions,
         "goals": body.goals,
