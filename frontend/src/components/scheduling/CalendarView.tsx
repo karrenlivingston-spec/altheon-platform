@@ -184,6 +184,13 @@ function intakeFlagPills(flags: unknown): string[] {
   return [];
 }
 
+/** Pills for display; drops case-insensitive "none" entries. */
+function intakeMedicalHistoryPills(flags: unknown): string[] {
+  return intakeFlagPills(flags).filter(
+    (p) => p.trim().toLowerCase() !== "none",
+  );
+}
+
 function monthGridRange(anchorYmd: string): { start: string; end: string } {
   const [y, mo] = anchorYmd.split("-").map(Number);
   const first = `${y}-${pad2(mo)}-01`;
@@ -897,10 +904,14 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
                     </p>
                     <div className="mt-1 flex flex-wrap gap-2">
                       {(() => {
-                        const pills = intakeFlagPills(detailIntake.medical_history_flags);
+                        const pills = intakeMedicalHistoryPills(
+                          detailIntake.medical_history_flags,
+                        );
                         if (!pills.length) {
                           return (
-                            <span className="text-sm text-slate-500">None noted</span>
+                            <span className="text-sm text-slate-500">
+                              None reported
+                            </span>
                           );
                         }
                         return pills.map((pill, idx) => (
