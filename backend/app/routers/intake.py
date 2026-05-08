@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import supabase
@@ -21,6 +21,34 @@ def _digits(s: Optional[str]) -> str:
     if not s:
         return ""
     return re.sub(r"\D", "", str(s))
+
+
+def _extract_bearer_token(authorization: Optional[str]) -> str:
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    parts = authorization.strip().split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1].strip():
+        raise HTTPException(status_code=401, detail="Invalid Authorization header")
+    return parts[1].strip()
+
+
+def _require_authenticated_user(authorization: Optional[str]) -> str:
+    token = _extract_bearer_token(authorization)
+    try:
+        auth_response = supabase.auth.get_user(token)
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
+
+    user_obj = getattr(auth_response, "user", None)
+    if user_obj is None and isinstance(auth_response, dict):
+        user_obj = auth_response.get("user")
+
+    user_id = str(getattr(user_obj, "id", None) or "").strip()
+    if not user_id and isinstance(user_obj, dict):
+        user_id = str(user_obj.get("id") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return user_id
 
 
 def _find_patient_by_phone(clinic_id: str, patient_phone: Optional[str]) -> Optional[dict[str, Any]]:
@@ -142,3 +170,32 @@ def submit_intake(body: IntakeSubmission):
 
     intake_id = data[0].get("id")
     return {"success": True, "intake_id": str(intake_id)}
+
+
+@router.get("/{appointment_id}")
+def get_intake_for_appointment(
+    appointment_id: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    _require_authenticated_user(authorization)
+
+    try:
+        resp = (
+            supabase.table("intake_forms")
+            .select(
+                "id,appointment_id,patient_id,chief_complaint,pain_scale,"
+                "symptom_duration,aggravating_factors,relieving_factors,"
+                "medical_history_flags,allergies,other_conditions,goals,created_at"
+            )
+            .eq("appointment_id", appointment_id)
+            .order("created_at", desc=True)
+            .limit(1)
+            .execute()
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        return {"intake": None}
+    return {"intake": rows[0]}
