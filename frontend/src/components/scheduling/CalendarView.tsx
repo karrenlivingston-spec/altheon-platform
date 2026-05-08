@@ -87,6 +87,21 @@ type TreatmentTypeOption = {
   name?: string | null;
   duration_minutes?: number | null;
 };
+type IntakeSummary = {
+  id: string;
+  appointment_id: string;
+  patient_id?: string | null;
+  chief_complaint?: string | null;
+  pain_scale?: number | null;
+  symptom_duration?: string | null;
+  aggravating_factors?: string | null;
+  relieving_factors?: string | null;
+  medical_history_flags?: unknown;
+  allergies?: string | null;
+  other_conditions?: string | null;
+  goals?: string | null;
+  created_at?: string | null;
+};
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -140,6 +155,33 @@ function statusDotClass(status: string): string {
   if (s === "completed") return "bg-[#7C3AED]";
   if (s === "cancelled") return "bg-[#DC2626]";
   return "bg-slate-400";
+}
+
+function painDotClass(scale: number | null | undefined): string {
+  const n = Number(scale);
+  if (!Number.isFinite(n)) return "bg-slate-400";
+  if (n >= 7) return "bg-red-500";
+  if (n >= 4) return "bg-amber-500";
+  return "bg-green-500";
+}
+
+function intakeFlagPills(flags: unknown): string[] {
+  if (Array.isArray(flags)) {
+    return flags
+      .map((v) => String(v ?? "").trim())
+      .filter((v) => v.length > 0);
+  }
+  if (flags && typeof flags === "object") {
+    const entries = Object.entries(flags as Record<string, unknown>);
+    return entries
+      .filter(([, v]) => Boolean(v))
+      .map(([k, v]) => {
+        if (typeof v === "boolean") return k.replace(/_/g, " ");
+        return `${k.replace(/_/g, " ")}: ${String(v)}`;
+      });
+  }
+  if (typeof flags === "string" && flags.trim()) return [flags.trim()];
+  return [];
 }
 
 function monthGridRange(anchorYmd: string): { start: string; end: string } {
@@ -231,6 +273,9 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
     message: string;
   } | null>(null);
   const [detailAppt, setDetailAppt] = useState<CalendarAppointment | null>(null);
+  const [detailIntake, setDetailIntake] = useState<IntakeSummary | null>(null);
+  const [detailIntakeLoading, setDetailIntakeLoading] = useState(false);
+  const [detailIntakeError, setDetailIntakeError] = useState<string | null>(null);
 
   const todayYmd = useMemo(() => getEasternYMD(new Date()), []);
 
@@ -504,6 +549,47 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
     };
   }, []);
 
+  useEffect(() => {
+    if (!detailAppt?.id) {
+      setDetailIntake(null);
+      setDetailIntakeLoading(false);
+      setDetailIntakeError(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setDetailIntakeLoading(true);
+      setDetailIntakeError(null);
+      try {
+        const h = await authHeaders();
+        const res = await fetch(
+          `${API_BASE}/intake/${encodeURIComponent(detailAppt.id)}`,
+          { headers: h },
+        );
+        const json = (await res.json().catch(() => ({}))) as {
+          intake?: IntakeSummary | null;
+          detail?: string;
+        };
+        if (cancelled) return;
+        if (!res.ok) {
+          throw new Error(json.detail || "Could not load intake");
+        }
+        setDetailIntake(json.intake ?? null);
+      } catch (e) {
+        if (cancelled) return;
+        setDetailIntake(null);
+        setDetailIntakeError(
+          e instanceof Error ? e.message : "Could not load intake",
+        );
+      } finally {
+        if (!cancelled) setDetailIntakeLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [detailAppt?.id]);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-4 rounded-xl border border-black/10 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.08)] lg:flex-row lg:items-center lg:justify-between">
@@ -719,7 +805,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
 
       {detailAppt ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="max-w-sm rounded-xl bg-white p-5 shadow-xl">
+          <div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl">
             <p className="font-semibold text-slate-900">{patientFull(detailAppt)}</p>
             <p className="mt-1 text-sm text-slate-600">
               {(() => {
@@ -737,6 +823,127 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
                 title: detailAppt.clinician.title,
               })}
             </p>
+            {detailIntakeLoading ? (
+              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                Loading pre-visit intake summary…
+              </div>
+            ) : detailIntakeError ? (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                Could not load intake summary.
+              </div>
+            ) : detailIntake == null ? (
+              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                No intake form on file for this appointment
+              </div>
+            ) : (
+              <section className="mt-4 rounded-lg border border-slate-200 bg-white">
+                <header className="border-l-4 border-[#16A34A] bg-slate-50 px-4 py-3">
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    Pre-Visit Intake Summary
+                  </h3>
+                </header>
+                <div className="space-y-3 px-4 py-4">
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Chief Complaint
+                    </p>
+                    <p className="mt-1 text-sm font-semibold text-slate-900">
+                      {detailIntake.chief_complaint?.trim() || "Not provided"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Pain Scale
+                    </p>
+                    <div className="mt-1 flex items-center gap-2 text-sm text-slate-900">
+                      <span
+                        className={`h-2.5 w-2.5 rounded-full ${painDotClass(detailIntake.pain_scale)}`}
+                        aria-hidden
+                      />
+                      <span>
+                        {detailIntake.pain_scale != null
+                          ? `${detailIntake.pain_scale} / 10`
+                          : "Not provided"}
+                      </span>
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Symptom Duration
+                    </p>
+                    <p className="mt-1 text-sm text-slate-900">
+                      {detailIntake.symptom_duration?.trim() || "Not provided"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Aggravating Factors
+                    </p>
+                    <p className="mt-1 text-sm text-slate-900">
+                      {detailIntake.aggravating_factors?.trim() || "Not provided"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Relieving Factors
+                    </p>
+                    <p className="mt-1 text-sm text-slate-900">
+                      {detailIntake.relieving_factors?.trim() || "Not provided"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Medical History Flags
+                    </p>
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {(() => {
+                        const pills = intakeFlagPills(detailIntake.medical_history_flags);
+                        if (!pills.length) {
+                          return (
+                            <span className="text-sm text-slate-500">None noted</span>
+                          );
+                        }
+                        return pills.map((pill, idx) => (
+                          <span
+                            key={`${pill}-${idx}`}
+                            className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-700"
+                          >
+                            {pill}
+                          </span>
+                        ));
+                      })()}
+                    </div>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Allergies
+                    </p>
+                    <p className="mt-1 text-sm text-slate-900">
+                      {detailIntake.allergies?.trim() || "Not provided"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+                      Goals
+                    </p>
+                    <p className="mt-1 text-sm text-slate-900">
+                      {detailIntake.goals?.trim() || "Not provided"}
+                    </p>
+                  </div>
+                </div>
+                <footer className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+                  {(() => {
+                    const submitted = safeDate(detailIntake.created_at);
+                    if (!submitted) return "Submitted —";
+                    return `Submitted ${submitted.toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}`;
+                  })()}
+                </footer>
+              </section>
+            )}
             <button
               type="button"
               className="mt-4 w-full rounded-lg border border-black/10 py-2 text-sm"
