@@ -21,6 +21,10 @@ const WIDGET_STYLE = `
     --el-color-primary-hover: #15803D;
     --el-color-background: #0f2f2a;
     --el-color-text: #ffffff;
+    position: fixed !important;
+    bottom: 50% !important;
+    right: 50% !important;
+    transform: translate(50%, 50%) !important;
   }
 `;
 
@@ -40,9 +44,48 @@ export default function IntakePage() {
 
   useEffect(() => {
     const widget = widgetRef.current;
-    const handler = () => setComplete(true);
-    widget?.addEventListener("conversation-end", handler);
-    return () => widget?.removeEventListener("conversation-end", handler);
+    if (!widget) return;
+
+    const markComplete = () => setComplete(true);
+
+    const events = [
+      "conversation-end",
+      "call_ended",
+      "elevenlabs:call_ended",
+      "elevenlabs-convai:call_ended",
+      "disconnected",
+    ];
+    events.forEach((name) => {
+      widget.addEventListener(name, markComplete);
+    });
+
+    const checkEndedAttributes = () => {
+      const state = widget.getAttribute("state")?.toLowerCase() ?? "";
+      const status = widget.getAttribute("status")?.toLowerCase() ?? "";
+      if (
+        state === "ended" ||
+        state === "disconnected" ||
+        status === "ended" ||
+        status === "disconnected"
+      ) {
+        markComplete();
+      }
+    };
+
+    const observer = new MutationObserver(() => {
+      checkEndedAttributes();
+    });
+    observer.observe(widget, {
+      attributes: true,
+      attributeFilter: ["state", "status"],
+    });
+
+    return () => {
+      events.forEach((name) => {
+        widget.removeEventListener(name, markComplete);
+      });
+      observer.disconnect();
+    };
   }, []);
 
   return (
