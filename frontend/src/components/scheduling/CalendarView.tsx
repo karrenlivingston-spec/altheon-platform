@@ -13,7 +13,14 @@ import {
 } from "@dnd-kit/core";
 import { formatInTimeZone, toDate } from "date-fns-tz";
 import type { CSSProperties } from "react";
-import { memo, useCallback, useEffect, useMemo, useState } from "react";
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useState,
+} from "react";
 
 import {
   addDaysToYmd,
@@ -231,9 +238,49 @@ function monthCalendarCells(anchorYmd: string): { ymd: string; inMonth: boolean 
   return rows;
 }
 
+/** Waits until a bearer token exists (refresh + auth listener) so fetches after navigation are authenticated. */
+async function getAccessTokenWithRetry(maxMs = 4000): Promise<string | null> {
+  let { data } = await supabase.auth.getSession();
+  let token = data.session?.access_token ?? null;
+  if (token) return token;
+
+  await supabase.auth.refreshSession();
+  ({ data } = await supabase.auth.getSession());
+  token = data.session?.access_token ?? null;
+  if (token) return token;
+
+  return new Promise<string | null>((resolve) => {
+    const timer = setTimeout(() => {
+      cleanup();
+      void supabase.auth.getSession().then(({ data: d }) => {
+        resolve(d.session?.access_token ?? null);
+      });
+    }, maxMs);
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (session?.access_token) {
+        cleanup();
+        resolve(session.access_token);
+      }
+    });
+
+    function cleanup() {
+      clearTimeout(timer);
+      subscription.unsubscribe();
+    }
+  });
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token ?? "";
+  let { data } = await supabase.auth.getSession();
+  let token = data.session?.access_token ?? "";
+  if (!token) {
+    await supabase.auth.refreshSession();
+    ({ data } = await supabase.auth.getSession());
+    token = data.session?.access_token ?? "";
+  }
   const h: Record<string, string> = { "Content-Type": "application/json" };
   if (token) h.Authorization = `Bearer ${token}`;
   return h;
@@ -263,6 +310,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
   const [appointments, setAppointments] = useState<CalendarAppointment[]>([]);
   const [blocked, setBlocked] = useState<BlockedRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [calendarError, setCalendarError] = useState<string | null>(null);
   const [activeDrag, setActiveDrag] = useState<CalendarAppointment | null>(null);
   const [undo, setUndo] = useState<{ apptId: string; prevStart: string } | null>(null);
   const [swapDialog, setSwapDialog] = useState<{
@@ -284,7 +332,13 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
   const [detailIntakeLoading, setDetailIntakeLoading] = useState(false);
   const [detailIntakeError, setDetailIntakeError] = useState<string | null>(null);
 
-  const todayYmd = useMemo(() => getEasternYMD(new Date()), []);
+  const [todayYmd, setTodayYmd] = useState(() => getEasternYMD(new Date()));
+
+  useLayoutEffect(() => {
+    const ymd = getEasternYMD(new Date());
+    setAnchorYmd(ymd);
+    setTodayYmd(ymd);
+  }, []);
 
   const range = useMemo(() => {
     if (view === "day") return { start: anchorYmd, end: anchorYmd };
@@ -317,7 +371,18 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
 
   const loadData = useCallback(async () => {
     setLoading(true);
+    setCalendarError(null);
     try {
+      const token = await getAccessTokenWithRetry();
+      if (!token) {
+        setCalendarError("Sign in is required to load the calendar.");
+        setAppointments([]);
+        setClinicians([]);
+        setLocations([]);
+        setBlocked([]);
+        return;
+      }
+
       const h = await authHeaders();
       let calUrl = `${API_BASE}/appointments/calendar?start_date=${encodeURIComponent(range.start)}&end_date=${encodeURIComponent(range.end)}&clinic_id=${encodeURIComponent(clinicId)}`;
       if (providerId) {
@@ -328,11 +393,27 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
         fetch(`${API_BASE}/clinicians?clinic_id=${encodeURIComponent(clinicId)}`, { headers: h }),
         supabase.from("locations").select("id,name").eq("clinic_id", clinicId).eq("is_active", true),
       ]);
-      const calJson = calRes.ok ? await calRes.json() : { appointments: [] };
+
+      if (!calRes.ok) {
+        const errBody = (await calRes.json().catch(() => ({}))) as { detail?: string };
+        setCalendarError(
+          errBody.detail?.trim() ||
+            `Could not load appointments (${calRes.status}). Try again.`,
+        );
+        setAppointments([]);
+        setBlocked([]);
+      } else {
+        const calJson = await calRes.json();
+        setAppointments(Array.isArray(calJson.appointments) ? calJson.appointments : []);
+      }
+
       const clinJson = clinRes.ok ? await clinRes.json() : [];
-      setAppointments(Array.isArray(calJson.appointments) ? calJson.appointments : []);
       setClinicians(Array.isArray(clinJson) ? clinJson : []);
       setLocations((locRes.data as LocationRow[]) || []);
+
+      if (!calRes.ok) {
+        return;
+      }
 
       if (view === "day") {
         const ids = providerId
@@ -354,6 +435,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
         setBlocked([]);
       }
     } catch {
+      setCalendarError("Something went wrong loading the calendar. Check your connection and try again.");
       setAppointments([]);
       setBlocked([]);
     } finally {
@@ -679,8 +761,41 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
       ) : null}
 
       {loading ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-8 text-center text-sm text-slate-500">
-          Loading calendar…
+        <div className="flex min-h-[280px] flex-col items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white p-10 text-center">
+          <span
+            className="inline-block size-8 animate-spin rounded-full border-2 border-slate-200 border-t-[#16A34A]"
+            aria-hidden
+          />
+          <p className="text-sm font-medium text-slate-700">Loading calendar…</p>
+          <p className="max-w-sm text-xs text-slate-500">
+            Fetching appointments for {periodLabel}.
+          </p>
+        </div>
+      ) : calendarError ? (
+        <div className="flex min-h-[280px] flex-col items-center justify-center gap-4 rounded-xl border border-red-200 bg-red-50/80 p-10 text-center">
+          <p className="text-sm font-medium text-red-900">{calendarError}</p>
+          <button
+            type="button"
+            className="rounded-lg bg-[#16A34A] px-4 py-2 text-sm font-medium text-white hover:bg-[#15803D]"
+            onClick={() => void loadData()}
+          >
+            Retry
+          </button>
+        </div>
+      ) : appointments.length === 0 ? (
+        <div className="flex min-h-[280px] flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50/80 p-10 text-center">
+          <p className="text-sm font-medium text-slate-800">No appointments this period</p>
+          <p className="max-w-md text-xs text-slate-600">
+            There are no appointments scheduled for {periodLabel}. Try another week or month, or book a new
+            appointment.
+          </p>
+        </div>
+      ) : filteredAppointments.length === 0 ? (
+        <div className="flex min-h-[280px] flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50/80 p-10 text-center">
+          <p className="text-sm font-medium text-slate-800">No appointments match your filters</p>
+          <p className="max-w-xs text-xs text-slate-600">
+            Clear the provider or location filter to see all appointments in this date range.
+          </p>
         </div>
       ) : view === "day" ? (
         <DayGrid
