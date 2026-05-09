@@ -28,6 +28,11 @@ import {
   findMondayYmdOfWeekContaining,
   getEasternYMD,
 } from "@/components/adminEastern";
+import {
+  injectIntakePrintStylesAndPrint,
+  intakeMedicalHistoryPills,
+  painDotClass,
+} from "@/lib/intakePrint";
 import { supabase } from "@/lib/supabase";
 
 const API_BASE = "https://altheon-platform.onrender.com";
@@ -163,134 +168,6 @@ function statusDotClass(status: string): string {
   if (s === "completed") return "bg-[#7C3AED]";
   if (s === "cancelled") return "bg-[#DC2626]";
   return "bg-slate-400";
-}
-
-function painDotClass(scale: number | null | undefined): string {
-  const n = Number(scale);
-  if (!Number.isFinite(n)) return "bg-slate-400";
-  if (n >= 7) return "bg-red-500";
-  if (n >= 4) return "bg-amber-500";
-  return "bg-green-500";
-}
-
-function intakeFlagPills(flags: unknown): string[] {
-  if (Array.isArray(flags)) {
-    return flags
-      .map((v) => String(v ?? "").trim())
-      .filter((v) => v.length > 0);
-  }
-  if (flags && typeof flags === "object") {
-    const entries = Object.entries(flags as Record<string, unknown>);
-    return entries
-      .filter(([, v]) => Boolean(v))
-      .map(([k, v]) => {
-        if (typeof v === "boolean") return k.replace(/_/g, " ");
-        return `${k.replace(/_/g, " ")}: ${String(v)}`;
-      });
-  }
-  if (typeof flags === "string" && flags.trim()) return [flags.trim()];
-  return [];
-}
-
-/** Pills for display; drops case-insensitive "none" entries. */
-function intakeMedicalHistoryPills(flags: unknown): string[] {
-  return intakeFlagPills(flags).filter(
-    (p) => p.trim().toLowerCase() !== "none",
-  );
-}
-
-const INTAKE_PRINT_STYLE_ID = "intake-print-dynamic-styles";
-
-function injectIntakePrintStylesAndPrint(): void {
-  const existing = document.getElementById(INTAKE_PRINT_STYLE_ID);
-  existing?.remove();
-
-  const style = document.createElement("style");
-  style.id = INTAKE_PRINT_STYLE_ID;
-  style.textContent = `
-@media print {
-  body * {
-    visibility: hidden;
-  }
-  #intake-print-area,
-  #intake-print-area * {
-    visibility: visible;
-  }
-  #intake-print-area {
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    background: #fff;
-  }
-  .intake-print-toolbar-btn,
-  .intake-print-close-btn {
-    display: none !important;
-  }
-  .intake-print-screen-extra {
-    display: none !important;
-  }
-  .intake-print-print-only {
-    display: block !important;
-  }
-  #intake-print-area .intake-print-field-row {
-    break-inside: avoid;
-    margin-bottom: 14px;
-  }
-  #intake-print-area .intake-print-field-label {
-    font-variant: small-caps;
-    font-size: 9pt;
-    letter-spacing: 0.06em;
-    color: #64748b;
-    margin-bottom: 4px;
-    font-weight: 600;
-    text-transform: none;
-  }
-  #intake-print-area .intake-print-field-value {
-    font-size: 11pt;
-    line-height: 1.45;
-    color: #0f172a;
-  }
-  #intake-print-area .intake-print-doc-title {
-    font-size: 14pt;
-    margin-bottom: 8px;
-    letter-spacing: 0.02em;
-  }
-  #intake-print-area .intake-print-meta-line {
-    font-size: 11pt;
-    margin-bottom: 4px;
-  }
-  #intake-print-area .intake-print-confidential-footer {
-    margin-top: 28px;
-    padding-top: 12px;
-    border-top: 1px solid #cbd5e1;
-    font-size: 9pt;
-    color: #475569;
-  }
-  @page {
-    margin: 0.65in;
-  }
-}
-`;
-  document.head.appendChild(style);
-
-  let cleaned = false;
-  const removeEl = () => {
-    if (cleaned) return;
-    cleaned = true;
-    document.getElementById(INTAKE_PRINT_STYLE_ID)?.remove();
-    window.removeEventListener("afterprint", onAfterPrint);
-    window.clearTimeout(fallbackTimer);
-  };
-
-  function onAfterPrint() {
-    removeEl();
-  }
-
-  const fallbackTimer = window.setTimeout(removeEl, 8000);
-
-  window.addEventListener("afterprint", onAfterPrint);
-  window.print();
 }
 
 function monthGridRange(anchorYmd: string): { start: string; end: string } {
@@ -1084,7 +961,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
                     <button
                       type="button"
                       className="intake-print-toolbar-btn inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#16A34A] px-2.5 py-1 text-xs font-medium text-[#16A34A] hover:bg-green-50"
-                      onClick={() => injectIntakePrintStylesAndPrint()}
+                      onClick={() => injectIntakePrintStylesAndPrint("intake-print-area")}
                     >
                       <Printer className="size-3.5" aria-hidden />
                       Download PDF
