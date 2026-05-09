@@ -236,6 +236,32 @@ def submit_intake(
     }
 
 
+@router.get("/patient/{patient_id}")
+def list_intakes_for_patient(
+    patient_id: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    _require_authenticated_user(authorization)
+
+    try:
+        resp = (
+            supabase.table("intake_forms")
+            .select(
+                "id,appointment_id,patient_id,chief_complaint,pain_scale,"
+                "symptom_duration,aggravating_factors,relieving_factors,"
+                "medical_history_flags,allergies,other_conditions,goals,created_at"
+            )
+            .eq("patient_id", patient_id)
+            .order("created_at", desc=True)
+            .execute()
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    rows = getattr(resp, "data", None) or []
+    return {"intakes": rows}
+
+
 @router.get("/{appointment_id}")
 def get_intake_for_appointment(
     appointment_id: str,
