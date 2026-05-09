@@ -21,6 +21,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { Printer } from "lucide-react";
 
 import {
   addDaysToYmd,
@@ -196,6 +197,100 @@ function intakeMedicalHistoryPills(flags: unknown): string[] {
   return intakeFlagPills(flags).filter(
     (p) => p.trim().toLowerCase() !== "none",
   );
+}
+
+const INTAKE_PRINT_STYLE_ID = "intake-print-dynamic-styles";
+
+function injectIntakePrintStylesAndPrint(): void {
+  const existing = document.getElementById(INTAKE_PRINT_STYLE_ID);
+  existing?.remove();
+
+  const style = document.createElement("style");
+  style.id = INTAKE_PRINT_STYLE_ID;
+  style.textContent = `
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #intake-print-area,
+  #intake-print-area * {
+    visibility: visible;
+  }
+  #intake-print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    background: #fff;
+  }
+  .intake-print-toolbar-btn,
+  .intake-print-close-btn {
+    display: none !important;
+  }
+  .intake-print-screen-extra {
+    display: none !important;
+  }
+  .intake-print-print-only {
+    display: block !important;
+  }
+  #intake-print-area .intake-print-field-row {
+    break-inside: avoid;
+    margin-bottom: 14px;
+  }
+  #intake-print-area .intake-print-field-label {
+    font-variant: small-caps;
+    font-size: 9pt;
+    letter-spacing: 0.06em;
+    color: #64748b;
+    margin-bottom: 4px;
+    font-weight: 600;
+    text-transform: none;
+  }
+  #intake-print-area .intake-print-field-value {
+    font-size: 11pt;
+    line-height: 1.45;
+    color: #0f172a;
+  }
+  #intake-print-area .intake-print-doc-title {
+    font-size: 14pt;
+    margin-bottom: 8px;
+    letter-spacing: 0.02em;
+  }
+  #intake-print-area .intake-print-meta-line {
+    font-size: 11pt;
+    margin-bottom: 4px;
+  }
+  #intake-print-area .intake-print-confidential-footer {
+    margin-top: 28px;
+    padding-top: 12px;
+    border-top: 1px solid #cbd5e1;
+    font-size: 9pt;
+    color: #475569;
+  }
+  @page {
+    margin: 0.65in;
+  }
+}
+`;
+  document.head.appendChild(style);
+
+  let cleaned = false;
+  const removeEl = () => {
+    if (cleaned) return;
+    cleaned = true;
+    document.getElementById(INTAKE_PRINT_STYLE_ID)?.remove();
+    window.removeEventListener("afterprint", onAfterPrint);
+    window.clearTimeout(fallbackTimer);
+  };
+
+  function onAfterPrint() {
+    removeEl();
+  }
+
+  const fallbackTimer = window.setTimeout(removeEl, 8000);
+
+  window.addEventListener("afterprint", onAfterPrint);
+  window.print();
 }
 
 function monthGridRange(anchorYmd: string): { start: string; end: string } {
@@ -627,6 +722,12 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
     return locations[0]?.id ?? "";
   }, [locationId, locations]);
 
+  const intakePrintReady =
+    detailAppt != null &&
+    !detailIntakeLoading &&
+    !detailIntakeError &&
+    detailIntake != null;
+
   useEffect(() => {
     if (openBookingNonce <= 0) return;
     setBookModalOpen(true);
@@ -928,151 +1029,182 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
       {detailAppt ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl">
-            <p className="font-semibold text-slate-900">{patientFull(detailAppt)}</p>
-            <p className="mt-1 text-sm text-slate-600">
-              {(() => {
-                const d = safeDate(detailAppt.start_time);
-                return d ? formatInTimeZone(d, NY, "h:mm a") : "Invalid time";
-              })()}{" "}
-              ·{" "}
-              {detailAppt.treatment_type.name}
-            </p>
-            <p className="mt-1 text-xs text-slate-500">
-              {clinicianLabel({
-                id: detailAppt.clinician.id,
-                first_name: detailAppt.clinician.first_name,
-                last_name: detailAppt.clinician.last_name,
-                title: detailAppt.clinician.title,
-              })}
-            </p>
-            {detailIntakeLoading ? (
-              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                Loading pre-visit intake summary…
-              </div>
-            ) : detailIntakeError ? (
-              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-                Could not load intake summary.
-              </div>
-            ) : detailIntake == null ? (
-              <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
-                No intake form on file for this appointment
-              </div>
-            ) : (
-              <section className="mt-4 rounded-lg border border-slate-200 bg-white">
-                <header className="border-l-4 border-[#16A34A] bg-slate-50 px-4 py-3">
-                  <h3 className="text-sm font-semibold text-slate-900">
-                    Pre-Visit Intake Summary
-                  </h3>
-                </header>
-                <div className="space-y-3 px-4 py-4">
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Chief Complaint
-                    </p>
-                    <p className="mt-1 text-sm font-semibold text-slate-900">
-                      {detailIntake.chief_complaint?.trim() || "Not provided"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Pain Scale
-                    </p>
-                    <div className="mt-1 flex items-center gap-2 text-sm text-slate-900">
-                      <span
-                        className={`h-2.5 w-2.5 rounded-full ${painDotClass(detailIntake.pain_scale)}`}
-                        aria-hidden
-                      />
-                      <span>
-                        {detailIntake.pain_scale != null
-                          ? `${detailIntake.pain_scale} / 10`
-                          : "Not provided"}
-                      </span>
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Symptom Duration
-                    </p>
-                    <p className="mt-1 text-sm text-slate-900">
-                      {detailIntake.symptom_duration?.trim() || "Not provided"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Aggravating Factors
-                    </p>
-                    <p className="mt-1 text-sm text-slate-900">
-                      {detailIntake.aggravating_factors?.trim() || "Not provided"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Relieving Factors
-                    </p>
-                    <p className="mt-1 text-sm text-slate-900">
-                      {detailIntake.relieving_factors?.trim() || "Not provided"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Medical History Flags
-                    </p>
-                    <div className="mt-1 flex flex-wrap gap-2">
-                      {(() => {
-                        const pills = intakeMedicalHistoryPills(
-                          detailIntake.medical_history_flags,
-                        );
-                        if (!pills.length) {
-                          return (
-                            <span className="text-sm text-slate-500">
-                              None reported
-                            </span>
-                          );
-                        }
-                        return pills.map((pill, idx) => (
-                          <span
-                            key={`${pill}-${idx}`}
-                            className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-700"
-                          >
-                            {pill}
-                          </span>
-                        ));
-                      })()}
-                    </div>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Allergies
-                    </p>
-                    <p className="mt-1 text-sm text-slate-900">
-                      {detailIntake.allergies?.trim() || "Not provided"}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
-                      Goals
-                    </p>
-                    <p className="mt-1 text-sm text-slate-900">
-                      {detailIntake.goals?.trim() || "Not provided"}
-                    </p>
-                  </div>
+            <div
+              id={intakePrintReady ? "intake-print-area" : undefined}
+            >
+              {intakePrintReady ? (
+                <div className="intake-print-print-only hidden text-center text-base font-semibold text-slate-900">
+                  Straight To The Point Dry Needling
                 </div>
-                <footer className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
-                  {(() => {
-                    const submitted = safeDate(detailIntake.created_at);
-                    if (!submitted) return "Submitted —";
-                    return `Submitted ${submitted.toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}`;
-                  })()}
-                </footer>
-              </section>
-            )}
+              ) : null}
+              <p className="font-semibold text-slate-900">{patientFull(detailAppt)}</p>
+              <p className="mt-1 text-sm text-slate-600">
+                {(() => {
+                  const d = safeDate(detailAppt.start_time);
+                  const timeStr = d ? formatInTimeZone(d, NY, "h:mm a") : "Invalid time";
+                  return (
+                    <>
+                      <span className="intake-print-field-value intake-print-meta-line">
+                        {timeStr}
+                      </span>
+                      <span className="intake-print-screen-extra">
+                        {" "}
+                        · {detailAppt.treatment_type.name}
+                      </span>
+                    </>
+                  );
+                })()}
+              </p>
+              <p className="mt-1 text-xs text-slate-500 intake-print-screen-extra">
+                {clinicianLabel({
+                  id: detailAppt.clinician.id,
+                  first_name: detailAppt.clinician.first_name,
+                  last_name: detailAppt.clinician.last_name,
+                  title: detailAppt.clinician.title,
+                })}
+              </p>
+              {detailIntakeLoading ? (
+                <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                  Loading pre-visit intake summary…
+                </div>
+              ) : detailIntakeError ? (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                  Could not load intake summary.
+                </div>
+              ) : detailIntake == null ? (
+                <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
+                  No intake form on file for this appointment
+                </div>
+              ) : (
+                <section className="mt-4 rounded-lg border border-slate-200 bg-white">
+                  <header className="flex items-center justify-between gap-3 border-l-4 border-[#16A34A] bg-slate-50 px-4 py-3">
+                    <h3 className="intake-print-doc-title text-sm font-semibold text-slate-900">
+                      Pre-Visit Intake Summary
+                    </h3>
+                    <button
+                      type="button"
+                      className="intake-print-toolbar-btn inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#16A34A] px-2.5 py-1 text-xs font-medium text-[#16A34A] hover:bg-green-50"
+                      onClick={() => injectIntakePrintStylesAndPrint()}
+                    >
+                      <Printer className="size-3.5" aria-hidden />
+                      Download PDF
+                    </button>
+                  </header>
+                  <div className="space-y-3 px-4 py-4">
+                    <div className="intake-print-field-row">
+                      <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Chief Complaint
+                      </p>
+                      <p className="intake-print-field-value mt-1 text-sm font-semibold text-slate-900">
+                        {detailIntake.chief_complaint?.trim() || "Not provided"}
+                      </p>
+                    </div>
+                    <div className="intake-print-field-row">
+                      <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Pain Scale
+                      </p>
+                      <div className="intake-print-field-value mt-1 flex items-center gap-2 text-sm text-slate-900">
+                        <span
+                          className={`h-2.5 w-2.5 rounded-full ${painDotClass(detailIntake.pain_scale)}`}
+                          aria-hidden
+                        />
+                        <span>
+                          {detailIntake.pain_scale != null
+                            ? `${detailIntake.pain_scale} / 10`
+                            : "Not provided"}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="intake-print-field-row">
+                      <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Symptom Duration
+                      </p>
+                      <p className="intake-print-field-value mt-1 text-sm text-slate-900">
+                        {detailIntake.symptom_duration?.trim() || "Not provided"}
+                      </p>
+                    </div>
+                    <div className="intake-print-field-row">
+                      <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Aggravating Factors
+                      </p>
+                      <p className="intake-print-field-value mt-1 text-sm text-slate-900">
+                        {detailIntake.aggravating_factors?.trim() || "Not provided"}
+                      </p>
+                    </div>
+                    <div className="intake-print-field-row">
+                      <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Relieving Factors
+                      </p>
+                      <p className="intake-print-field-value mt-1 text-sm text-slate-900">
+                        {detailIntake.relieving_factors?.trim() || "Not provided"}
+                      </p>
+                    </div>
+                    <div className="intake-print-field-row">
+                      <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Medical History Flags
+                      </p>
+                      <div className="intake-print-field-value mt-1 flex flex-wrap gap-2">
+                        {(() => {
+                          const pills = intakeMedicalHistoryPills(
+                            detailIntake.medical_history_flags,
+                          );
+                          if (!pills.length) {
+                            return (
+                              <span className="text-sm text-slate-500">
+                                None reported
+                              </span>
+                            );
+                          }
+                          return pills.map((pill, idx) => (
+                            <span
+                              key={`${pill}-${idx}`}
+                              className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs text-slate-700"
+                            >
+                              {pill}
+                            </span>
+                          ));
+                        })()}
+                      </div>
+                    </div>
+                    <div className="intake-print-field-row">
+                      <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Allergies
+                      </p>
+                      <p className="intake-print-field-value mt-1 text-sm text-slate-900">
+                        {detailIntake.allergies?.trim() || "Not provided"}
+                      </p>
+                    </div>
+                    <div className="intake-print-field-row">
+                      <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-slate-500">
+                        Goals
+                      </p>
+                      <p className="intake-print-field-value mt-1 text-sm text-slate-900">
+                        {detailIntake.goals?.trim() || "Not provided"}
+                      </p>
+                    </div>
+                  </div>
+                  <footer className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+                    {(() => {
+                      const submitted = safeDate(detailIntake.created_at);
+                      if (!submitted) return "Submitted —";
+                      return `Submitted ${submitted.toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}`;
+                    })()}
+                  </footer>
+                </section>
+              )}
+              {intakePrintReady ? (
+                <div className="intake-print-print-only intake-print-confidential-footer hidden text-center text-xs text-slate-600">
+                  Confidential — Clinical Use Only
+                </div>
+              ) : null}
+            </div>
             <button
               type="button"
-              className="mt-4 w-full rounded-lg border border-black/10 py-2 text-sm"
+              className="intake-print-close-btn mt-4 w-full rounded-lg border border-black/10 py-2 text-sm"
               onClick={() => setDetailAppt(null)}
             >
               Close
