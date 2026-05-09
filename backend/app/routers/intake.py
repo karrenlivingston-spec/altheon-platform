@@ -8,6 +8,7 @@ import secrets
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from dateutil import parser as date_parser
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -59,6 +60,13 @@ def _require_intake_secret(x_intake_secret: Optional[str]) -> Optional[JSONRespo
     return None
 
 
+def _strip_nonempty(val: Optional[str]) -> Optional[str]:
+    if val is None:
+        return None
+    s = str(val).strip()
+    return s if s else None
+
+
 class IntakeSubmission(BaseModel):
     phone_number: str
     chief_complaint: str = ""
@@ -70,6 +78,39 @@ class IntakeSubmission(BaseModel):
     allergies: str = ""
     other_conditions: str = ""
     goals: str = ""
+    patient_dob: Optional[str] = None
+    patient_gender: Optional[str] = None
+    patient_occupation: Optional[str] = None
+    patient_email: Optional[str] = None
+    patient_address_line1: Optional[str] = None
+    patient_city: Optional[str] = None
+    patient_state: Optional[str] = None
+    patient_zip: Optional[str] = None
+
+
+def _patient_demographic_updates(body: IntakeSubmission) -> dict[str, Any]:
+    """Map optional intake body fields to patients table columns (non-empty only)."""
+    out: dict[str, Any] = {}
+    dob_raw = _strip_nonempty(body.patient_dob)
+    if dob_raw:
+        try:
+            out["date_of_birth"] = date_parser.parse(dob_raw).date().isoformat()
+        except (ValueError, TypeError, OverflowError):
+            pass
+    mapping: tuple[tuple[Optional[str], str], ...] = (
+        (body.patient_gender, "gender"),
+        (body.patient_occupation, "occupation"),
+        (body.patient_email, "email"),
+        (body.patient_address_line1, "address_line1"),
+        (body.patient_city, "city"),
+        (body.patient_state, "state"),
+        (body.patient_zip, "zip"),
+    )
+    for raw, col in mapping:
+        s = _strip_nonempty(raw)
+        if s:
+            out[col] = s
+    return out
 
 
 @router.post("")
@@ -167,6 +208,16 @@ def submit_intake(
         raise HTTPException(status_code=500, detail=msg)
 
     intake_id = data[0].get("id")
+
+    try:
+        demo_updates = _patient_demographic_updates(body)
+        if demo_updates:
+            supabase.table("patients").update(demo_updates).eq("id", patient_id).execute()
+    except Exception as exc:
+        print(
+            f"POST /intake: could not update patient {patient_id} demographics: {exc}",
+            flush=True,
+        )
 
     try:
         supabase.table("appointments").update({"status": "checked_in"}).eq(

@@ -110,6 +110,7 @@ CREATE TABLE public.patients (
   email text,
   phone text,
   date_of_birth date,
+  occupation text,
   gender text,
   address_line1 text,
   address_line2 text,

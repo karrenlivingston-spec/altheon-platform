@@ -1,4 +1,5 @@
 -- Run once on existing Supabase/Postgres databases (adds profile fields to patients).
+ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS occupation text;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS gender text;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS address_line1 text;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS address_line2 text;
