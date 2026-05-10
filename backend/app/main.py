@@ -4,7 +4,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import Body, FastAPI, Header, HTTPException, Query
@@ -294,6 +294,22 @@ def _require_super_admin(authorization: Optional[str]) -> None:
         raise HTTPException(status_code=403, detail="Super admin only")
 
 
+def _shape_super_admin_clinic_list_item(
+    clinic_row: dict[str, Any],
+    billing_model: Optional[str],
+) -> dict[str, Any]:
+    return {
+        "id": str(clinic_row.get("id")),
+        "brand_name": clinic_row.get("brand_name"),
+        "slug": clinic_row.get("slug"),
+        "agent_name": clinic_row.get("agent_name"),
+        "primary_color": clinic_row.get("primary_color"),
+        "logo_url": clinic_row.get("logo_url"),
+        "billing_model": billing_model,
+        "created_at": clinic_row.get("created_at"),
+    }
+
+
 def _rollback_clinic_onboard(clinic_id: Optional[str], admin_user_id: Optional[str]) -> None:
     """Best-effort undo after a failed provision (DB cascade, then auth user)."""
     if clinic_id:
@@ -366,6 +382,29 @@ class OnboardClinicFields(BaseModel):
                 "billing_model must be one of: cash, insurance, hybrid"
             )
         return b
+
+
+class SuperAdminClinicPatch(BaseModel):
+    """Partial update for clinics + optional billing_model in clinic_settings."""
+
+    brand_name: Optional[str] = None
+    slug: Optional[str] = None
+    agent_name: Optional[str] = None
+    primary_color: Optional[str] = None
+    logo_url: Optional[str] = None
+    billing_model: Optional[Literal["cash", "insurance", "hybrid"]] = None
+
+    @field_validator("slug")
+    @classmethod
+    def slug_url_safe_opt(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        s = v.strip().lower()
+        if not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)*", s):
+            raise ValueError(
+                "slug must be URL-safe (lowercase letters, numbers, hyphens only)"
+            )
+        return s
 
 
 class OnboardLocationFields(BaseModel):
@@ -1229,6 +1268,196 @@ def patch_pi_case(case_id: str, body: dict = Body(...)):
     if not rows:
         raise HTTPException(status_code=404, detail="PI case not found")
     return rows[0]
+
+
+@app.get("/clinics")
+def list_clinics_super_admin(
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """List all clinics with branding and billing_model (super_admin only)."""
+    _require_super_admin(authorization)
+    try:
+        clinics_resp = (
+            supabase.table("clinics")
+            .select(
+                "id, brand_name, slug, agent_name, primary_color, logo_url, created_at"
+            )
+            .order("brand_name")
+            .execute()
+        )
+        _handle_supabase_error(clinics_resp)
+        st_resp = (
+            supabase.table("clinic_settings")
+            .select("clinic_id, billing_model")
+            .execute()
+        )
+        _handle_supabase_error(st_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    billing_by_clinic: dict[str, Any] = {}
+    for r in st_resp.data or []:
+        if not isinstance(r, dict):
+            continue
+        cid = str(r.get("clinic_id") or "").strip()
+        if cid:
+            billing_by_clinic[cid] = r.get("billing_model")
+
+    out: list[dict[str, Any]] = []
+    for c in clinics_resp.data or []:
+        if not isinstance(c, dict):
+            continue
+        cid = str(c.get("id") or "").strip()
+        bm = billing_by_clinic.get(cid)
+        out.append(_shape_super_admin_clinic_list_item(c, bm))
+    return out
+
+
+@app.patch("/clinics/{clinic_id}")
+def patch_clinic_super_admin(
+    clinic_id: str,
+    body: SuperAdminClinicPatch,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """Update clinic branding and/or billing_model (super_admin only)."""
+    _require_super_admin(authorization)
+    payload = body.model_dump(exclude_unset=True)
+    if not payload:
+        raise HTTPException(
+            status_code=400,
+            detail="No fields to update",
+        )
+
+    try:
+        cur = (
+            supabase.table("clinics")
+            .select("id")
+            .eq("id", clinic_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(cur)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if not cur.data:
+        raise HTTPException(status_code=404, detail="Clinic not found")
+
+    billing_model = payload.pop("billing_model", None)
+    clinic_allowed = frozenset(
+        {"brand_name", "slug", "agent_name", "primary_color", "logo_url"}
+    )
+    clinic_updates = {k: v for k, v in payload.items() if k in clinic_allowed}
+
+    try:
+        if "slug" in clinic_updates:
+            dup = (
+                supabase.table("clinics")
+                .select("id")
+                .eq("slug", clinic_updates["slug"])
+                .neq("id", clinic_id)
+                .limit(1)
+                .execute()
+            )
+            _handle_supabase_error(dup)
+            if dup.data:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Slug is already in use",
+                )
+
+        if clinic_updates:
+            cu = (
+                supabase.table("clinics")
+                .update(clinic_updates)
+                .eq("id", clinic_id)
+                .execute()
+            )
+            _handle_supabase_error(cu)
+
+        if billing_model is not None:
+            existing = (
+                supabase.table("clinic_settings")
+                .select("clinic_id")
+                .eq("clinic_id", clinic_id)
+                .limit(1)
+                .execute()
+            )
+            _handle_supabase_error(existing)
+            if existing.data:
+                upd_st = (
+                    supabase.table("clinic_settings")
+                    .update({"billing_model": billing_model})
+                    .eq("clinic_id", clinic_id)
+                    .execute()
+                )
+                _handle_supabase_error(upd_st)
+            else:
+                clin = (
+                    supabase.table("clinics")
+                    .select("name, phone, email")
+                    .eq("id", clinic_id)
+                    .limit(1)
+                    .execute()
+                )
+                _handle_supabase_error(clin)
+                rows = clin.data or []
+                row = rows[0] if rows else {}
+                insert_payload = {
+                    "clinic_id": clinic_id,
+                    "billing_model": billing_model,
+                    "clinic_name": (str(row.get("name") or "").strip() or "Clinic"),
+                    "timezone": "America/New_York",
+                    "phone": str(row.get("phone") or "").strip(),
+                    "email": str(row.get("email") or "").strip(),
+                    "address_line1": "",
+                    "city": "",
+                    "state": "",
+                    "zip": "",
+                }
+                ins_st = (
+                    supabase.table("clinic_settings")
+                    .insert(insert_payload)
+                    .execute()
+                )
+                _handle_supabase_error(ins_st)
+
+        cresp = (
+            supabase.table("clinics")
+            .select(
+                "id, brand_name, slug, agent_name, primary_color, logo_url, created_at"
+            )
+            .eq("id", clinic_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(cresp)
+        crows = cresp.data or []
+        if not crows:
+            raise HTTPException(status_code=404, detail="Clinic not found")
+        crow = crows[0]
+
+        sresp = (
+            supabase.table("clinic_settings")
+            .select("billing_model")
+            .eq("clinic_id", clinic_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(sresp)
+        bm = None
+        if sresp.data:
+            bm = sresp.data[0].get("billing_model")
+
+        return _shape_super_admin_clinic_list_item(crow, bm)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @app.get("/clinic-settings/{clinic_id}")
