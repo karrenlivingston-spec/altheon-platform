@@ -13,6 +13,7 @@ import {
   CreditCard,
   Receipt,
   Briefcase,
+  ClipboardList,
   Phone,
   Building2,
   Settings,
@@ -353,6 +354,19 @@ function AdminAuthenticatedShellInner({
                   aria-hidden
                 />
                 PI Cases
+              </span>
+            </Link>
+            <Link
+              href="/admin/clinical-notes"
+              className={navLinkClass("/admin/clinical-notes")}
+              onClick={() => setSidebarOpen(false)}
+            >
+              <span className="flex items-center gap-3">
+                <ClipboardList
+                  className={navIconClass("/admin/clinical-notes")}
+                  aria-hidden
+                />
+                Clinical Notes
               </span>
             </Link>
             <Link
