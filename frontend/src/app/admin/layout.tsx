@@ -14,6 +14,7 @@ import {
   Receipt,
   Briefcase,
   Phone,
+  Building2,
   Settings,
   Clock3,
 } from "lucide-react";
@@ -114,6 +115,11 @@ function AdminAuthenticatedShellInner({
   const [clinicMenuOpen, setClinicMenuOpen] = useState(false);
 
   function isNavLinkActive(href: string): boolean {
+    if (href === "/dashboard/clinics") {
+      return (
+        pathname === "/dashboard/clinics" || pathname === "/admin/clinics"
+      );
+    }
     if (href === "/admin/settings") {
       return pathname === "/admin/settings";
     }
@@ -362,6 +368,21 @@ function AdminAuthenticatedShellInner({
                 Voice Agent
               </span>
             </Link>
+            {role === "super_admin" ? (
+              <Link
+                href="/dashboard/clinics"
+                className={navLinkClass("/dashboard/clinics")}
+                onClick={() => setSidebarOpen(false)}
+              >
+                <span className="flex items-center gap-3">
+                  <Building2
+                    className={navIconClass("/dashboard/clinics")}
+                    aria-hidden
+                  />
+                  Clinics
+                </span>
+              </Link>
+            ) : null}
             <Link
               href="/admin/settings"
               className={navLinkClass("/admin/settings")}
