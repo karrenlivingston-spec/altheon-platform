@@ -767,12 +767,14 @@ class CreateAppointmentRequest(BaseModel):
     patient_email: Optional[str] = None
     notes: Optional[str] = None
     source: Optional[str] = None
+    preferred_language: Optional[str] = "en"
 
 
 class RescheduleAppointmentRequest(BaseModel):
     patient_phone: str = Field(...)
     new_date: str = Field(..., description="YYYY-MM-DD")
     new_time: str = Field(..., description="HH:MM (24-hour)")
+    preferred_language: Optional[str] = None
 
     @field_validator("new_date")
     @classmethod
@@ -801,7 +803,82 @@ def _handle_supabase_error(response: Any) -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
-def _format_confirmation_sms(start_time_iso: str, first_name: str) -> str:
+_WD_EN = (
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+    "Sunday",
+)
+_WD_ES = (
+    "lunes",
+    "martes",
+    "miércoles",
+    "jueves",
+    "viernes",
+    "sábado",
+    "domingo",
+)
+_WD_FR = (
+    "lundi",
+    "mardi",
+    "mercredi",
+    "jeudi",
+    "vendredi",
+    "samedi",
+    "dimanche",
+)
+
+_SMS_CONFIRM_TEMPLATES = {
+    "en": (
+        "Hi {first_name}! Your appointment at STTPDN is confirmed for {day} at {time}. "
+        "Questions? Call 561-772-5799. Reply STOP to opt out."
+    ),
+    "es": (
+        "¡Hola {first_name}! Tu cita en STTPDN está confirmada para el {day} a las {time}. "
+        "¿Preguntas? Llama al 561-772-5799. Responde STOP para cancelar."
+    ),
+    "fr": (
+        "Bonjour {first_name}! Votre rendez-vous chez STTPDN est confirmé pour le {day} à {time}. "
+        "Des questions? Appelez le 561-772-5799. Répondez STOP pour vous désabonner."
+    ),
+}
+
+
+def _normalize_preferred_language(code: Optional[str]) -> str:
+    """Map stored or incoming codes to en | es | fr; default English."""
+    if code is None or str(code).strip() == "":
+        return "en"
+    c = str(code).strip().lower()
+    if c in ("en", "english", "eng"):
+        return "en"
+    if c in ("es", "spa", "spanish", "espanol", "español"):
+        return "es"
+    if c in ("fr", "fra", "french", "francais", "français"):
+        return "fr"
+    return "en"
+
+
+def _format_sms_day_time_eastern(dt_e: datetime, lang: str) -> tuple[str, str]:
+    idx = dt_e.weekday()
+    if lang == "es":
+        day = f"{_WD_ES[idx]} {dt_e.day}/{dt_e.month}/{dt_e.year}"
+    elif lang == "fr":
+        day = f"{_WD_FR[idx]} {dt_e.day}/{dt_e.month}/{dt_e.year}"
+    else:
+        day = f"{_WD_EN[idx]}, {dt_e.month}/{dt_e.day}/{dt_e.year}"
+    h12 = dt_e.hour % 12 or 12
+    time_part = f"{h12}:{dt_e.minute:02d} {dt_e.strftime('%p')}"
+    return day, time_part
+
+
+def _format_confirmation_sms(
+    start_time_iso: str,
+    first_name: str,
+    preferred_language: Optional[str] = None,
+) -> str:
     s = str(start_time_iso).strip().replace("Z", "+00:00")
     try:
         dt = datetime.fromisoformat(s)
@@ -810,16 +887,11 @@ def _format_confirmation_sms(start_time_iso: str, first_name: str) -> str:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     dt_e = dt.astimezone(ZoneInfo("America/New_York"))
-    day_name = dt_e.strftime("%A")
-    date_part = f"{dt_e.month}/{dt_e.day}/{dt_e.year}"
-    h12 = dt_e.hour % 12 or 12
-    time_part = f"{h12}:{dt_e.minute:02d} {dt_e.strftime('%p')}"
+    lang = _normalize_preferred_language(preferred_language)
+    day_s, time_s = _format_sms_day_time_eastern(dt_e, lang)
     fn = (first_name or "there").strip() or "there"
-    return (
-        f"Hi {fn}! Your appointment at Straight To The Point Dry Needling is "
-        f"confirmed for {day_name}, {date_part} at {time_part}. "
-        f"Questions? Call us at 561-772-5799. Reply STOP to opt out."
-    )
+    template = _SMS_CONFIRM_TEMPLATES.get(lang, _SMS_CONFIRM_TEMPLATES["en"])
+    return template.format(first_name=fn, day=day_s, time=time_s)
 
 
 def _to_e164_us(phone: str) -> str:
@@ -905,7 +977,7 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
     try:
         all_patients = (
             supabase.table("patients")
-            .select("id, phone, first_name, last_name")
+            .select("id, phone, first_name, last_name, preferred_language")
             .eq("clinic_id", clinic_id_for_lookup)
             .execute()
         )
@@ -927,6 +999,20 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
         raise HTTPException(status_code=404, detail="Patient not found")
     patient_id = str(patient["id"])
     print(f"Found patient: {patient_id}")
+
+    if payload.preferred_language is not None:
+        new_lang = str(payload.preferred_language).strip()
+        if new_lang:
+            try:
+                supabase.table("patients").update({"preferred_language": new_lang}).eq(
+                    "id", patient_id
+                ).execute()
+                patient["preferred_language"] = new_lang
+            except Exception:
+                logger.exception(
+                    "reschedule: failed to update preferred_language patient_id=%s",
+                    patient_id,
+                )
 
     try:
         result = (
@@ -1109,7 +1195,7 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
     try:
         pt_msg = (
             supabase.table("patients")
-            .select("first_name, phone")
+            .select("first_name, phone, preferred_language")
             .eq("id", patient_id)
             .limit(1)
             .execute()
@@ -1118,8 +1204,9 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
         pr = (pt_msg.data or [{}])[0]
         phone_out = pr.get("phone") or patient_phone
         fname = (pr.get("first_name") or "").strip()
+        pref_lang = pr.get("preferred_language")
         if phone_out:
-            body = _format_confirmation_sms(start_iso, fname)
+            body = _format_confirmation_sms(start_iso, fname, pref_lang)
             send_sms(
                 _to_e164_us(str(phone_out)),
                 body,
@@ -1229,6 +1316,20 @@ def create_appointment(payload: CreateAppointmentRequest):
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    pref_raw = payload.preferred_language
+    pref_stored = (
+        (str(pref_raw).strip() if pref_raw is not None else "") or "en"
+    )
+    try:
+        supabase.table("patients").update({"preferred_language": pref_stored}).eq(
+            "id", patient_id
+        ).execute()
+    except Exception:
+        logger.exception(
+            "create appointment: failed to update preferred_language patient_id=%s",
+            patient_id,
+        )
 
     start_iso = payload.start_time
     if payload.end_time:
@@ -1343,7 +1444,7 @@ def create_appointment(payload: CreateAppointmentRequest):
     try:
         pt_msg = (
             supabase.table("patients")
-            .select("first_name, phone")
+            .select("first_name, phone, preferred_language")
             .eq("id", patient_id)
             .limit(1)
             .execute()
@@ -1352,8 +1453,9 @@ def create_appointment(payload: CreateAppointmentRequest):
         prow = (pt_msg.data or [{}])[0]
         phone_out = prow.get("phone") or payload.patient_phone
         fname = (prow.get("first_name") or payload.patient_first_name or "").strip()
+        pref_lang = prow.get("preferred_language") or pref_stored
         if phone_out:
-            body = _format_confirmation_sms(start_iso, fname)
+            body = _format_confirmation_sms(start_iso, fname, pref_lang)
             send_sms(
                 _to_e164_us(str(phone_out)),
                 body,

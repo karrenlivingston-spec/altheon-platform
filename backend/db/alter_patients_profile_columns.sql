@@ -15,3 +15,4 @@ ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS insurance_group_number text
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS primary_complaint text;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS referring_provider text;
 ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS notes text;
+ALTER TABLE public.patients ADD COLUMN IF NOT EXISTS preferred_language text NOT NULL DEFAULT 'en';

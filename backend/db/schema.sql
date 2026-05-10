@@ -126,6 +126,7 @@ CREATE TABLE public.patients (
   primary_complaint text,
   referring_provider text,
   notes text,
+  preferred_language text NOT NULL DEFAULT 'en',
   clinic_id uuid REFERENCES public.clinics (id),
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()

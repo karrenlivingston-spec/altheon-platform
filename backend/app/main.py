@@ -181,7 +181,7 @@ def patient_lookup(phone: str, clinic_id: str):
 
         patient_resp = (
             supabase.table("patients")
-            .select("id, first_name, last_name, phone")
+            .select("id, first_name, last_name, phone, preferred_language")
             .execute()
         )
         patients = patient_resp.data or []
@@ -259,6 +259,7 @@ def patient_lookup(phone: str, clinic_id: str):
                 "first_name": patient.get("first_name"),
                 "last_name": patient.get("last_name"),
                 "phone": patient.get("phone"),
+                "preferred_language": patient.get("preferred_language"),
                 "last_visit": last_visit,
             },
             "upcoming_appointment": upcoming_appointment,
