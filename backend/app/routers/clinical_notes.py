@@ -673,7 +673,7 @@ def sign_clinical_note(note_id: str, body: SignNoteBody):
     try:
         cur = (
             supabase.table("clinical_notes")
-            .select("id,status")
+            .select("id,status,clinic_id")
             .eq("id", nid)
             .limit(1)
             .execute()
@@ -688,17 +688,28 @@ def sign_clinical_note(note_id: str, body: SignNoteBody):
     if not crows:
         raise HTTPException(status_code=404, detail="Clinical note not found")
 
-    st = str(crows[0].get("status") or "").strip().lower()
+    note_row = crows[0]
+    st = str(note_row.get("status") or "").strip().lower()
     if st != "ready_for_review":
         raise HTTPException(
             status_code=409,
             detail="Note must be in ready_for_review status to sign",
         )
 
+    clinic_id_note = str(note_row.get("clinic_id") or "").strip()
+    if not clinic_id_note:
+        raise HTTPException(status_code=500, detail="Clinical note missing clinic_id")
+
+    resolved_signed_by = _resolve_clinic_users_pk(
+        signed_by,
+        clinic_id_note,
+        not_found_detail="Signing user not found in clinic users",
+    )
+
     data = {
         "status": "signed",
         "signed_at": _now_iso(),
-        "signed_by": signed_by,
+        "signed_by": resolved_signed_by,
         "updated_at": _now_iso(),
     }
     try:
