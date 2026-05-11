@@ -305,6 +305,56 @@ def _validate_note_type(value: Optional[str]) -> Optional[str]:
     return v
 
 
+def _resolve_clinic_users_pk(
+    raw_id: str,
+    clinic_id: str,
+    *,
+    not_found_detail: str,
+) -> str:
+    """Map Supabase auth user_id or clinic_users.id to clinic_users.id for this clinic."""
+    key = raw_id.strip()
+    cid = clinic_id.strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Invalid clinic user reference")
+
+    try:
+        by_id = (
+            supabase.table("clinic_users")
+            .select("id")
+            .eq("id", key)
+            .eq("clinic_id", cid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(by_id)
+        rows = by_id.data or []
+        if rows:
+            rid = str(rows[0].get("id") or "").strip()
+            if rid:
+                return rid
+
+        by_uid = (
+            supabase.table("clinic_users")
+            .select("id")
+            .eq("user_id", key)
+            .eq("clinic_id", cid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(by_uid)
+        rows = by_uid.data or []
+        if rows:
+            rid = str(rows[0].get("id") or "").strip()
+            if rid:
+                return rid
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    raise HTTPException(status_code=404, detail=not_found_detail)
+
+
 @router.post("/clinical-notes")
 def create_clinical_note(body: CreateClinicalNoteBody):
     patient_id = body.patient_id.strip()
@@ -318,10 +368,16 @@ def create_clinical_note(body: CreateClinicalNoteBody):
 
     nt = _validate_note_type(body.note_type)
 
+    resolved_author = _resolve_clinic_users_pk(
+        author_id,
+        clinic_id,
+        not_found_detail="Author not found in clinic users",
+    )
+
     row: dict[str, Any] = {
         "patient_id": patient_id,
         "clinic_id": clinic_id,
-        "author_id": author_id,
+        "author_id": resolved_author,
         "status": "draft",
     }
     if nt:
@@ -329,7 +385,11 @@ def create_clinical_note(body: CreateClinicalNoteBody):
     if body.supervising_pt_id is not None:
         s = body.supervising_pt_id.strip()
         if s:
-            row["supervising_pt_id"] = s
+            row["supervising_pt_id"] = _resolve_clinic_users_pk(
+                s,
+                clinic_id,
+                not_found_detail="Supervising PT not found in clinic users",
+            )
     if body.appointment_id is not None:
         a = body.appointment_id.strip()
         if a:
