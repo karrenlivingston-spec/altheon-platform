@@ -132,12 +132,22 @@ def _patient_display_name(row: dict[str, Any]) -> str:
     return f"{fn} {ln}".strip() or "—"
 
 
-def _author_display_name(row: Optional[dict[str, Any]]) -> str:
+def _clinic_user_display_name(row: Optional[dict[str, Any]]) -> str:
+    """Derive a display label from clinic_users row without assuming column names exist."""
     if not row:
         return "—"
     fn = str(row.get("first_name") or "").strip()
     ln = str(row.get("last_name") or "").strip()
-    return f"{fn} {ln}".strip() or "—"
+    combined = f"{fn} {ln}".strip()
+    if combined:
+        return combined
+    single = str(row.get("name") or "").strip()
+    if single:
+        return single
+    email = str(row.get("email") or "").strip()
+    if email:
+        return email
+    return "Unknown"
 
 
 def _load_clinic_users_maps(
@@ -152,7 +162,7 @@ def _load_clinic_users_maps(
     try:
         r1 = (
             supabase.table("clinic_users")
-            .select("id,user_id,first_name,last_name")
+            .select("*")
             .in_("id", author_ids)
             .execute()
         )
@@ -171,7 +181,7 @@ def _load_clinic_users_maps(
         if missing:
             r2 = (
                 supabase.table("clinic_users")
-                .select("id,user_id,first_name,last_name")
+                .select("*")
                 .in_("user_id", missing)
                 .execute()
             )
@@ -213,6 +223,13 @@ def _enrich_notes_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         {str(r["patient_id"]) for r in rows if r.get("patient_id")}
     )
     author_ids = list({str(r["author_id"]) for r in rows if r.get("author_id")})
+    supervising_ids = list(
+        {
+            str(r["supervising_pt_id"])
+            for r in rows
+            if r.get("supervising_pt_id")
+        }
+    )
 
     patients_map: dict[str, dict[str, Any]] = {}
     try:
@@ -234,15 +251,38 @@ def _enrich_notes_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     by_cu_id, by_user_id = _load_clinic_users_maps(author_ids)
 
+    supervising_by_id: dict[str, dict[str, Any]] = {}
+    try:
+        if supervising_ids:
+            sresp = (
+                supabase.table("clinic_users")
+                .select("*")
+                .in_("id", supervising_ids)
+                .execute()
+            )
+            _handle_supabase_error(sresp)
+            for srow in sresp.data or []:
+                if isinstance(srow, dict) and srow.get("id"):
+                    supervising_by_id[str(srow["id"])] = srow
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     out: list[dict[str, Any]] = []
     for r in rows:
         item = dict(r)
         pid = str(r.get("patient_id") or "")
         aid = str(r.get("author_id") or "")
+        spid = str(r.get("supervising_pt_id") or "").strip()
         pt = patients_map.get(pid)
         item["patient_name"] = _patient_display_name(pt) if pt else "—"
         cu = _resolve_clinic_user_row(aid, by_cu_id, by_user_id)
-        item["author_name"] = _author_display_name(cu)
+        item["author_name"] = _clinic_user_display_name(cu)
+        if spid:
+            item["supervising_pt_name"] = _clinic_user_display_name(
+                supervising_by_id.get(spid)
+            )
         out.append(item)
     return out
 

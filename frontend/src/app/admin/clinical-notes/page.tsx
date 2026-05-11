@@ -50,6 +50,7 @@ type ClinicalNote = {
   updated_at?: string | null;
   patient_name?: string | null;
   author_name?: string | null;
+  supervising_pt_name?: string | null;
 };
 
 const NOTE_TYPE_OPTIONS = [
@@ -148,7 +149,9 @@ export default function AdminClinicalNotesPage() {
 
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [patientSearch, setPatientSearch] = useState("");
+  const [patientInputValue, setPatientInputValue] = useState("");
+  const [patientPickerOpen, setPatientPickerOpen] = useState(false);
+  const patientPickerRef = useRef<HTMLDivElement>(null);
   const [draftPatientId, setDraftPatientId] = useState("");
   const [draftNoteType, setDraftNoteType] = useState<string>("daily_note");
   const [draftSupervisingPtId, setDraftSupervisingPtId] = useState("");
@@ -303,7 +306,8 @@ export default function AdminClinicalNotesPage() {
     setDraftObjective("");
     setDraftAssessment("");
     setDraftPlan("");
-    setPatientSearch("");
+    setPatientInputValue("");
+    setPatientPickerOpen(false);
   }
 
   function openNewNote() {
@@ -331,7 +335,13 @@ export default function AdminClinicalNotesPage() {
       setDraftObjective(row.objective ?? "");
       setDraftAssessment(row.assessment ?? "");
       setDraftPlan(row.plan ?? "");
-      setPatientSearch("");
+      const picked = patients.find((x) => x.id === row.patient_id);
+      setPatientInputValue(
+        picked
+          ? patientDisplayName(picked)
+          : `Patient ${String(row.patient_id).slice(0, 8)}…`,
+      );
+      setPatientPickerOpen(false);
       setEditorOpen(true);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load note");
@@ -518,12 +528,30 @@ export default function AdminClinicalNotesPage() {
   }
 
   const filteredPatients = useMemo(() => {
-    const q = patientSearch.trim().toLowerCase();
+    const q = patientInputValue.trim().toLowerCase();
     if (!q) return patients;
     return patients.filter((p) =>
       patientDisplayName(p).toLowerCase().includes(q),
     );
-  }, [patients, patientSearch]);
+  }, [patients, patientInputValue]);
+
+  useEffect(() => {
+    function onDocMouseDown(e: MouseEvent) {
+      if (!patientPickerOpen) return;
+      const el = patientPickerRef.current;
+      if (el && !el.contains(e.target as Node)) {
+        setPatientPickerOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [patientPickerOpen]);
+
+  useEffect(() => {
+    if (!editorOpen || !editingId || !draftPatientId) return;
+    const p = patients.find((x) => x.id === draftPatientId);
+    if (p) setPatientInputValue(patientDisplayName(p));
+  }, [editorOpen, editingId, draftPatientId, patients]);
 
   useEffect(() => {
     if (!toast) return;
@@ -840,35 +868,65 @@ export default function AdminClinicalNotesPage() {
               {editingId ? "Edit clinical note" : "New clinical note"}
             </h2>
             <div className="space-y-4 pt-5">
-              <div>
+              <div className="relative" ref={patientPickerRef}>
                 <label className="block text-sm font-medium text-gray-700">
                   Patient
                 </label>
                 <input
-                  type="search"
-                  value={patientSearch}
-                  onChange={(e) => setPatientSearch(e.target.value)}
-                  placeholder="Search patients…"
+                  type="text"
+                  autoComplete="off"
+                  value={patientInputValue}
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setPatientInputValue(v);
+                    setDraftPatientId("");
+                    setPatientPickerOpen(true);
+                  }}
+                  onFocus={() => {
+                    if (!editingId) setPatientPickerOpen(true);
+                  }}
+                  placeholder="Search and select a patient…"
                   className={`mt-1 h-9 ${DS_INPUT}`}
                   disabled={Boolean(editingId)}
                 />
-                {!editingId ? (
-                  <select
-                    value={draftPatientId}
-                    onChange={(e) => setDraftPatientId(e.target.value)}
-                    className={`mt-2 h-10 max-h-48 ${DS_INPUT}`}
-                    size={Math.min(8, Math.max(3, filteredPatients.length))}
+                {!editingId && patientPickerOpen ? (
+                  <div
+                    className="absolute left-0 right-0 z-20 mt-1 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg"
+                    style={{ minHeight: 200, maxHeight: 300 }}
                   >
-                    <option value="">Select patient…</option>
-                    {filteredPatients.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {patientDisplayName(p)}
-                      </option>
-                    ))}
-                  </select>
+                    {filteredPatients.length === 0 ? (
+                      <div className="px-3 py-4 text-sm text-gray-500">
+                        No matching patients.
+                      </div>
+                    ) : (
+                      <ul className="py-1">
+                        {filteredPatients.map((p) => (
+                          <li key={p.id}>
+                            <button
+                              type="button"
+                              className="w-full px-3 py-2.5 text-left text-sm text-gray-900 hover:bg-gray-50"
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                setDraftPatientId(p.id);
+                                setPatientInputValue(patientDisplayName(p));
+                                setPatientPickerOpen(false);
+                              }}
+                            >
+                              {patientDisplayName(p)}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                ) : null}
+                {!editingId ? (
+                  <p className="mt-1 text-xs text-gray-500">
+                    Type to filter, then click a name to select.
+                  </p>
                 ) : (
                   <p className="mt-2 text-sm text-gray-600">
-                    Patient is locked for this note.
+                    Patient cannot be changed for an existing note.
                   </p>
                 )}
               </div>
