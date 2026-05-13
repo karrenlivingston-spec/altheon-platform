@@ -833,15 +833,15 @@ _WD_FR = (
 
 _SMS_CONFIRM_TEMPLATES = {
     "en": (
-        "Hi {first_name}! Your appointment at STTPDN is confirmed for {day} at {time}. "
+        "Hi {first_name}! Your appointment at STTPDN is confirmed for {day} at {time}.{loc_slot}"
         "Questions? Call 561-772-5799. Reply STOP to opt out."
     ),
     "es": (
-        "¡Hola {first_name}! Tu cita en STTPDN está confirmada para el {day} a las {time}. "
+        "¡Hola {first_name}! Tu cita en STTPDN está confirmada para el {day} a las {time}.{loc_slot}"
         "¿Preguntas? Llama al 561-772-5799. Responde STOP para cancelar."
     ),
     "fr": (
-        "Bonjour {first_name}! Votre rendez-vous chez STTPDN est confirmé pour le {day} à {time}. "
+        "Bonjour {first_name}! Votre rendez-vous chez STTPDN est confirmé pour le {day} à {time}.{loc_slot}"
         "Des questions? Appelez le 561-772-5799. Répondez STOP pour vous désabonner."
     ),
 }
@@ -874,10 +874,23 @@ def _format_sms_day_time_eastern(dt_e: datetime, lang: str) -> tuple[str, str]:
     return day, time_part
 
 
+def _sms_location_slot(lang: str, clinic_address: Optional[str]) -> str:
+    """Space before follow-up sentence, or location line + trailing space (omit if no address)."""
+    addr = (clinic_address or "").strip()
+    if not addr:
+        return " "
+    if lang == "es":
+        return f" 📍 Ubicación: {addr} "
+    if lang == "fr":
+        return f" 📍 Adresse: {addr} "
+    return f" 📍 Location: {addr} "
+
+
 def _format_confirmation_sms(
     start_time_iso: str,
     first_name: str,
     preferred_language: Optional[str] = None,
+    clinic_address: Optional[str] = None,
 ) -> str:
     s = str(start_time_iso).strip().replace("Z", "+00:00")
     try:
@@ -890,8 +903,38 @@ def _format_confirmation_sms(
     lang = _normalize_preferred_language(preferred_language)
     day_s, time_s = _format_sms_day_time_eastern(dt_e, lang)
     fn = (first_name or "there").strip() or "there"
+    loc_slot = _sms_location_slot(lang, clinic_address)
     template = _SMS_CONFIRM_TEMPLATES.get(lang, _SMS_CONFIRM_TEMPLATES["en"])
-    return template.format(first_name=fn, day=day_s, time=time_s)
+    return template.format(
+        first_name=fn, day=day_s, time=time_s, loc_slot=loc_slot
+    )
+
+
+def _fetch_clinic_address(clinic_id: str) -> Optional[str]:
+    """Return clinics.address for SMS; None if missing, empty, or on error."""
+    cid = str(clinic_id or "").strip()
+    if not cid:
+        return None
+    try:
+        resp = (
+            supabase.table("clinics")
+            .select("address")
+            .eq("id", cid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except Exception:
+        logger.exception("fetch clinic address failed clinic_id=%s", cid)
+        return None
+    rows = resp.data or []
+    if not rows:
+        return None
+    raw = rows[0].get("address")
+    if raw is None:
+        return None
+    out = str(raw).strip()
+    return out or None
 
 
 def _to_e164_us(phone: str) -> str:
@@ -1206,7 +1249,10 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
         fname = (pr.get("first_name") or "").strip()
         pref_lang = pr.get("preferred_language")
         if phone_out:
-            body = _format_confirmation_sms(start_iso, fname, pref_lang)
+            clinic_addr = _fetch_clinic_address(clinic_id)
+            body = _format_confirmation_sms(
+                start_iso, fname, pref_lang, clinic_address=clinic_addr
+            )
             send_sms(
                 _to_e164_us(str(phone_out)),
                 body,
@@ -1455,7 +1501,10 @@ def create_appointment(payload: CreateAppointmentRequest):
         fname = (prow.get("first_name") or payload.patient_first_name or "").strip()
         pref_lang = prow.get("preferred_language") or pref_stored
         if phone_out:
-            body = _format_confirmation_sms(start_iso, fname, pref_lang)
+            clinic_addr = _fetch_clinic_address(payload.clinic_id)
+            body = _format_confirmation_sms(
+                start_iso, fname, pref_lang, clinic_address=clinic_addr
+            )
             send_sms(
                 _to_e164_us(str(phone_out)),
                 body,
