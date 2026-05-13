@@ -4,6 +4,7 @@ supabase
 anthropic
 requests
 python-dotenv
+python-multipart
 pytz
 python-dateutil
 twilio>=9.0.0
