@@ -2,7 +2,7 @@ fastapi
 uvicorn
 supabase
 anthropic
-openai
+requests
 python-dotenv
 pytz
 python-dateutil

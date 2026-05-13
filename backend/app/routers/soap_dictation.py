@@ -1,7 +1,7 @@
-"""Ambient scribe / SOAP dictation (Whisper + Claude).
+"""Ambient scribe / SOAP dictation (ElevenLabs Scribe + Claude).
 
 Required environment variables:
-- OPENAI_API_KEY — OpenAI Whisper API for audio transcription
+- ELEVENLABS_API_KEY — ElevenLabs Scribe API for audio transcription
 - ANTHROPIC_API_KEY — Anthropic API for Claude Haiku SOAP structuring
 """
 
@@ -12,6 +12,7 @@ import re
 import tempfile
 from pathlib import Path
 
+import requests
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 router = APIRouter()
@@ -96,7 +97,7 @@ async def transcribe_and_generate(
     clinic_id: str = Form(...),
     patient_id: str = Form(default=""),
 ):
-    """Transcribe audio with Whisper, then structure into SOAP with Claude Haiku."""
+    """Transcribe audio with ElevenLabs Scribe, then structure into SOAP with Claude Haiku."""
     _ = clinic_id.strip()
     _ = (patient_id or "").strip()
 
@@ -116,35 +117,58 @@ async def transcribe_and_generate(
         finally:
             os.close(fd)
 
-        openai_key = (os.environ.get("OPENAI_API_KEY") or "").strip()
-        if not openai_key:
+        eleven_key = (os.environ.get("ELEVENLABS_API_KEY") or "").strip()
+        if not eleven_key:
             raise HTTPException(
                 status_code=500,
-                detail="OPENAI_API_KEY is not configured",
+                detail="ELEVENLABS_API_KEY is not configured",
             )
 
         try:
-            from openai import OpenAI
-
-            oai = OpenAI(api_key=openai_key)
-            with open(tmp_path, "rb") as audio_file:
-                transcription = oai.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
+            with open(tmp_path, "rb") as fp:
+                resp = requests.post(
+                    "https://api.elevenlabs.io/v1/speech-to-text",
+                    headers={"xi-api-key": eleven_key},
+                    data={"model_id": "scribe_v1"},
+                    files={
+                        "file": (
+                            Path(tmp_path).name,
+                            fp,
+                            "application/octet-stream",
+                        ),
+                    },
+                    timeout=300,
                 )
         except HTTPException:
             raise
         except Exception as exc:
             raise HTTPException(
                 status_code=500,
-                detail=f"Whisper transcription failed: {exc}",
+                detail=f"ElevenLabs transcription failed: {exc}",
             ) from exc
 
-        transcript = str(getattr(transcription, "text", None) or "").strip()
+        if not resp.ok:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    f"ElevenLabs transcription failed: HTTP {resp.status_code} "
+                    f"{resp.text[:2000]}"
+                ),
+            )
+
+        try:
+            payload = resp.json()
+        except Exception as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"ElevenLabs returned invalid JSON: {exc}",
+            ) from exc
+
+        transcript = str(payload.get("text") or "").strip()
         if not transcript:
             raise HTTPException(
                 status_code=500,
-                detail="Whisper returned an empty transcript",
+                detail="ElevenLabs returned an empty transcript",
             )
 
         try:
