@@ -1,21 +1,58 @@
-"""Public intake submissions from Aria / ElevenLabs webhook."""
+"""Public intake submissions from Aria / ElevenLabs webhook, scheduled reminders, and token-based forms.
+
+Environment (reminder + token links):
+  FRONTEND_URL — required for POST /intake/send-reminders SMS links (e.g. https://app.example.com).
+  INTAKE_SECRET — existing webhook auth for POST /intake.
+
+stdlib: secrets (token_urlsafe) — no PyPI package.
+
+-- intake_tokens (create manually in Supabase)
+-- id uuid primary key default gen_random_uuid()
+-- patient_id uuid references patients(id)
+-- appointment_id uuid references appointments(id)
+-- clinic_id uuid references clinics(id)
+-- token text unique not null
+-- expires_at timestamptz not null
+-- used boolean default false
+-- created_at timestamptz default now()
+
+-- intake_forms (token submit path; align with Supabase — create/alter manually)
+-- id uuid primary key default gen_random_uuid()
+-- patient_id uuid references patients(id)
+-- appointment_id uuid references appointments(id)
+-- clinic_id uuid references clinics(id)
+-- chief_complaint text
+-- pain_scale integer
+-- symptom_duration text
+-- mechanism_of_injury text
+-- medications text
+-- allergies text
+-- medical_conditions text
+-- previous_treatments text
+-- consent_to_treatment boolean
+-- submitted_at timestamptz default now()
+"""
 
 from __future__ import annotations
 
+import logging
 import re
 import os
 import secrets
-from datetime import datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 
 from dateutil import parser as date_parser
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Body, Header, HTTPException
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from zoneinfo import ZoneInfo
 
 from app.db import supabase
+from app.sms import send_sms
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _digits(s: Optional[str]) -> str:
@@ -113,7 +150,159 @@ def _patient_demographic_updates(body: IntakeSubmission) -> dict[str, Any]:
     return out
 
 
-@router.post("")
+def _handle_supabase_error(response: Any) -> None:
+    error = getattr(response, "error", None)
+    if error:
+        detail = getattr(error, "message", None) or str(error)
+        raise HTTPException(status_code=500, detail=detail)
+
+
+def _to_e164_us(phone: str) -> str:
+    d = "".join(c for c in (phone or "") if c.isdigit())
+    if len(d) == 10:
+        return f"+1{d}"
+    if len(d) == 11 and d.startswith("1"):
+        return f"+{d}"
+    p = (phone or "").strip()
+    return p if p.startswith("+") else f"+{d}"
+
+
+def _normalize_pref_lang(code: Optional[str]) -> str:
+    if code is None or str(code).strip() == "":
+        return "en"
+    c = str(code).strip().lower()
+    if c in ("en", "english", "eng"):
+        return "en"
+    if c in ("es", "spa", "spanish", "espanol", "español"):
+        return "es"
+    if c in ("fr", "fra", "french", "francais", "français"):
+        return "fr"
+    return "en"
+
+
+def _clinic_tz_name(tz_raw: Optional[str]) -> str:
+    s = (tz_raw or "").strip()
+    if not s:
+        return "America/New_York"
+    try:
+        ZoneInfo(s)
+    except Exception:
+        return "America/New_York"
+    return s
+
+
+def _local_date_bounds_utc(d: date, tz_name: str) -> tuple[datetime, datetime]:
+    tz = ZoneInfo(_clinic_tz_name(tz_name))
+    start_local = datetime.combine(d, time.min, tzinfo=tz)
+    end_local = start_local + timedelta(days=1)
+    return (
+        start_local.astimezone(timezone.utc),
+        end_local.astimezone(timezone.utc),
+    )
+
+
+def _parse_start_dt(value: Any) -> datetime:
+    s = str(value).strip().replace("Z", "+00:00")
+    dt = datetime.fromisoformat(s)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _reminder_sms_body(
+    lang: str,
+    first_name: str,
+    clinic_name: str,
+    days: int,
+    token: str,
+    base_url: str,
+) -> str:
+    fn = (first_name or "there").strip() or "there"
+    cn = (clinic_name or "the clinic").strip() or "the clinic"
+    form_url = f"{base_url.rstrip('/')}/intake/form?token={token}"
+    intake_url = f"{base_url.rstrip('/')}/intake"
+    if lang == "es":
+        return (
+            f"Hola {fn}, su cita en {cn} es en {days} días. "
+            f"Complete su formulario de ingreso:\n"
+            f"📋 Formulario: {form_url}\n"
+            f"🎙️ Prefiere hablar? {intake_url}"
+        )
+    if lang == "fr":
+        return (
+            f"Bonjour {fn}, votre rendez-vous à {cn} est dans "
+            f"{days} jours. Veuillez compléter votre dossier:\n"
+            f"📋 Formulaire: {form_url}\n"
+            f"🎙️ Préférez parler? {intake_url}"
+        )
+    return (
+        f"Hi {fn}, your appointment at {cn} is in {days} days! "
+        f"Please complete your intake beforehand:\n"
+        f"📋 Fill out a form: {form_url}\n"
+        f"🎙️ Prefer to talk? {intake_url}"
+    )
+
+
+def _token_expires_at_utc(
+    appointment_start_utc: datetime, tz_name: str
+) -> datetime:
+    """End of calendar day (local) following the appointment's local date."""
+    tz = ZoneInfo(_clinic_tz_name(tz_name))
+    local = appointment_start_utc.astimezone(tz)
+    end_day = local.date() + timedelta(days=1)
+    end_local = datetime.combine(end_day, time(23, 59, 59), tzinfo=tz)
+    return end_local.astimezone(timezone.utc)
+
+
+def _fetch_clinic_display_name(clinic_id: str) -> str:
+    cid = str(clinic_id or "").strip()
+    if not cid:
+        return ""
+    try:
+        resp = (
+            supabase.table("clinics")
+            .select("name, brand_name")
+            .eq("id", cid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+        rows = resp.data or []
+        if not rows:
+            return ""
+        r = rows[0]
+        for key in ("brand_name", "name"):
+            v = r.get(key)
+            if v is not None and str(v).strip():
+                return str(v).strip()
+        return ""
+    except HTTPException:
+        return ""
+    except Exception:
+        logger.exception("fetch clinic name failed clinic_id=%s", cid)
+        return ""
+
+
+def _intake_token_exists_for_appointment(appointment_id: str) -> bool:
+    aid = str(appointment_id or "").strip()
+    if not aid:
+        return False
+    try:
+        q = (
+            supabase.table("intake_tokens")
+            .select("id")
+            .eq("appointment_id", aid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(q)
+        return bool(q.data)
+    except Exception:
+        logger.exception("intake_tokens lookup failed appointment_id=%s", aid)
+        return True
+
+
+@router.post("/intake")
 def submit_intake(
     body: IntakeSubmission,
     x_intake_secret: Optional[str] = Header(default=None, alias="X-Intake-Secret"),
@@ -236,7 +425,7 @@ def submit_intake(
     }
 
 
-@router.get("/patient/{patient_id}")
+@router.get("/intake/patient/{patient_id}")
 def list_intakes_for_patient(
     patient_id: str,
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
@@ -262,7 +451,393 @@ def list_intakes_for_patient(
     return {"intakes": rows}
 
 
-@router.get("/{appointment_id}")
+@router.post("/intake/send-reminders")
+def send_intake_reminders():
+    """Cron: remind patients N days before appointment (per clinic_settings.intake_reminder_days, default 2)."""
+    try:
+        base = (os.environ.get("FRONTEND_URL") or "").strip()
+        if not base:
+            raise HTTPException(
+                status_code=500,
+                detail="FRONTEND_URL environment variable is not set",
+            )
+        settings_resp = (
+            supabase.table("clinic_settings")
+            .select("clinic_id, intake_reminder_days, timezone")
+            .execute()
+        )
+        _handle_supabase_error(settings_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    sent = 0
+    skipped = 0
+    errors = 0
+    settings_rows = settings_resp.data or []
+
+    for st in settings_rows:
+        if not isinstance(st, dict):
+            continue
+        clinic_id = str(st.get("clinic_id") or "").strip()
+        if not clinic_id:
+            continue
+        raw_days = st.get("intake_reminder_days")
+        if raw_days is None or str(raw_days).strip() == "":
+            days = 2
+        else:
+            try:
+                days = int(raw_days)
+            except (TypeError, ValueError):
+                days = 2
+        if days <= 0:
+            days = 2
+
+        tz_for_date = _clinic_tz_name(str(st.get("timezone") or ""))
+        try:
+            z = ZoneInfo(tz_for_date)
+            today_local = datetime.now(z).date()
+            target_local_date = today_local + timedelta(days=days)
+            start_utc, end_utc = _local_date_bounds_utc(target_local_date, tz_for_date)
+        except Exception:
+            logger.exception("reminder date compute failed clinic_id=%s", clinic_id)
+            errors += 1
+            continue
+
+        try:
+            apq = (
+                supabase.table("appointments")
+                .select("id, patient_id, clinic_id, start_time, status")
+                .eq("clinic_id", clinic_id)
+                .gte("start_time", start_utc.isoformat())
+                .lt("start_time", end_utc.isoformat())
+                .execute()
+            )
+            _handle_supabase_error(apq)
+        except Exception:
+            logger.exception("appointments query failed clinic_id=%s", clinic_id)
+            errors += 1
+            continue
+
+        appts = apq.data or []
+        clinic_name = _fetch_clinic_display_name(clinic_id)
+
+        for ap in appts:
+            if not isinstance(ap, dict):
+                continue
+            st_ap = str(ap.get("status") or "").lower().replace(" ", "_")
+            if st_ap in ("cancelled", "canceled", "completed"):
+                skipped += 1
+                continue
+            appt_id = str(ap.get("id") or "").strip()
+            patient_id = str(ap.get("patient_id") or "").strip()
+            if not appt_id or not patient_id:
+                errors += 1
+                continue
+
+            try:
+                if _intake_token_exists_for_appointment(appt_id):
+                    skipped += 1
+                    continue
+
+                token = secrets.token_urlsafe(32)
+                start_dt = _parse_start_dt(ap.get("start_time"))
+                expires_dt = _token_expires_at_utc(start_dt, str(st.get("timezone") or ""))
+
+                ins_tok = (
+                    supabase.table("intake_tokens")
+                    .insert(
+                        {
+                            "patient_id": patient_id,
+                            "appointment_id": appt_id,
+                            "clinic_id": clinic_id,
+                            "token": token,
+                            "expires_at": expires_dt.isoformat(),
+                            "used": False,
+                        }
+                    )
+                    .execute()
+                )
+                _handle_supabase_error(ins_tok)
+                if not ins_tok.data:
+                    errors += 1
+                    continue
+
+                pt_resp = (
+                    supabase.table("patients")
+                    .select("first_name, phone, preferred_language")
+                    .eq("id", patient_id)
+                    .limit(1)
+                    .execute()
+                )
+                _handle_supabase_error(pt_resp)
+                prow = (pt_resp.data or [None])[0]
+                if not isinstance(prow, dict):
+                    errors += 1
+                    continue
+                phone = prow.get("phone")
+                fname = (prow.get("first_name") or "").strip()
+                pref = _normalize_pref_lang(prow.get("preferred_language"))
+                if not phone:
+                    errors += 1
+                    continue
+
+                sms_body = _reminder_sms_body(
+                    pref, fname, clinic_name, days, token, base
+                )
+                sid = send_sms(
+                    _to_e164_us(str(phone)),
+                    sms_body,
+                    patient_id=patient_id,
+                    appointment_id=appt_id,
+                    message_type="intake_reminder",
+                )
+                if sid is None:
+                    errors += 1
+                else:
+                    sent += 1
+            except Exception:
+                logger.exception(
+                    "intake reminder failed appt_id=%s patient_id=%s",
+                    appt_id,
+                    patient_id,
+                )
+                errors += 1
+
+    return {"sent": sent, "skipped": skipped, "errors": errors}
+
+
+def _parse_expires_at(raw: Any) -> datetime:
+    if raw is None:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    s = str(raw).strip().replace("Z", "+00:00")
+    try:
+        dt = datetime.fromisoformat(s)
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _inspect_intake_token(token: str) -> tuple[str, Optional[dict]]:
+    """not_found | already_completed | expired | valid"""
+    t = (token or "").strip()
+    if not t:
+        return "not_found", None
+    resp = (
+        supabase.table("intake_tokens")
+        .select(
+            "id, patient_id, appointment_id, clinic_id, token, expires_at, used"
+        )
+        .eq("token", t)
+        .limit(1)
+        .execute()
+    )
+    _handle_supabase_error(resp)
+    rows = resp.data or []
+    if not rows:
+        return "not_found", None
+    row = rows[0]
+    u = row.get("used")
+    if u is True or str(u).lower() in ("true", "t", "1"):
+        return "already_completed", row
+    exp_dt = _parse_expires_at(row.get("expires_at"))
+    if exp_dt < datetime.now(timezone.utc):
+        return "expired", row
+    return "valid", row
+
+
+@router.get("/intake/form/{token}")
+def get_intake_form_prefill(token: str):
+    try:
+        status, row = _inspect_intake_token(token)
+        if status == "not_found":
+            raise HTTPException(status_code=404, detail="Token not found")
+        if status == "already_completed":
+            return {"status": "already_completed"}
+        if status == "expired":
+            return JSONResponse(
+                status_code=400,
+                content={"status": "expired"},
+            )
+        if row is None:
+            raise HTTPException(status_code=500, detail="Invalid token state")
+        pid = str(row.get("patient_id") or "").strip()
+        aid = str(row.get("appointment_id") or "").strip()
+        if not pid or not aid:
+            raise HTTPException(status_code=500, detail="Invalid token row")
+
+        pt = (
+            supabase.table("patients")
+            .select("first_name, last_name, phone, preferred_language")
+            .eq("id", pid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(pt)
+        pt_row = (pt.data or [None])[0]
+        if not isinstance(pt_row, dict):
+            raise HTTPException(status_code=404, detail="Patient not found")
+
+        ap = (
+            supabase.table("appointments")
+            .select("start_time, clinician_id")
+            .eq("id", aid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(ap)
+        ap_row = (ap.data or [None])[0]
+        if not isinstance(ap_row, dict):
+            raise HTTPException(status_code=404, detail="Appointment not found")
+
+        start_raw = ap_row.get("start_time")
+        start_dt = _parse_start_dt(start_raw)
+        tz_name = _clinic_tz_name(None)
+        try:
+            cs = (
+                supabase.table("clinic_settings")
+                .select("timezone")
+                .eq("clinic_id", str(row.get("clinic_id") or ""))
+                .limit(1)
+                .execute()
+            )
+            _handle_supabase_error(cs)
+            crows = cs.data or []
+            if crows and crows[0].get("timezone"):
+                tz_name = _clinic_tz_name(str(crows[0].get("timezone")))
+        except Exception:
+            pass
+        appt_local = start_dt.astimezone(ZoneInfo(tz_name))
+        appointment_date = appt_local.date().isoformat()
+
+        return {
+            "status": "valid",
+            "patient": {
+                "first_name": pt_row.get("first_name"),
+                "last_name": pt_row.get("last_name"),
+                "phone": pt_row.get("phone"),
+                "preferred_language": pt_row.get("preferred_language"),
+            },
+            "appointment": {
+                "appointment_date": appointment_date,
+                "start_time": start_raw,
+                "clinician_id": ap_row.get("clinician_id"),
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+class IntakeTokenSubmitBody(BaseModel):
+    token: str = Field(..., min_length=1)
+    date_of_birth: Optional[str] = None
+    gender: Optional[str] = None
+    address: Optional[str] = None
+    email: Optional[str] = None
+    chief_complaint: str = Field(..., min_length=1)
+    pain_scale: Optional[int] = Field(default=None, ge=1, le=10)
+    symptom_duration: Optional[str] = None
+    mechanism_of_injury: Optional[str] = None
+    medications: Optional[str] = None
+    allergies: Optional[str] = None
+    medical_conditions: Optional[str] = None
+    previous_treatments: Optional[str] = None
+    consent_to_treatment: bool
+
+    @model_validator(mode="after")
+    def consent_must_be_true(self) -> "IntakeTokenSubmitBody":
+        if not self.consent_to_treatment:
+            raise ValueError("consent_to_treatment must be true to submit")
+        return self
+
+
+@router.post("/intake/form/submit")
+def submit_intake_token_form(body: IntakeTokenSubmitBody):
+    try:
+        status, row = _inspect_intake_token(body.token.strip())
+        if status == "not_found":
+            raise HTTPException(status_code=404, detail="Token not found")
+        if status == "already_completed":
+            raise HTTPException(
+                status_code=400,
+                detail={"status": "already_completed"},
+            )
+        if status == "expired":
+            raise HTTPException(status_code=400, detail={"status": "expired"})
+        assert row is not None
+        pid = str(row.get("patient_id") or "").strip()
+        aid = str(row.get("appointment_id") or "").strip()
+        cid = str(row.get("clinic_id") or "").strip()
+        tok_id = str(row.get("id") or "").strip()
+        if not pid or not aid or not cid or not tok_id:
+            raise HTTPException(status_code=500, detail="Invalid token row")
+
+        patient_updates: dict[str, Any] = {}
+        if body.date_of_birth is not None and str(body.date_of_birth).strip():
+            try:
+                patient_updates["date_of_birth"] = date_parser.parse(
+                    str(body.date_of_birth).strip()
+                ).date().isoformat()
+            except (ValueError, TypeError, OverflowError):
+                pass
+        if body.gender is not None and str(body.gender).strip():
+            patient_updates["gender"] = str(body.gender).strip()
+        if body.address is not None and str(body.address).strip():
+            patient_updates["address_line1"] = str(body.address).strip()
+        if body.email is not None and str(body.email).strip():
+            patient_updates["email"] = str(body.email).strip()
+
+        if patient_updates:
+            upd = (
+                supabase.table("patients")
+                .update(patient_updates)
+                .eq("id", pid)
+                .execute()
+            )
+            _handle_supabase_error(upd)
+
+        intake_row: dict[str, Any] = {
+            "patient_id": pid,
+            "appointment_id": aid,
+            "clinic_id": cid,
+            "chief_complaint": body.chief_complaint.strip(),
+            "symptom_duration": (body.symptom_duration or "").strip() or None,
+            "mechanism_of_injury": (body.mechanism_of_injury or "").strip() or None,
+            "medications": (body.medications or "").strip() or None,
+            "allergies": (body.allergies or "").strip() or None,
+            "medical_conditions": (body.medical_conditions or "").strip() or None,
+            "previous_treatments": (body.previous_treatments or "").strip() or None,
+            "consent_to_treatment": bool(body.consent_to_treatment),
+        }
+        if body.pain_scale is not None:
+            intake_row["pain_scale"] = int(body.pain_scale)
+
+        ins = supabase.table("intake_forms").insert(intake_row).execute()
+        _handle_supabase_error(ins)
+        if not ins.data:
+            raise HTTPException(status_code=500, detail="Failed to save intake form")
+
+        mark = (
+            supabase.table("intake_tokens")
+            .update({"used": True})
+            .eq("id", tok_id)
+            .execute()
+        )
+        _handle_supabase_error(mark)
+
+        return {"status": "success", "message": "Intake submitted successfully"}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/intake/{appointment_id}")
 def get_intake_for_appointment(
     appointment_id: str,
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
