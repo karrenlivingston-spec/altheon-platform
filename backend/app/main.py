@@ -29,6 +29,7 @@ from app.routers import (
     pi_cases as pi_cases_api_router,
     clinical_notes as clinical_notes_api_router,
     soap_dictation as soap_dictation_router,
+    dme as dme_router,
 )
 from app.routes.legal import router as legal_router
 
@@ -69,6 +70,7 @@ app.include_router(
     clinical_notes_api_router.router, prefix="/api", tags=["Clinical Notes"]
 )
 app.include_router(soap_dictation_router.router, prefix="")
+app.include_router(dme_router.router, prefix="", tags=["dme"])
 
 
 @app.get("/")
