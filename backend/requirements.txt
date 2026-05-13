@@ -2,6 +2,7 @@ fastapi
 uvicorn
 supabase
 anthropic
+openai
 python-dotenv
 pytz
 python-dateutil
