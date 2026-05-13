@@ -19,6 +19,10 @@ import {
 } from "@/app/admin/designSystem";
 
 import { useClinic } from "@/app/admin/ClinicContext";
+import {
+  AmbientScribe,
+  type SoapFromScribe,
+} from "@/components/clinical-notes/AmbientScribe";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -171,6 +175,27 @@ export default function AdminClinicalNotesPage() {
   const [toast, setToast] = useState<string | null>(null);
   const [pendingReviewCount, setPendingReviewCount] = useState(0);
 
+  const [scribeBannerVisible, setScribeBannerVisible] = useState(false);
+  const [sessionTranscript, setSessionTranscript] = useState("");
+  const [transcriptPanelOpen, setTranscriptPanelOpen] = useState(false);
+
+  const handleSoapFromScribe = useCallback((soap: SoapFromScribe) => {
+    setEditingId(null);
+    setDraftPatientId("");
+    setPatientInputValue("");
+    setPatientPickerOpen(false);
+    setDraftNoteType("daily_note");
+    setDraftSupervisingPtId("");
+    setDraftSubjective(soap.subjective);
+    setDraftObjective(soap.objective);
+    setDraftAssessment(soap.assessment);
+    setDraftPlan(soap.plan);
+    setSessionTranscript(soap.transcript);
+    setScribeBannerVisible(true);
+    setTranscriptPanelOpen(false);
+    setEditorOpen(true);
+  }, []);
+
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refreshPendingReviewCount = useCallback(async () => {
@@ -308,6 +333,9 @@ export default function AdminClinicalNotesPage() {
     setDraftPlan("");
     setPatientInputValue("");
     setPatientPickerOpen(false);
+    setScribeBannerVisible(false);
+    setSessionTranscript("");
+    setTranscriptPanelOpen(false);
   }
 
   function openNewNote() {
@@ -318,6 +346,9 @@ export default function AdminClinicalNotesPage() {
   async function openEditorForNote(note: ClinicalNote) {
     setEditorBusy(true);
     setError(null);
+    setScribeBannerVisible(false);
+    setSessionTranscript("");
+    setTranscriptPanelOpen(false);
     try {
       const res = await fetch(
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(note.id)}`,
@@ -572,7 +603,7 @@ export default function AdminClinicalNotesPage() {
           <button
             type="button"
             onClick={openNewNote}
-            className={`${DS_PRIMARY_BTN} inline-flex shrink-0 items-center justify-center`}
+            className={`${DS_PRIMARY_BTN} inline-flex min-h-[44px] shrink-0 items-center justify-center px-4 py-2.5`}
           >
             + New Note
           </button>
@@ -629,7 +660,27 @@ export default function AdminClinicalNotesPage() {
       </div>
 
       {activeTab === "my" ? (
-        <div className="mt-8">
+        <div className="mt-8 space-y-8">
+          <section className="max-w-3xl">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-900">
+              AI Scribe
+            </h3>
+            <p className="mt-1 text-xs text-gray-500 sm:text-sm">
+              Record a visit to draft SOAP sections; then review and save in a
+              new note.
+            </p>
+            <div className="mt-4 max-w-xl">
+              <AmbientScribe
+                clinicId={clinicId}
+                onSoapGenerated={handleSoapFromScribe}
+              />
+            </div>
+            <div
+              className="mt-8 border-b border-gray-200"
+              aria-hidden
+            />
+          </section>
+
           <div className={DS_TABLE_WRAP}>
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
@@ -867,6 +918,25 @@ export default function AdminClinicalNotesPage() {
             >
               {editingId ? "Edit clinical note" : "New clinical note"}
             </h2>
+            {scribeBannerVisible ? (
+              <div
+                className="relative mt-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 pr-12 text-sm text-sky-950"
+                role="status"
+              >
+                <p>
+                  Note generated from session recording. Please review before
+                  submitting.
+                </p>
+                <button
+                  type="button"
+                  className="absolute right-1 top-1 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-sky-800 hover:bg-sky-100"
+                  aria-label="Dismiss"
+                  onClick={() => setScribeBannerVisible(false)}
+                >
+                  ✕
+                </button>
+              </div>
+            ) : null}
             <div className="space-y-4 pt-5">
               <div className="relative" ref={patientPickerRef}>
                 <label className="block text-sm font-medium text-gray-700">
@@ -998,7 +1068,7 @@ export default function AdminClinicalNotesPage() {
                   setEditorOpen(false);
                   resetEditor();
                 }}
-                className={DS_SECONDARY_BTN}
+                className={`${DS_SECONDARY_BTN} min-h-[44px] px-4 py-2.5`}
               >
                 Cancel
               </button>
@@ -1006,7 +1076,7 @@ export default function AdminClinicalNotesPage() {
                 type="button"
                 disabled={editorBusy}
                 onClick={() => void saveDraft()}
-                className={`${DS_SECONDARY_BTN} disabled:opacity-60`}
+                className={`${DS_SECONDARY_BTN} min-h-[44px] px-4 py-2.5 disabled:opacity-60`}
               >
                 {editorBusy ? "Saving…" : "Save Draft"}
               </button>
@@ -1014,11 +1084,34 @@ export default function AdminClinicalNotesPage() {
                 type="button"
                 disabled={editorBusy}
                 onClick={() => void submitForAiReview()}
-                className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
+                className={`${DS_PRIMARY_BTN} min-h-[44px] px-4 py-2.5 disabled:opacity-60`}
               >
                 {editorBusy ? "Working…" : "Submit for AI Review"}
               </button>
             </div>
+
+            {sessionTranscript ? (
+              <div className="mt-6 border-t border-gray-100 pt-4">
+                <button
+                  type="button"
+                  className="flex min-h-[44px] w-full items-center justify-between rounded-lg px-2 text-left text-sm font-medium text-gray-800 hover:bg-gray-50 sm:text-base"
+                  onClick={() => setTranscriptPanelOpen((o) => !o)}
+                  aria-expanded={transcriptPanelOpen}
+                >
+                  <span>View Transcript</span>
+                  <span className="text-gray-500" aria-hidden>
+                    {transcriptPanelOpen ? "▲" : "▼"}
+                  </span>
+                </button>
+                {transcriptPanelOpen ? (
+                  <pre
+                    className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs leading-relaxed text-gray-800 whitespace-pre-wrap sm:text-sm"
+                  >
+                    {sessionTranscript}
+                  </pre>
+                ) : null}
+              </div>
+            ) : null}
           </div>
         </div>
       ) : null}
