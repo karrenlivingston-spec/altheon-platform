@@ -20,6 +20,8 @@ export type ClinicSummary = {
 
 export type MeResponse = {
   user_id: string;
+  /** `clinic_users.id` for the current clinic (use as clinical_notes.author_id). */
+  clinic_user_id?: string;
   role: string;
   clinic: ClinicSummary;
   all_clinics?: ClinicSummary[];

@@ -137,8 +137,10 @@ function canEditNote(status: string | null | undefined): boolean {
 
 export default function AdminClinicalNotesPage() {
   const { clinic_id: clinicId, me } = useClinic();
-  const userId = (me?.user_id ?? "").trim();
-  const signedByCandidate = userId || clinicId;
+  const supabaseUserId = (me?.user_id ?? "").trim();
+  /** clinical_notes.author_id is clinic_users.id; /me exposes clinic_user_id for list/save. */
+  const notesAuthorId = (me?.clinic_user_id ?? "").trim() || supabaseUserId;
+  const signedByCandidate = supabaseUserId || clinicId;
 
   const [activeTab, setActiveTab] = useState<"my" | "review">("my");
 
@@ -224,7 +226,7 @@ export default function AdminClinicalNotesPage() {
   }, [clinicId]);
 
   const loadMyNotes = useCallback(async () => {
-    if (!userId) {
+    if (!notesAuthorId) {
       setMyNotes([]);
       setLoadingMy(false);
       return;
@@ -233,7 +235,7 @@ export default function AdminClinicalNotesPage() {
     setError(null);
     try {
       const res = await fetch(
-        `${API_BASE}/api/clinics/${encodeURIComponent(clinicId)}/clinical-notes?author_id=${encodeURIComponent(userId)}`,
+        `${API_BASE}/api/clinics/${encodeURIComponent(clinicId)}/clinical-notes?author_id=${encodeURIComponent(notesAuthorId)}`,
       );
       if (!res.ok) {
         setError(await res.text().catch(() => `HTTP ${res.status}`));
@@ -248,7 +250,7 @@ export default function AdminClinicalNotesPage() {
     } finally {
       setLoadingMy(false);
     }
-  }, [clinicId, userId]);
+  }, [clinicId, notesAuthorId]);
 
   const loadReviewData = useCallback(async () => {
     setLoadingReview(true);
@@ -386,7 +388,7 @@ export default function AdminClinicalNotesPage() {
       setError("Select a patient.");
       return null;
     }
-    if (!userId) {
+    if (!notesAuthorId) {
       setError("Missing user context (author).");
       return null;
     }
@@ -396,7 +398,7 @@ export default function AdminClinicalNotesPage() {
       const body: Record<string, unknown> = {
         patient_id: draftPatientId.trim(),
         clinic_id: clinicId,
-        author_id: userId,
+        author_id: notesAuthorId,
         note_type: draftNoteType,
         subjective: draftSubjective.trim() || null,
         objective: draftObjective.trim() || null,
@@ -709,7 +711,7 @@ export default function AdminClinicalNotesPage() {
                         colSpan={5}
                         className="px-6 py-8 text-center text-gray-500"
                       >
-                        {!userId
+                        {!notesAuthorId
                           ? "Could not resolve your user id. Try reloading the page."
                           : "No notes yet. Create a new note to get started."}
                       </td>
