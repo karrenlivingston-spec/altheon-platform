@@ -29,6 +29,7 @@ import {
   painDotClass,
 } from "@/lib/intakePrint";
 import { supabase } from "@/lib/supabase";
+import { DmeSection } from "@/components/dme/DmeSection";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -617,54 +618,63 @@ export function PatientDetailView({
   }, [patientId, clinicId]);
 
   useEffect(() => {
-    void load();
+    let cancelled = false;
+    queueMicrotask(() => {
+      if (!cancelled) void load();
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [load]);
 
   useEffect(() => {
     let cancelled = false;
-    setIntakeForms([]);
-    setExpandedIntakeIds(new Set());
-    setIntakesFetchError(null);
-    setIntakesLoading(true);
-    (async () => {
-      try {
-        const h = await authHeaders();
-        const res = await fetch(
-          `${API_BASE}/intake/patient/${encodeURIComponent(patientId)}`,
-          { headers: h },
-        );
-        if (cancelled) return;
-        if (!res.ok) {
-          const t = await res.text().catch(() => "");
-          setIntakesFetchError(
-            res.status === 401 || res.status === 403
-              ? "Sign in required to load intake history."
-              : t.trim() || `Could not load intakes (${res.status})`,
+    queueMicrotask(() => {
+      if (cancelled) return;
+      setIntakeForms([]);
+      setExpandedIntakeIds(new Set());
+      setIntakesFetchError(null);
+      setIntakesLoading(true);
+      void (async () => {
+        try {
+          const h = await authHeaders();
+          const res = await fetch(
+            `${API_BASE}/intake/patient/${encodeURIComponent(patientId)}`,
+            { headers: h },
           );
-          setIntakeForms([]);
-          return;
+          if (cancelled) return;
+          if (!res.ok) {
+            const t = await res.text().catch(() => "");
+            setIntakesFetchError(
+              res.status === 401 || res.status === 403
+                ? "Sign in required to load intake history."
+                : t.trim() || `Could not load intakes (${res.status})`,
+            );
+            setIntakeForms([]);
+            return;
+          }
+          const json = (await res.json()) as { intakes?: unknown };
+          const list = Array.isArray(json.intakes)
+            ? (json.intakes as IntakeFormRow[])
+            : [];
+          setIntakeForms(list);
+          if (list.length > 0) {
+            const firstPid = String(list[0].id ?? "").trim();
+            const firstKey = firstPid || "row-0";
+            setExpandedIntakeIds(new Set([firstKey]));
+          } else {
+            setExpandedIntakeIds(new Set());
+          }
+        } catch {
+          if (!cancelled) {
+            setIntakesFetchError("Could not load intake history.");
+            setIntakeForms([]);
+          }
+        } finally {
+          if (!cancelled) setIntakesLoading(false);
         }
-        const json = (await res.json()) as { intakes?: unknown };
-        const list = Array.isArray(json.intakes)
-          ? (json.intakes as IntakeFormRow[])
-          : [];
-        setIntakeForms(list);
-        if (list.length > 0) {
-          const firstPid = String(list[0].id ?? "").trim();
-          const firstKey = firstPid || "row-0";
-          setExpandedIntakeIds(new Set([firstKey]));
-        } else {
-          setExpandedIntakeIds(new Set());
-        }
-      } catch {
-        if (!cancelled) {
-          setIntakesFetchError("Could not load intake history.");
-          setIntakeForms([]);
-        }
-      } finally {
-        if (!cancelled) setIntakesLoading(false);
-      }
-    })();
+      })();
+    });
     return () => {
       cancelled = true;
     };
@@ -765,13 +775,11 @@ export function PatientDetailView({
         return;
       }
       const data = (await res.json()) as Record<string, unknown>;
-      const {
-        appointments: _a,
-        billing_records: _b,
-        memberships: _m,
-        pi_cases: _p,
-        ...patientFields
-      } = data;
+      const patientFields = { ...data };
+      delete patientFields.appointments;
+      delete patientFields.billing_records;
+      delete patientFields.memberships;
+      delete patientFields.pi_cases;
       setPatient(patientFields as PatientRecord);
       setDraft({ ...(patientFields as PatientRecord) });
       await load(true);
@@ -807,13 +815,11 @@ export function PatientDetailView({
         return;
       }
       const data = (await res.json()) as Record<string, unknown>;
-      const {
-        appointments: _a,
-        billing_records: _b,
-        memberships: _m,
-        pi_cases: _p,
-        ...patientFields
-      } = data;
+      const patientFields = { ...data };
+      delete patientFields.appointments;
+      delete patientFields.billing_records;
+      delete patientFields.memberships;
+      delete patientFields.pi_cases;
       setPatient(patientFields as PatientRecord);
       setDraft((d) => (d ? { ...d, ...(patientFields as PatientRecord) } : d));
       setLegalDraft({
@@ -1795,6 +1801,8 @@ export function PatientDetailView({
           </div>
         </div>
       ) : null}
+
+      <DmeSection clinicId={clinicId} patientId={patientId} />
     </div>
   );
 }

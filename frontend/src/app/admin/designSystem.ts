@@ -128,6 +128,16 @@ export function piCaseStatusBadgeClass(status: string): string {
   return `${BADGE} bg-gray-100 text-gray-500`;
 }
 
+/** DME / bracing billing workflow */
+export function dmeBillingStatusBadgeClass(status: string): string {
+  const s = status.toLowerCase().replace(/\s+/g, "_");
+  if (s === "unbilled") return `${BADGE} bg-gray-100 text-gray-600`;
+  if (s === "billed") return `${BADGE} bg-blue-50 text-blue-700`;
+  if (s === "paid") return `${BADGE} bg-green-50 text-green-700`;
+  if (s === "written_off") return `${BADGE} bg-red-50 text-red-600`;
+  return `${BADGE} bg-gray-100 text-gray-500`;
+}
+
 /** Billing type (cash / insurance / mixed) */
 export function billingTypePillClass(t: string): string {
   const s = t.toLowerCase();
