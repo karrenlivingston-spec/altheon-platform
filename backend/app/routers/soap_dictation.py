@@ -44,18 +44,31 @@ def _parse_soap_sections(raw: str) -> dict[str, str]:
     if fence:
         text = fence.group(1).strip()
 
+    # Allow markdown: e.g. "### Subjective:", "**Subjective:**" (colon may be inside bold).
     pattern = re.compile(
-        r"(?im)^\s*(Subjective|Objective|Assessment|Plan)\s*:\s*",
+        r"(?im)^\s*"
+        r"(?:#{1,6}\s+)?"
+        r"(?:\*\*)?"
+        r"(Subjective|Objective|Assessment|Plan)"
+        r"\s*:"
+        r"(?:\*\*)?"
+        r"\s*",
     )
     matches = list(pattern.finditer(text))
+    if not matches:
+        # Headings like "### Subjective" with body on following lines (no colon on header line).
+        heading_pat = re.compile(
+            r"(?im)^\s*(?:#{1,6}\s+)(?:\*\*)?(Subjective|Objective|Assessment|Plan)(?:\*\*)?\s*$",
+        )
+        matches = list(heading_pat.finditer(text))
     if not matches:
         return out
 
     for i, m in enumerate(matches):
         label = m.group(1).strip().lower()
         start = m.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        chunk = text[start:end].strip()
+        chunk = text[start : matches[i + 1].start() if i + 1 < len(matches) else len(text)]
+        chunk = chunk.strip()
         if label in out:
             out[label] = chunk
     return out
