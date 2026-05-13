@@ -780,6 +780,22 @@ def request_correction(note_id: str, body: RequestCorrectionBody):
     return urows[0]
 
 
+def _author_id_for_clinical_notes_filter(clinic_id: str, author_id: str) -> str:
+    """clinical_notes.author_id stores clinic_users.id; accept Supabase auth user_id too."""
+    key = author_id.strip()
+    cid = clinic_id.strip()
+    if not key or not cid:
+        return key
+    try:
+        return _resolve_clinic_users_pk(
+            key,
+            cid,
+            not_found_detail="Author not found in clinic users",
+        )
+    except HTTPException:
+        return key
+
+
 @router.get("/clinics/{clinic_id}/clinical-notes")
 def list_clinic_clinical_notes(
     clinic_id: str,
@@ -795,7 +811,8 @@ def list_clinic_clinical_notes(
         if status is not None and str(status).strip():
             q = q.eq("status", str(status).strip())
         if author_id is not None and str(author_id).strip():
-            q = q.eq("author_id", str(author_id).strip())
+            resolved_author = _author_id_for_clinical_notes_filter(cid, str(author_id).strip())
+            q = q.eq("author_id", resolved_author)
         resp = q.order("created_at", desc=True).execute()
         _handle_supabase_error(resp)
     except HTTPException:

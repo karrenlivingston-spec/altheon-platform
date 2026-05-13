@@ -130,7 +130,7 @@ def me(authorization: Optional[str] = Header(default=None, alias="Authorization"
         cu_resp = (
             supabase.table("clinic_users")
             .select(
-                "user_id,role,clinic_id,"
+                "id,user_id,role,clinic_id,"
                 "clinics:clinic_id(id,slug,brand_name,logo_url,primary_color,agent_name)"
             )
             .eq("user_id", user_id)
@@ -155,8 +155,10 @@ def me(authorization: Optional[str] = Header(default=None, alias="Authorization"
     if not isinstance(clinic_raw, dict):
         raise HTTPException(status_code=500, detail="Clinic join returned no clinic data")
 
+    cu_pk = str(row.get("id") or "").strip()
     out: dict[str, Any] = {
         "user_id": user_id,
+        "clinic_user_id": cu_pk,
         "role": role,
         "clinic": _clinic_shape(clinic_raw),
     }
