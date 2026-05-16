@@ -29,6 +29,7 @@ import {
   painDotClass,
 } from "@/lib/intakePrint";
 import { supabase } from "@/lib/supabase";
+import { PatientGroupsSection } from "@/components/admin/PatientGroupsSection";
 import { DmeSection } from "@/components/dme/DmeSection";
 
 const API_BASE = "https://altheon-platform.onrender.com";
@@ -1803,6 +1804,7 @@ export function PatientDetailView({
       ) : null}
 
       <DmeSection clinicId={clinicId} patientId={patientId} />
+      <PatientGroupsSection clinicId={clinicId} patientId={patientId} />
     </div>
   );
 }

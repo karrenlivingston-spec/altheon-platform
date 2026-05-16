@@ -1236,7 +1236,7 @@ export default function AdminPiCasesPage() {
                       <th className="px-4 py-3 text-xs font-medium uppercase tracking-wider text-gray-500">
                         Notes
                       </th>
-                      <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
+                      <th className="whitespace-nowrap px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">
                         Actions
                       </th>
                     </tr>
@@ -1313,7 +1313,7 @@ export default function AdminPiCasesPage() {
                                 {dash(row.notes)}
                               </span>
                             </td>
-                            <td className={`${DS_TD_PRIMARY} text-right`}>
+                            <td className={`${DS_TD_PRIMARY} whitespace-nowrap text-right`}>
                               <button
                                 type="button"
                                 onClick={() => openEditReferral(row)}

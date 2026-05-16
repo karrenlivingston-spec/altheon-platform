@@ -10,6 +10,7 @@ import {
   ChevronDown,
   Scale,
   Users,
+  Layers,
   CreditCard,
   Receipt,
   Briefcase,
@@ -317,6 +318,16 @@ function AdminAuthenticatedShellInner({
               <span className="flex items-center gap-3">
                 <Users className={navIconClass("/admin/patients")} aria-hidden />
                 Patients
+              </span>
+            </Link>
+            <Link
+              href="/admin/groups"
+              className={navLinkClass("/admin/groups")}
+              onClick={() => setSidebarOpen(false)}
+            >
+              <span className="flex items-center gap-3">
+                <Layers className={navIconClass("/admin/groups")} aria-hidden />
+                Groups
               </span>
             </Link>
             <div className="mt-8" aria-hidden />
