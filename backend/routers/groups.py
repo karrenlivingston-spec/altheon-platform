@@ -193,7 +193,7 @@ def list_group_members(group_id: str):
     _fetch_group(group_id)
     try:
         resp = (
-            supabase.table("group_memberships")
+            supabase.table("patient_group_memberships")
             .select("id, patient_id, created_at, patients(first_name, last_name)")
             .eq("group_id", group_id)
             .order("created_at")
@@ -222,7 +222,7 @@ def add_group_member(group_id: str, body: AddMemberBody):
 
     try:
         existing = (
-            supabase.table("group_memberships")
+            supabase.table("patient_group_memberships")
             .select("id, patient_id, group_id, clinic_id, created_at")
             .eq("group_id", group_id)
             .eq("patient_id", patient_id)
@@ -245,7 +245,7 @@ def add_group_member(group_id: str, body: AddMemberBody):
         "clinic_id": clinic_id,
     }
     try:
-        ins = supabase.table("group_memberships").insert(row).execute()
+        ins = supabase.table("patient_group_memberships").insert(row).execute()
         _handle_supabase_error(ins)
     except HTTPException:
         raise
@@ -253,7 +253,7 @@ def add_group_member(group_id: str, body: AddMemberBody):
         err = str(exc).lower()
         if "duplicate" in err or "unique" in err or "23505" in err:
             dup = (
-                supabase.table("group_memberships")
+                supabase.table("patient_group_memberships")
                 .select("id, patient_id, group_id, clinic_id, created_at")
                 .eq("group_id", group_id)
                 .eq("patient_id", patient_id)
@@ -276,7 +276,7 @@ def add_group_member(group_id: str, body: AddMemberBody):
 def remove_group_member(group_id: str, patient_id: str):
     try:
         dele = (
-            supabase.table("group_memberships")
+            supabase.table("patient_group_memberships")
             .delete()
             .eq("group_id", group_id)
             .eq("patient_id", patient_id)
@@ -302,7 +302,7 @@ def list_patient_groups(
 ):
     try:
         resp = (
-            supabase.table("group_memberships")
+            supabase.table("patient_group_memberships")
             .select("groups(id, name, color, priority_flag)")
             .eq("patient_id", patient_id)
             .eq("clinic_id", clinic_id)
