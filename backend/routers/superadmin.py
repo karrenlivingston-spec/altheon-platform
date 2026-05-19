@@ -165,6 +165,7 @@ def superadmin_onboard(body: SuperadminOnboardBody):
     slug = body.clinic.slug
     clinic_id: Optional[str] = None
     admin_user_id: Optional[str] = None
+    clinic_user_id: Optional[str] = None
     location_id = ""
     clinician_ids: list[str] = []
     treatment_type_ids: list[str] = []
@@ -301,6 +302,24 @@ def superadmin_onboard(body: SuperadminOnboardBody):
             clinic_id,
         )
 
+        cui = (
+            supabase.table("clinic_users")
+            .insert(
+                {
+                    "user_id": admin_user_id,
+                    "clinic_id": clinic_id,
+                    "role": "clinic_admin",
+                }
+            )
+            .execute()
+        )
+        _handle_supabase_error(cui)
+        if not cui.data:
+            raise HTTPException(
+                status_code=500, detail="clinic_users insert returned no row"
+            )
+        clinic_user_id = str(cui.data[0]["id"])
+
     except HTTPException:
         _rollback(clinic_id, admin_user_id)
         raise
@@ -318,5 +337,6 @@ def superadmin_onboard(body: SuperadminOnboardBody):
         "clinician_ids": clinician_ids,
         "treatment_type_ids": treatment_type_ids,
         "admin_user_id": admin_user_id,
+        "clinic_user_id": clinic_user_id,
         "slug": slug,
     }
