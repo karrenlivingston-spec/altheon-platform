@@ -33,6 +33,7 @@ from app.routers import (
 )
 from app.routes.legal import router as legal_router
 from routers import groups as groups_router
+from routers import superadmin as superadmin_router
 
 load_dotenv()
 
@@ -74,6 +75,7 @@ app.include_router(soap_dictation_router.router, prefix="")
 app.include_router(dme_router.router, prefix="", tags=["dme"])
 app.include_router(groups_router.router, prefix="/groups", tags=["groups"])
 app.include_router(groups_router.patients_groups_router, tags=["groups"])
+app.include_router(superadmin_router.router, prefix="/superadmin", tags=["superadmin"])
 
 
 @app.get("/")
