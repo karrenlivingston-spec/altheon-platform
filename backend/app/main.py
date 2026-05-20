@@ -1581,11 +1581,20 @@ def ask_altheon(body: dict = Body(...)):
 
 @app.get("/voice-agent/status")
 def voice_agent_status(
-    _clinic_id: Optional[str] = Query(None, alias="clinic_id"),
+    clinic_id: Optional[str] = Query(None, alias="clinic_id"),
 ):
-    agent_id = os.environ.get("ELEVENLABS_AGENT_ID")
+    result = (
+        supabase.table("clinics")
+        .select("elevenlabs_agent_id")
+        .eq("id", clinic_id)
+        .limit(1)
+        .execute()
+    )
+    agent_id = result.data[0].get("elevenlabs_agent_id") if result.data else None
+    if not clinic_id or not agent_id:
+        return {"status": "not_configured", "agent_name": "Not configured"}
     api_key = os.environ.get("ELEVENLABS_API_KEY")
-    if not agent_id or not api_key:
+    if not api_key:
         return {"status": "offline", "agent_name": _VOICE_AGENT_DISPLAY_NAME}
     safe_id = urllib.parse.quote(agent_id, safe="")
     url = f"{_VOICE_UPSTREAM_BASE}/agents/{safe_id}"
@@ -1597,12 +1606,21 @@ def voice_agent_status(
 
 @app.get("/voice-agent/conversations")
 def voice_agent_conversations(
-    _clinic_id: Optional[str] = Query(None, alias="clinic_id"),
+    clinic_id: Optional[str] = Query(None, alias="clinic_id"),
     page_size: int = Query(20, ge=1, le=50),
 ):
-    agent_id = os.environ.get("ELEVENLABS_AGENT_ID")
+    result = (
+        supabase.table("clinics")
+        .select("elevenlabs_agent_id")
+        .eq("id", clinic_id)
+        .limit(1)
+        .execute()
+    )
+    agent_id = result.data[0].get("elevenlabs_agent_id") if result.data else None
+    if not clinic_id or not agent_id:
+        return {"conversations": []}
     api_key = os.environ.get("ELEVENLABS_API_KEY")
-    if not agent_id or not api_key:
+    if not api_key:
         return {"conversations": []}
     qs = urllib.parse.urlencode(
         {"agent_id": agent_id, "page_size": str(page_size)},
