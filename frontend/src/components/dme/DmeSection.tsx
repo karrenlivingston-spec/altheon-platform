@@ -109,6 +109,10 @@ function signatureImageSrc(data: string): string {
   return `data:image/png;base64,${s}`;
 }
 
+function hasStoredSignature(data: string | null | undefined): boolean {
+  return Boolean((data ?? "").trim());
+}
+
 function canvasHasInk(ctx: CanvasRenderingContext2D, w: number, h: number): boolean {
   const pixels = ctx.getImageData(0, 0, w, h).data;
   for (let i = 3; i < pixels.length; i += 4) {
@@ -134,13 +138,16 @@ function DmeSignatureCapture({
   const drawingRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [confirmMsg, setConfirmMsg] = useState<string | null>(null);
-  const existing = (signatureData ?? "").trim();
-  const [showPad, setShowPad] = useState(() => !existing);
+  const [reSigning, setReSigning] = useState(false);
+
+  const hasSignature = hasStoredSignature(signatureData);
+  const savedSignature = (signatureData ?? "").trim();
+  const showPad = !hasSignature || reSigning;
 
   useEffect(() => {
-    setShowPad(!((signatureData ?? "").trim()));
+    setReSigning(false);
     setConfirmMsg(null);
-  }, [recordId, signatureData]);
+  }, [recordId]);
 
   useEffect(() => {
     if (!showPad) return;
@@ -240,6 +247,7 @@ function DmeSignatureCapture({
       }
       const updated = (await res.json()) as DmeRecord;
       setConfirmMsg("Signature saved successfully.");
+      setReSigning(false);
       handleClear();
       onSaved(updated);
     } catch {
@@ -252,21 +260,21 @@ function DmeSignatureCapture({
   return (
     <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50/50 p-4">
       <p className={LABEL_CLASS}>Patient Signature</p>
-      {existing ? (
+      {hasSignature ? (
         <div className="mt-2">
           <p className="mb-2 text-xs text-gray-500">Saved signature</p>
           <img
-            src={signatureImageSrc(existing)}
+            src={signatureImageSrc(savedSignature)}
             alt="Saved patient signature"
             className="max-h-32 rounded border border-gray-200 bg-white object-contain"
           />
         </div>
       ) : null}
-      {existing && !showPad ? (
+      {hasSignature && !reSigning ? (
         <button
           type="button"
           onClick={() => {
-            setShowPad(true);
+            setReSigning(true);
             setConfirmMsg(null);
             onError("");
           }}
@@ -277,6 +285,9 @@ function DmeSignatureCapture({
       ) : null}
       {showPad ? (
         <>
+          <p className="mt-3 text-sm font-medium text-gray-800">
+            Re-sign / Update Signature
+          </p>
           <canvas
             ref={canvasRef}
             className="mt-3 h-40 w-full touch-none rounded-lg border border-gray-300 bg-white cursor-crosshair"
@@ -405,7 +416,8 @@ export function DmeSection({ clinicId, patientId }: DmeSectionProps) {
 
   function openDetail(row: DmeRecord) {
     setDetailError(null);
-    setDetailRecord(row);
+    const latest = rows.find((r) => r.id === row.id) ?? row;
+    setDetailRecord(latest);
   }
 
   function closeDetail() {
@@ -768,6 +780,7 @@ export function DmeSection({ clinicId, patientId }: DmeSectionProps) {
               </p>
             ) : null}
             <DmeSignatureCapture
+              key={detailRecord.id}
               recordId={detailRecord.id}
               signatureData={detailRecord.signature_data}
               onSaved={applyDetailUpdate}
