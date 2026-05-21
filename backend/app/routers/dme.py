@@ -59,6 +59,10 @@ class CreateDmeBody(BaseModel):
     notes: Optional[str] = None
 
 
+class SignatureDmeBody(BaseModel):
+    signature_data: str
+
+
 class PatchDmeBody(BaseModel):
     item_name: Optional[str] = None
     l_code: Optional[str] = None
@@ -183,6 +187,34 @@ def patch_dme_record(record_id: str, body: PatchDmeBody):
     if not urows:
         raise HTTPException(status_code=404, detail="DME record not found")
     return urows[0]
+
+
+@router.post("/dme/{record_id}/signature")
+def post_dme_signature(record_id: str, body: SignatureDmeBody):
+    signature_data = body.signature_data.strip()
+    if not signature_data:
+        raise HTTPException(status_code=400, detail="signature_data is required")
+    try:
+        upd = (
+            supabase.table("dme_records")
+            .update(
+                {
+                    "signature_data": signature_data,
+                    "signed_at": _now_iso(),
+                }
+            )
+            .eq("id", record_id)
+            .execute()
+        )
+        _handle_supabase_error(upd)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    rows = upd.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="DME record not found")
+    return rows[0]
 
 
 @router.delete("/dme/{record_id}")

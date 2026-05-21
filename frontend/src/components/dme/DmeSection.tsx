@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   DS_INPUT,
@@ -32,6 +32,8 @@ export type DmeRecord = {
   billing_status?: string | null;
   pi_case_id?: string | null;
   patient_signature_url?: string | null;
+  signature_data?: string | null;
+  signed_at?: string | null;
   notes?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -101,6 +103,207 @@ function displayBillingLabel(status: string): string {
   return s.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function signatureImageSrc(data: string): string {
+  const s = data.trim();
+  if (s.startsWith("data:")) return s;
+  return `data:image/png;base64,${s}`;
+}
+
+function canvasHasInk(ctx: CanvasRenderingContext2D, w: number, h: number): boolean {
+  const pixels = ctx.getImageData(0, 0, w, h).data;
+  for (let i = 3; i < pixels.length; i += 4) {
+    if (pixels[i] !== 0) return true;
+  }
+  return false;
+}
+
+type DmeSignatureCaptureProps = {
+  recordId: string;
+  signatureData: string | null | undefined;
+  onSaved: (updated: DmeRecord) => void;
+  onError: (message: string) => void;
+};
+
+function DmeSignatureCapture({
+  recordId,
+  signatureData,
+  onSaved,
+  onError,
+}: DmeSignatureCaptureProps) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawingRef = useRef(false);
+  const [saving, setSaving] = useState(false);
+  const [confirmMsg, setConfirmMsg] = useState<string | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.floor(rect.width * dpr);
+    canvas.height = Math.floor(rect.height * dpr);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.strokeStyle = "#111827";
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+  }, []);
+
+  function pointerPos(
+    clientX: number,
+    clientY: number,
+    canvas: HTMLCanvasElement,
+  ): { x: number; y: number } {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top,
+    };
+  }
+
+  function startDraw(clientX: number, clientY: number) {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    drawingRef.current = true;
+    const { x, y } = pointerPos(clientX, clientY, canvas);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+  }
+
+  function drawTo(clientX: number, clientY: number) {
+    if (!drawingRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const { x, y } = pointerPos(clientX, clientY, canvas);
+    ctx.lineTo(x, y);
+    ctx.stroke();
+  }
+
+  function endDraw() {
+    drawingRef.current = false;
+  }
+
+  function handleClear() {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    const dpr = window.devicePixelRatio || 1;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.strokeStyle = "#111827";
+    ctx.lineWidth = 2;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    setConfirmMsg(null);
+  }
+
+  async function handleSaveSignature() {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+    if (!canvasHasInk(ctx, canvas.width, canvas.height)) {
+      onError("Draw a signature before saving.");
+      return;
+    }
+    const png = canvas.toDataURL("image/png");
+    setSaving(true);
+    setConfirmMsg(null);
+    onError("");
+    try {
+      const res = await fetch(
+        `${API_BASE}/dme/${encodeURIComponent(recordId)}/signature`,
+        {
+          method: "POST",
+          headers: await authHeaders(),
+          body: JSON.stringify({ signature_data: png }),
+        },
+      );
+      if (!res.ok) {
+        onError(
+          (await res.text().catch(() => "")).trim() ||
+            `Could not save signature (${res.status})`,
+        );
+        return;
+      }
+      const updated = (await res.json()) as DmeRecord;
+      setConfirmMsg("Signature saved successfully.");
+      handleClear();
+      onSaved(updated);
+    } catch {
+      onError("Could not save signature.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const existing = (signatureData ?? "").trim();
+
+  return (
+    <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50/50 p-4">
+      <p className={LABEL_CLASS}>Patient signature</p>
+      {existing ? (
+        <div className="mt-2">
+          <p className="mb-2 text-xs text-gray-500">Saved signature</p>
+          <img
+            src={signatureImageSrc(existing)}
+            alt="Saved patient signature"
+            className="max-h-32 rounded border border-gray-200 bg-white object-contain"
+          />
+        </div>
+      ) : null}
+      <canvas
+        ref={canvasRef}
+        className="mt-3 h-40 w-full touch-none rounded-lg border border-gray-300 bg-white cursor-crosshair"
+        aria-label="Signature pad"
+        onMouseDown={(e) => startDraw(e.clientX, e.clientY)}
+        onMouseMove={(e) => drawTo(e.clientX, e.clientY)}
+        onMouseUp={endDraw}
+        onMouseLeave={endDraw}
+        onTouchStart={(e) => {
+          e.preventDefault();
+          const t = e.touches[0];
+          if (t) startDraw(t.clientX, t.clientY);
+        }}
+        onTouchMove={(e) => {
+          e.preventDefault();
+          const t = e.touches[0];
+          if (t) drawTo(t.clientX, t.clientY);
+        }}
+        onTouchEnd={(e) => {
+          e.preventDefault();
+          endDraw();
+        }}
+      />
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={handleClear}
+          disabled={saving}
+          className={`${DS_SECONDARY_BTN} disabled:opacity-50`}
+        >
+          Clear
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleSaveSignature()}
+          disabled={saving}
+          className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
+        >
+          {saving ? "Saving…" : "Save Signature"}
+        </button>
+      </div>
+      {confirmMsg ? (
+        <p className="mt-3 text-sm font-medium text-green-700">{confirmMsg}</p>
+      ) : null}
+    </div>
+  );
+}
+
 export type DmeSectionProps = {
   clinicId: string;
   patientId: string;
@@ -121,6 +324,8 @@ export function DmeSection({ clinicId, patientId }: DmeSectionProps) {
   const [unitCost, setUnitCost] = useState("");
   const [billingStatus, setBillingStatus] = useState<BillingStatus>("unbilled");
   const [notes, setNotes] = useState("");
+  const [detailRecord, setDetailRecord] = useState<DmeRecord | null>(null);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (!clinicId.trim() || !patientId.trim()) {
@@ -175,8 +380,28 @@ export function DmeSection({ clinicId, patientId }: DmeSectionProps) {
     setModalOpen(true);
   }
 
+  function openDetail(row: DmeRecord) {
+    setDetailError(null);
+    setDetailRecord(row);
+  }
+
+  function closeDetail() {
+    setDetailRecord(null);
+    setDetailError(null);
+  }
+
+  function applyDetailUpdate(updated: DmeRecord) {
+    setRows((prev) =>
+      prev.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)),
+    );
+    setDetailRecord((prev) =>
+      prev?.id === updated.id ? { ...prev, ...updated } : prev,
+    );
+  }
+
   function openEdit(row: DmeRecord) {
     setError(null);
+    closeDetail();
     setEditing(row);
     setItemName((row.item_name ?? "").trim());
     setLCode((row.l_code ?? "").trim());
@@ -392,6 +617,17 @@ export function DmeSection({ clinicId, patientId }: DmeSectionProps) {
                         <div className="flex flex-wrap justify-end gap-1">
                           <button
                             type="button"
+                            onClick={() => openDetail(row)}
+                            className={`inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-3 text-sm font-medium ${
+                              detailRecord?.id === row.id
+                                ? "bg-green-50 text-[var(--color-primary,#16A34A)]"
+                                : "text-gray-700 hover:bg-gray-50"
+                            }`}
+                          >
+                            View
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => openEdit(row)}
                             className="inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg px-3 text-sm font-medium text-[var(--color-primary,#16A34A)] hover:bg-green-50"
                           >
@@ -414,6 +650,109 @@ export function DmeSection({ clinicId, patientId }: DmeSectionProps) {
           </table>
         </div>
       </div>
+
+      {detailRecord ? (
+        <div className={`${DS_TABLE_WRAP} mt-4`}>
+          <div className="flex items-start justify-between gap-3 border-b border-gray-100 bg-gray-50 px-4 py-3 sm:px-6">
+            <div>
+              <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-900">
+                DME record detail
+              </h3>
+              <p className="mt-1 text-sm font-medium text-gray-800">
+                {(detailRecord.item_name ?? "").trim() || "—"}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={closeDetail}
+              className="text-sm text-gray-500 hover:text-gray-800"
+            >
+              Close
+            </button>
+          </div>
+          <div className="px-4 py-4 sm:px-6">
+            <dl className="grid gap-2 text-sm sm:grid-cols-2">
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-gray-500">
+                  L-Code
+                </dt>
+                <dd className="text-gray-900">
+                  {(detailRecord.l_code ?? "").trim() || "—"}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-gray-500">
+                  Date issued
+                </dt>
+                <dd className="text-gray-900">
+                  {formatIssueDate(detailRecord.date_issued ?? undefined)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-gray-500">
+                  Quantity
+                </dt>
+                <dd className="text-gray-900">{detailRecord.quantity ?? 1}</dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-gray-500">
+                  Unit cost
+                </dt>
+                <dd className="text-gray-900">
+                  {formatUnitCost(detailRecord.unit_cost)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-xs uppercase tracking-wide text-gray-500">
+                  Billing status
+                </dt>
+                <dd>
+                  <span
+                    className={dmeBillingStatusBadgeClass(
+                      normalizeBillingStatus(detailRecord.billing_status),
+                    )}
+                  >
+                    {displayBillingLabel(
+                      normalizeBillingStatus(detailRecord.billing_status),
+                    )}
+                  </span>
+                </dd>
+              </div>
+              {detailRecord.signed_at ? (
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-gray-500">
+                    Signed at
+                  </dt>
+                  <dd className="text-gray-900">
+                    {formatIssueDate(String(detailRecord.signed_at).slice(0, 10))}
+                  </dd>
+                </div>
+              ) : null}
+              {(detailRecord.notes ?? "").trim() ? (
+                <div className="sm:col-span-2">
+                  <dt className="text-xs uppercase tracking-wide text-gray-500">
+                    Notes
+                  </dt>
+                  <dd className="whitespace-pre-wrap text-gray-900">
+                    {detailRecord.notes}
+                  </dd>
+                </div>
+              ) : null}
+            </dl>
+            {detailError ? (
+              <p className="mt-3 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                {detailError}
+              </p>
+            ) : null}
+            <DmeSignatureCapture
+              recordId={detailRecord.id}
+              signatureData={detailRecord.signature_data}
+              onSaved={applyDetailUpdate}
+              onError={(msg) => setDetailError(msg || null)}
+            />
+          </div>
+        </div>
+      ) : null}
 
       {modalOpen ? (
         <div
