@@ -286,7 +286,7 @@ function DmeSignatureCapture({
       {showPad ? (
         <>
           <p className="mt-3 text-sm font-medium text-gray-800">
-            Re-sign / Update Signature
+            Clinician Signature
           </p>
           <canvas
             ref={canvasRef}
