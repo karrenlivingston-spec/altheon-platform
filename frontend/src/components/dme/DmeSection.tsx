@@ -134,8 +134,16 @@ function DmeSignatureCapture({
   const drawingRef = useRef(false);
   const [saving, setSaving] = useState(false);
   const [confirmMsg, setConfirmMsg] = useState<string | null>(null);
+  const existing = (signatureData ?? "").trim();
+  const [showPad, setShowPad] = useState(() => !existing);
 
   useEffect(() => {
+    setShowPad(!((signatureData ?? "").trim()));
+    setConfirmMsg(null);
+  }, [recordId, signatureData]);
+
+  useEffect(() => {
+    if (!showPad) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -149,7 +157,7 @@ function DmeSignatureCapture({
     ctx.lineWidth = 2;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-  }, []);
+  }, [showPad]);
 
   function pointerPos(
     clientX: number,
@@ -241,11 +249,9 @@ function DmeSignatureCapture({
     }
   }
 
-  const existing = (signatureData ?? "").trim();
-
   return (
     <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50/50 p-4">
-      <p className={LABEL_CLASS}>Patient signature</p>
+      <p className={LABEL_CLASS}>Patient Signature</p>
       {existing ? (
         <div className="mt-2">
           <p className="mb-2 text-xs text-gray-500">Saved signature</p>
@@ -256,47 +262,64 @@ function DmeSignatureCapture({
           />
         </div>
       ) : null}
-      <canvas
-        ref={canvasRef}
-        className="mt-3 h-40 w-full touch-none rounded-lg border border-gray-300 bg-white cursor-crosshair"
-        aria-label="Signature pad"
-        onMouseDown={(e) => startDraw(e.clientX, e.clientY)}
-        onMouseMove={(e) => drawTo(e.clientX, e.clientY)}
-        onMouseUp={endDraw}
-        onMouseLeave={endDraw}
-        onTouchStart={(e) => {
-          e.preventDefault();
-          const t = e.touches[0];
-          if (t) startDraw(t.clientX, t.clientY);
-        }}
-        onTouchMove={(e) => {
-          e.preventDefault();
-          const t = e.touches[0];
-          if (t) drawTo(t.clientX, t.clientY);
-        }}
-        onTouchEnd={(e) => {
-          e.preventDefault();
-          endDraw();
-        }}
-      />
-      <div className="mt-3 flex flex-wrap gap-2">
+      {existing && !showPad ? (
         <button
           type="button"
-          onClick={handleClear}
-          disabled={saving}
-          className={`${DS_SECONDARY_BTN} disabled:opacity-50`}
+          onClick={() => {
+            setShowPad(true);
+            setConfirmMsg(null);
+            onError("");
+          }}
+          className={`${DS_SECONDARY_BTN} mt-3`}
         >
-          Clear
+          Re-sign
         </button>
-        <button
-          type="button"
-          onClick={() => void handleSaveSignature()}
-          disabled={saving}
-          className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
-        >
-          {saving ? "Saving…" : "Save Signature"}
-        </button>
-      </div>
+      ) : null}
+      {showPad ? (
+        <>
+          <canvas
+            ref={canvasRef}
+            className="mt-3 h-40 w-full touch-none rounded-lg border border-gray-300 bg-white cursor-crosshair"
+            aria-label="Signature pad"
+            onMouseDown={(e) => startDraw(e.clientX, e.clientY)}
+            onMouseMove={(e) => drawTo(e.clientX, e.clientY)}
+            onMouseUp={endDraw}
+            onMouseLeave={endDraw}
+            onTouchStart={(e) => {
+              e.preventDefault();
+              const t = e.touches[0];
+              if (t) startDraw(t.clientX, t.clientY);
+            }}
+            onTouchMove={(e) => {
+              e.preventDefault();
+              const t = e.touches[0];
+              if (t) drawTo(t.clientX, t.clientY);
+            }}
+            onTouchEnd={(e) => {
+              e.preventDefault();
+              endDraw();
+            }}
+          />
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={handleClear}
+              disabled={saving}
+              className={`${DS_SECONDARY_BTN} disabled:opacity-50`}
+            >
+              Clear
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleSaveSignature()}
+              disabled={saving}
+              className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
+            >
+              {saving ? "Saving…" : "Save Signature"}
+            </button>
+          </div>
+        </>
+      ) : null}
       {confirmMsg ? (
         <p className="mt-3 text-sm font-medium text-green-700">{confirmMsg}</p>
       ) : null}
