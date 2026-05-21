@@ -217,6 +217,34 @@ def post_dme_signature(record_id: str, body: SignatureDmeBody):
     return rows[0]
 
 
+@router.post("/dme/{record_id}/clinician-signature")
+def post_dme_clinician_signature(record_id: str, body: SignatureDmeBody):
+    signature_data = body.signature_data.strip()
+    if not signature_data:
+        raise HTTPException(status_code=400, detail="signature_data is required")
+    try:
+        upd = (
+            supabase.table("dme_records")
+            .update(
+                {
+                    "clinician_signature_data": signature_data,
+                    "clinician_signed_at": _now_iso(),
+                }
+            )
+            .eq("id", record_id)
+            .execute()
+        )
+        _handle_supabase_error(upd)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    rows = upd.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="DME record not found")
+    return rows[0]
+
+
 @router.delete("/dme/{record_id}")
 def delete_dme_record(record_id: str):
     try:

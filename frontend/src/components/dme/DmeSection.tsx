@@ -34,6 +34,8 @@ export type DmeRecord = {
   patient_signature_url?: string | null;
   signature_data?: string | null;
   signed_at?: string | null;
+  clinician_signature_data?: string | null;
+  clinician_signed_at?: string | null;
   notes?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
@@ -121,7 +123,35 @@ function canvasHasInk(ctx: CanvasRenderingContext2D, w: number, h: number): bool
   return false;
 }
 
+type SignatureVariant = "patient" | "clinician";
+
+const SIGNATURE_VARIANT_CONFIG: Record<
+  SignatureVariant,
+  {
+    sectionTitle: string;
+    padLabel: string;
+    savePath: (recordId: string) => string;
+    savedImageAlt: string;
+  }
+> = {
+  patient: {
+    sectionTitle: "Patient Signature",
+    padLabel: "Patient Signature",
+    savePath: (recordId) =>
+      `${API_BASE}/dme/${encodeURIComponent(recordId)}/signature`,
+    savedImageAlt: "Saved patient signature",
+  },
+  clinician: {
+    sectionTitle: "Clinician Signature",
+    padLabel: "Clinician Signature",
+    savePath: (recordId) =>
+      `${API_BASE}/dme/${encodeURIComponent(recordId)}/clinician-signature`,
+    savedImageAlt: "Saved clinician signature",
+  },
+};
+
 type DmeSignatureCaptureProps = {
+  variant: SignatureVariant;
   recordId: string;
   signatureData: string | null | undefined;
   onSaved: (updated: DmeRecord) => void;
@@ -129,11 +159,13 @@ type DmeSignatureCaptureProps = {
 };
 
 function DmeSignatureCapture({
+  variant,
   recordId,
   signatureData,
   onSaved,
   onError,
 }: DmeSignatureCaptureProps) {
+  const config = SIGNATURE_VARIANT_CONFIG[variant];
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const drawingRef = useRef(false);
   const [saving, setSaving] = useState(false);
@@ -230,14 +262,11 @@ function DmeSignatureCapture({
     setConfirmMsg(null);
     onError("");
     try {
-      const res = await fetch(
-        `${API_BASE}/dme/${encodeURIComponent(recordId)}/signature`,
-        {
-          method: "POST",
-          headers: await authHeaders(),
-          body: JSON.stringify({ signature_data: png }),
-        },
-      );
+      const res = await fetch(config.savePath(recordId), {
+        method: "POST",
+        headers: await authHeaders(),
+        body: JSON.stringify({ signature_data: png }),
+      });
       if (!res.ok) {
         onError(
           (await res.text().catch(() => "")).trim() ||
@@ -259,13 +288,13 @@ function DmeSignatureCapture({
 
   return (
     <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50/50 p-4">
-      <p className={LABEL_CLASS}>Patient Signature</p>
+      <p className={LABEL_CLASS}>{config.sectionTitle}</p>
       {hasSignature ? (
         <div className="mt-2">
           <p className="mb-2 text-xs text-gray-500">Saved signature</p>
           <img
             src={signatureImageSrc(savedSignature)}
-            alt="Saved patient signature"
+            alt={config.savedImageAlt}
             className="max-h-32 rounded border border-gray-200 bg-white object-contain"
           />
         </div>
@@ -286,12 +315,12 @@ function DmeSignatureCapture({
       {showPad ? (
         <>
           <p className="mt-3 text-sm font-medium text-gray-800">
-            Clinician Signature
+            {config.padLabel}
           </p>
           <canvas
             ref={canvasRef}
             className="mt-3 h-40 w-full touch-none rounded-lg border border-gray-300 bg-white cursor-crosshair"
-            aria-label="Signature pad"
+            aria-label={`${config.sectionTitle} pad`}
             onMouseDown={(e) => startDraw(e.clientX, e.clientY)}
             onMouseMove={(e) => drawTo(e.clientX, e.clientY)}
             onMouseUp={endDraw}
@@ -756,10 +785,22 @@ export function DmeSection({ clinicId, patientId }: DmeSectionProps) {
               {detailRecord.signed_at ? (
                 <div>
                   <dt className="text-xs uppercase tracking-wide text-gray-500">
-                    Signed at
+                    Patient signed
                   </dt>
                   <dd className="text-gray-900">
                     {formatIssueDate(String(detailRecord.signed_at).slice(0, 10))}
+                  </dd>
+                </div>
+              ) : null}
+              {detailRecord.clinician_signed_at ? (
+                <div>
+                  <dt className="text-xs uppercase tracking-wide text-gray-500">
+                    Clinician signed
+                  </dt>
+                  <dd className="text-gray-900">
+                    {formatIssueDate(
+                      String(detailRecord.clinician_signed_at).slice(0, 10),
+                    )}
                   </dd>
                 </div>
               ) : null}
@@ -780,9 +821,18 @@ export function DmeSection({ clinicId, patientId }: DmeSectionProps) {
               </p>
             ) : null}
             <DmeSignatureCapture
-              key={detailRecord.id}
+              key={`${detailRecord.id}-patient`}
+              variant="patient"
               recordId={detailRecord.id}
               signatureData={detailRecord.signature_data}
+              onSaved={applyDetailUpdate}
+              onError={(msg) => setDetailError(msg || null)}
+            />
+            <DmeSignatureCapture
+              key={`${detailRecord.id}-clinician`}
+              variant="clinician"
+              recordId={detailRecord.id}
+              signatureData={detailRecord.clinician_signature_data}
               onSaved={applyDetailUpdate}
               onError={(msg) => setDetailError(msg || null)}
             />
