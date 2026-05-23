@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 STEDI_SUBMIT_URL = (
     "https://healthcare.us.stedi.com/2024-04-01"
-    "/change/medicalnetwork/professionalclaims/v3"
+    "/change/medicalnetwork/professionalclaims/v3/submission"
 )
 STEDI_STATUS_URL = (
     "https://healthcare.us.stedi.com/2024-04-01"
