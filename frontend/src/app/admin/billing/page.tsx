@@ -1,12 +1,12 @@
 "use client";
 
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useClinic } from "@/app/admin/ClinicContext";
 import {
-  billingStatusBadgeClass,
-  billingTypePillClass,
+  claimDaysRemainingClass,
+  claimStatusBadgeClass,
   DS_CARD,
-  DS_FILTER_BAR,
   DS_INPUT,
   DS_PAGE_ROOT,
   DS_PAGE_SUBTITLE,
@@ -19,8 +19,7 @@ import {
   DS_TH,
   DS_TR,
 } from "@/app/admin/designSystem";
-
-import { useClinic } from "@/app/admin/ClinicContext";
+import { supabase } from "@/lib/supabase";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -30,175 +29,201 @@ type PatientRow = {
   last_name?: string;
 };
 
-type BillingRecordRow = {
+type ClaimRow = {
   id: string;
   clinic_id?: string;
   patient_id: string;
-  date_of_service?: string;
-  billing_type?: string;
-  status?: string;
-  total_billed_cents?: number | null;
-  total_paid_cents?: number | null;
-  amount_paid_cents?: number | null;
-  amount_remaining_cents?: number | null;
+  clinician_id?: string;
+  appointment_id?: string;
+  first_treatment_date?: string | null;
+  payer_name?: string | null;
+  payer_id?: string | null;
+  policy_number?: string | null;
+  member_id?: string | null;
+  diagnosis_codes?: string[] | null;
+  cpt_codes?: string[] | null;
+  total_amount?: number | null;
+  filing_deadline?: string | null;
+  days_remaining?: number | null;
+  status?: string | null;
+  notes?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
 };
 
-type BillingPaymentRow = {
+type AuditLogEntry = {
   id: string;
-  billing_record_id?: string;
-  amount_cents: number;
-  payment_date?: string;
-  payment_method?: string | null;
-  note?: string | null;
-  created_at?: string;
+  claim_id?: string;
+  action: string;
+  old_status?: string | null;
+  new_status?: string | null;
+  created_at?: string | null;
 };
 
-type BillingLineItem = {
-  id: string;
-  billing_record_id?: string;
-  cpt_code?: string;
-  description?: string | null;
-  units?: number;
-  rate_cents?: number;
-  total_cents?: number;
-  payment_type?: string;
-  modifiers?: string[] | null;
-  is_timed?: boolean;
+type ClaimDetail = ClaimRow & {
+  audit_log?: AuditLogEntry[];
 };
 
-type BillingRecordDetail = BillingRecordRow & {
-  line_items?: BillingLineItem[];
-};
-
-const STATUS_FILTER_OPTIONS = [
-  { value: "", label: "All" },
-  { value: "draft", label: "Draft" },
-  { value: "submitted", label: "Submitted" },
-  { value: "paid", label: "Paid" },
-  { value: "denied", label: "Denied" },
-  { value: "partial", label: "Partial" },
-] as const;
-
-const RECORD_STATUS_OPTIONS = [
-  "draft",
-  "submitted",
-  "paid",
-  "denied",
-  "partial",
-] as const;
+async function authHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token ?? "";
+  const h: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) h.Authorization = `Bearer ${token}`;
+  return h;
+}
 
 function patientDisplayName(p: PatientRow): string {
   const s = `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim();
   return s || "—";
 }
 
-function formatUsdFromCents(cents: number | null | undefined): string {
+function formatUsd(amount: number | null | undefined): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-  }).format((Number(cents) || 0) / 100);
+  }).format(Number(amount) || 0);
 }
 
-function amountPaidCents(r: BillingRecordRow): number {
-  const a = r.amount_paid_cents;
-  if (a !== undefined && a !== null) return Number(a) || 0;
-  return Number(r.total_paid_cents) || 0;
+function formatDate(value: string | null | undefined): string {
+  if (!value) return "—";
+  return String(value).slice(0, 10);
 }
 
-function paymentProgressPct(r: BillingRecordRow): number {
-  const billed = Number(r.total_billed_cents) || 0;
-  const paid = amountPaidCents(r);
-  if (billed <= 0) return 0;
-  return Math.min(100, Math.round((paid / billed) * 100));
+function formatCodes(codes: string[] | null | undefined): string {
+  if (!codes || codes.length === 0) return "—";
+  return codes.join(", ");
 }
 
-function showRecordPaymentButton(r: BillingRecordRow): boolean {
-  const st = (r.status ?? "").toLowerCase();
-  if (st === "denied") return false;
-  const billed = Number(r.total_billed_cents) || 0;
-  const paid = amountPaidCents(r);
-  return billed > 0 && paid < billed;
+function formatDaysRemaining(days: number | null | undefined): string {
+  if (days === null || days === undefined) return "—";
+  if (days < 0) return `${Math.abs(days)}d overdue`;
+  if (days === 0) return "Due today";
+  return `${days}d`;
 }
 
-const PAYMENT_METHOD_OPTIONS = [
-  { value: "cash", label: "Cash" },
-  { value: "card", label: "Card" },
-  { value: "insurance", label: "Insurance" },
-  { value: "attorney", label: "Attorney" },
-  { value: "other", label: "Other" },
-] as const;
-
-function todayYmdLocal(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+function formatAuditLabel(entry: AuditLogEntry): string {
+  const action = (entry.action ?? "").toLowerCase();
+  if (action === "claim_created") return "Claim created";
+  if (action === "status_changed") {
+    const from = entry.old_status ?? "—";
+    const to = entry.new_status ?? "—";
+    return `Status changed: ${from} → ${to}`;
+  }
+  return entry.action || "Event";
 }
 
-function compareDateOfServiceDesc(a: BillingRecordRow, b: BillingRecordRow): number {
-  const da = a.date_of_service ?? "";
-  const db = b.date_of_service ?? "";
-  return db.localeCompare(da);
+function formatAuditTime(value: string | null | undefined): string {
+  if (!value) return "—";
+  try {
+    return new Date(value).toLocaleString(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  } catch {
+    return value;
+  }
 }
 
-export default function AdminBillingPage() {
-  const { clinicId } = useClinic();
-  const [records, setRecords] = useState<BillingRecordRow[]>([]);
+function CodeListField({
+  label,
+  values,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  values: string[];
+  onChange: (next: string[]) => void;
+  placeholder?: string;
+}) {
+  function updateAt(index: number, value: string) {
+    const next = [...values];
+    next[index] = value;
+    onChange(next);
+  }
+
+  function addRow() {
+    onChange([...values, ""]);
+  }
+
+  function removeAt(index: number) {
+    onChange(values.filter((_, i) => i !== index));
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-sm font-medium text-gray-700">{label}</span>
+        <button
+          type="button"
+          onClick={addRow}
+          className="text-xs font-medium text-[var(--color-primary,#16A34A)] hover:underline"
+        >
+          + Add code
+        </button>
+      </div>
+      <div className="mt-2 space-y-2">
+        {values.length === 0 ? (
+          <button
+            type="button"
+            onClick={addRow}
+            className={`${DS_SECONDARY_BTN} w-full py-2 text-xs`}
+          >
+            Add first code
+          </button>
+        ) : (
+          values.map((code, index) => (
+            <div key={index} className="flex gap-2">
+              <input
+                type="text"
+                value={code}
+                onChange={(e) => updateAt(index, e.target.value)}
+                placeholder={placeholder}
+                className={`flex-1 ${DS_INPUT}`}
+              />
+              <button
+                type="button"
+                onClick={() => removeAt(index)}
+                className="shrink-0 rounded-lg px-2 text-sm text-red-600 hover:bg-red-50"
+                aria-label="Remove code"
+              >
+                ✕
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function AdminInsuranceBillingPage() {
+  const { clinicId, me } = useClinic();
+  const clinicUserId = (me?.clinic_user_id ?? "").trim();
+
+  const [claims, setClaims] = useState<ClaimRow[]>([]);
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [statusFilter, setStatusFilter] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [searchName, setSearchName] = useState("");
-
   const [createOpen, setCreateOpen] = useState(false);
-  const [createPatientId, setCreatePatientId] = useState("");
-  const [createDateOfService, setCreateDateOfService] = useState("");
-  const [createBillingType, setCreateBillingType] = useState("cash");
-  const [createAppointmentId, setCreateAppointmentId] = useState("");
-  const [createPiCaseId, setCreatePiCaseId] = useState("");
-  const [createProviderId, setCreateProviderId] = useState("");
-  const [createInsurance, setCreateInsurance] = useState("");
-  const [createClaimNumber, setCreateClaimNumber] = useState("");
-  const [createNotes, setCreateNotes] = useState("");
+  const [patientSearch, setPatientSearch] = useState("");
+  const [selectedPatientId, setSelectedPatientId] = useState("");
+  const [payerName, setPayerName] = useState("");
+  const [payerId, setPayerId] = useState("");
+  const [policyNumber, setPolicyNumber] = useState("");
+  const [memberId, setMemberId] = useState("");
+  const [firstTreatmentDate, setFirstTreatmentDate] = useState("");
+  const [appointmentId, setAppointmentId] = useState("");
+  const [cptCodes, setCptCodes] = useState<string[]>([""]);
+  const [diagnosisCodes, setDiagnosisCodes] = useState<string[]>([""]);
+  const [totalAmount, setTotalAmount] = useState("");
+  const [notes, setNotes] = useState("");
   const [createBusy, setCreateBusy] = useState(false);
 
   const [detailId, setDetailId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<BillingRecordDetail | null>(null);
+  const [detail, setDetail] = useState<ClaimDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
-  const [statusDraft, setStatusDraft] = useState("");
-  const [statusBusy, setStatusBusy] = useState(false);
-
-  const [lineFormOpen, setLineFormOpen] = useState(false);
-  const [lineCpt, setLineCpt] = useState("");
-  const [lineDescription, setLineDescription] = useState("");
-  const [lineUnits, setLineUnits] = useState("1");
-  const [lineRateDollars, setLineRateDollars] = useState("");
-  const [lineTimed, setLineTimed] = useState(false);
-  const [linePaymentType, setLinePaymentType] = useState<"cash" | "insurance">(
-    "cash",
-  );
-  const [lineModifiers, setLineModifiers] = useState("");
-  const [lineBusy, setLineBusy] = useState(false);
-  const [deleteBusyId, setDeleteBusyId] = useState<string | null>(null);
-
-  const [paymentsByRecord, setPaymentsByRecord] = useState<
-    Record<string, BillingPaymentRow[]>
-  >({});
-  const [detailPayments, setDetailPayments] = useState<BillingPaymentRow[]>([]);
-
-  const [paymentModalRecordId, setPaymentModalRecordId] = useState<string | null>(
-    null,
-  );
-  const [paymentAmountDollars, setPaymentAmountDollars] = useState("");
-  const [paymentDate, setPaymentDate] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("cash");
-  const [paymentNote, setPaymentNote] = useState("");
-  const [paymentBusy, setPaymentBusy] = useState(false);
 
   const patientById = useMemo(() => {
     const m = new Map<string, PatientRow>();
@@ -206,10 +231,19 @@ export default function AdminBillingPage() {
     return m;
   }, [patients]);
 
+  const filteredPatients = useMemo(() => {
+    const q = patientSearch.trim().toLowerCase();
+    if (!q) return patients.slice(0, 50);
+    return patients
+      .filter((p) => patientDisplayName(p).toLowerCase().includes(q))
+      .slice(0, 50);
+  }, [patients, patientSearch]);
+
   const loadPatients = useCallback(async () => {
     try {
       const res = await fetch(
         `${API_BASE}/patients?clinic_id=${encodeURIComponent(clinicId)}`,
+        { headers: await authHeaders() },
       );
       const data = res.ok ? await res.json() : [];
       setPatients(Array.isArray(data) ? data : []);
@@ -218,85 +252,52 @@ export default function AdminBillingPage() {
     }
   }, [clinicId]);
 
-  const loadRecords = useCallback(async () => {
+  const loadClaims = useCallback(async () => {
     setError(null);
     try {
-      const params = new URLSearchParams({ clinic_id: clinicId });
-      if (statusFilter) params.set("status", statusFilter);
-      if (dateFrom) params.set("date_from", dateFrom);
-      if (dateTo) params.set("date_to", dateTo);
-      const res = await fetch(`${API_BASE}/billing-records?${params.toString()}`);
+      const res = await fetch(
+        `${API_BASE}/billing/claims?clinic_id=${encodeURIComponent(clinicId)}`,
+        { headers: await authHeaders() },
+      );
       if (!res.ok) {
-        setError(`Could not load billing records (HTTP ${res.status}).`);
-        setRecords([]);
-        setPaymentsByRecord({});
+        setError(`Could not load claims (HTTP ${res.status}).`);
+        setClaims([]);
         return;
       }
       const data = await res.json();
-      const list = Array.isArray(data) ? data : [];
-      list.sort(compareDateOfServiceDesc);
-      setRecords(list);
-      const payMap: Record<string, BillingPaymentRow[]> = {};
-      await Promise.all(
-        list.map(async (row) => {
-          try {
-            const pr = await fetch(
-              `${API_BASE}/billing-records/${encodeURIComponent(row.id)}/payments?clinic_id=${encodeURIComponent(clinicId)}`,
-            );
-            const pj = pr.ok ? await pr.json() : [];
-            payMap[row.id] = Array.isArray(pj) ? pj : [];
-          } catch {
-            payMap[row.id] = [];
-          }
-        }),
-      );
-      setPaymentsByRecord(payMap);
+      setClaims(Array.isArray(data) ? data : []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load billing records");
-      setRecords([]);
-      setPaymentsByRecord({});
+      setError(e instanceof Error ? e.message : "Failed to load claims");
+      setClaims([]);
     }
-  }, [statusFilter, dateFrom, dateTo, clinicId]);
+  }, [clinicId]);
 
-  const loadDetail = useCallback(async (recordId: string) => {
+  const loadDetail = useCallback(async (claimId: string) => {
     setDetailLoading(true);
     setDetailError(null);
-    setDetailPayments([]);
     try {
       const res = await fetch(
-        `${API_BASE}/billing-records/${encodeURIComponent(recordId)}`,
+        `${API_BASE}/billing/claims/${encodeURIComponent(claimId)}`,
+        { headers: await authHeaders() },
       );
       if (res.status === 404) {
-        setDetailError("Billing record not found.");
+        setDetailError("Claim not found.");
         setDetail(null);
         return;
       }
       if (!res.ok) {
-        setDetailError(`Could not load record (HTTP ${res.status}).`);
+        setDetailError(`Could not load claim (HTTP ${res.status}).`);
         setDetail(null);
         return;
       }
-      const data = (await res.json()) as BillingRecordDetail;
-      setDetail(data);
-      setStatusDraft((data.status ?? "draft").toLowerCase());
-      try {
-        const pr = await fetch(
-          `${API_BASE}/billing-records/${encodeURIComponent(recordId)}/payments?clinic_id=${encodeURIComponent(clinicId)}`,
-        );
-        const pj = pr.ok ? await pr.json() : [];
-        setDetailPayments(Array.isArray(pj) ? pj : []);
-      } catch {
-        setDetailPayments([]);
-      }
+      setDetail((await res.json()) as ClaimDetail);
     } catch (e) {
-      setDetailError(
-        e instanceof Error ? e.message : "Failed to load billing record",
-      );
+      setDetailError(e instanceof Error ? e.message : "Failed to load claim");
       setDetail(null);
     } finally {
       setDetailLoading(false);
     }
-  }, [clinicId]);
+  }, []);
 
   useEffect(() => {
     void loadPatients();
@@ -306,70 +307,92 @@ export default function AdminBillingPage() {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      await loadRecords();
+      await loadClaims();
       if (!cancelled) setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [loadRecords]);
-
-  const tableRows = useMemo(() => {
-    const q = searchName.trim().toLowerCase();
-    return records.filter((r) => {
-      if (!q) return true;
-      const p = patientById.get(r.patient_id);
-      const name = p ? patientDisplayName(p).toLowerCase() : "";
-      return name.includes(q);
-    });
-  }, [records, searchName, patientById]);
+  }, [loadClaims]);
 
   function openCreateModal() {
-    setCreatePatientId("");
-    setCreateDateOfService("");
-    setCreateBillingType("cash");
-    setCreateAppointmentId("");
-    setCreatePiCaseId("");
-    setCreateProviderId("");
-    setCreateInsurance("");
-    setCreateClaimNumber("");
-    setCreateNotes("");
+    setPatientSearch("");
+    setSelectedPatientId("");
+    setPayerName("");
+    setPayerId("");
+    setPolicyNumber("");
+    setMemberId("");
+    setFirstTreatmentDate("");
+    setAppointmentId("");
+    setCptCodes([""]);
+    setDiagnosisCodes([""]);
+    setTotalAmount("");
+    setNotes("");
     setCreateOpen(true);
   }
 
+  function selectPatient(p: PatientRow) {
+    setSelectedPatientId(p.id);
+    setPatientSearch(patientDisplayName(p));
+  }
+
   async function submitCreate() {
-    if (!createPatientId || !createDateOfService) {
-      setError("Select a patient and date of service.");
+    if (!selectedPatientId) {
+      setError("Select a patient.");
       return;
     }
+    if (!clinicUserId) {
+      setError("Your clinic user profile is required to file claims. Sign in again or contact support.");
+      return;
+    }
+    if (!firstTreatmentDate) {
+      setError("First treatment date is required.");
+      return;
+    }
+    if (!payerName.trim() || !payerId.trim() || !policyNumber.trim() || !memberId.trim()) {
+      setError("Payer name, payer ID, policy number, and member ID are required.");
+      return;
+    }
+    const amount = parseFloat(totalAmount);
+    if (Number.isNaN(amount) || amount < 0) {
+      setError("Enter a valid total amount.");
+      return;
+    }
+    const cpt = cptCodes.map((c) => c.trim()).filter(Boolean);
+    const dx = diagnosisCodes.map((c) => c.trim()).filter(Boolean);
+    if (!appointmentId.trim()) {
+      setError("Appointment ID is required to create a claim.");
+      return;
+    }
+
     setCreateBusy(true);
     setError(null);
     try {
-      const body: Record<string, unknown> = {
-        clinic_id: clinicId,
-        patient_id: createPatientId,
-        date_of_service: createDateOfService,
-        billing_type: createBillingType,
-      };
-      if (createAppointmentId.trim())
-        body.appointment_id = createAppointmentId.trim();
-      if (createPiCaseId.trim()) body.pi_case_id = createPiCaseId.trim();
-      if (createProviderId.trim()) body.provider_id = createProviderId.trim();
-      if (createInsurance.trim()) body.insurance_carrier = createInsurance.trim();
-      if (createClaimNumber.trim()) body.claim_number = createClaimNumber.trim();
-      if (createNotes.trim()) body.notes = createNotes.trim();
-
-      const res = await fetch(`${API_BASE}/billing-records`, {
+      const res = await fetch(`${API_BASE}/billing/claims`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        headers: await authHeaders(),
+        body: JSON.stringify({
+          clinic_id: clinicId,
+          patient_id: selectedPatientId,
+          clinician_id: clinicUserId,
+          appointment_id: appointmentId.trim(),
+          first_treatment_date: firstTreatmentDate,
+          payer_name: payerName.trim(),
+          payer_id: payerId.trim(),
+          policy_number: policyNumber.trim(),
+          member_id: memberId.trim(),
+          diagnosis_codes: dx,
+          cpt_codes: cpt,
+          total_amount: amount,
+          notes: notes.trim() || null,
+        }),
       });
       if (!res.ok) {
         setError(await res.text().catch(() => res.statusText));
         return;
       }
       setCreateOpen(false);
-      await loadRecords();
+      await loadClaims();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Create failed");
     } finally {
@@ -377,200 +400,15 @@ export default function AdminBillingPage() {
     }
   }
 
-  function clearFilters() {
-    setStatusFilter("");
-    setDateFrom("");
-    setDateTo("");
-    setSearchName("");
-  }
-
-  async function openDetail(recordId: string) {
-    setDetailId(recordId);
-    setLineFormOpen(false);
-    await loadDetail(recordId);
+  function openDetail(claimId: string) {
+    setDetailId(claimId);
+    void loadDetail(claimId);
   }
 
   function closeDetail() {
     setDetailId(null);
     setDetail(null);
     setDetailError(null);
-    setLineFormOpen(false);
-    setDetailPayments([]);
-  }
-
-  function openPaymentModal(recordId: string) {
-    setPaymentModalRecordId(recordId);
-    setPaymentAmountDollars("");
-    setPaymentDate(todayYmdLocal());
-    setPaymentMethod("cash");
-    setPaymentNote("");
-    setDetailError(null);
-    setError(null);
-  }
-
-  function closePaymentModal() {
-    setPaymentModalRecordId(null);
-    setPaymentBusy(false);
-  }
-
-  async function submitPayment() {
-    if (!paymentModalRecordId) return;
-    const dollars = parseFloat(paymentAmountDollars);
-    if (Number.isNaN(dollars) || dollars <= 0) {
-      setError("Enter a valid payment amount greater than zero.");
-      return;
-    }
-    const amount_cents = Math.round(dollars * 100);
-    if (!paymentDate.trim()) {
-      setError("Payment date is required.");
-      return;
-    }
-    setPaymentBusy(true);
-    setError(null);
-    setDetailError(null);
-    try {
-      const res = await fetch(
-        `${API_BASE}/billing-records/${encodeURIComponent(paymentModalRecordId)}/payments?clinic_id=${encodeURIComponent(clinicId)}`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            amount_cents,
-            payment_date: paymentDate.trim().slice(0, 10),
-            payment_method: paymentMethod,
-            note: paymentNote.trim() || null,
-          }),
-        },
-      );
-      if (!res.ok) {
-        const msg = await res.text().catch(() => res.statusText);
-        setError(msg || `Payment failed (HTTP ${res.status})`);
-        return;
-      }
-      const savedId = paymentModalRecordId;
-      closePaymentModal();
-      await loadRecords();
-      if (detailId && detailId === savedId) {
-        await loadDetail(detailId);
-      }
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Payment failed");
-    } finally {
-      setPaymentBusy(false);
-    }
-  }
-
-  async function refreshListAndDetail() {
-    await loadRecords();
-    if (detailId) await loadDetail(detailId);
-  }
-
-  async function updateRecordStatus() {
-    if (!detailId || !statusDraft) return;
-    setStatusBusy(true);
-    setDetailError(null);
-    try {
-      const res = await fetch(
-        `${API_BASE}/billing-records/${encodeURIComponent(detailId)}/status`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: statusDraft }),
-        },
-      );
-      if (!res.ok) {
-        setDetailError(await res.text().catch(() => res.statusText));
-        return;
-      }
-      await refreshListAndDetail();
-    } catch (e) {
-      setDetailError(e instanceof Error ? e.message : "Update failed");
-    } finally {
-      setStatusBusy(false);
-    }
-  }
-
-  async function deleteLineItem(itemId: string) {
-    if (!detailId) return;
-    setDeleteBusyId(itemId);
-    setDetailError(null);
-    try {
-      const res = await fetch(
-        `${API_BASE}/billing-line-items/${encodeURIComponent(itemId)}`,
-        { method: "DELETE" },
-      );
-      if (!res.ok) {
-        setDetailError(await res.text().catch(() => res.statusText));
-        return;
-      }
-      await refreshListAndDetail();
-    } catch (e) {
-      setDetailError(e instanceof Error ? e.message : "Delete failed");
-    } finally {
-      setDeleteBusyId(null);
-    }
-  }
-
-  async function submitLineItem() {
-    if (!detailId) return;
-    const cpt = lineCpt.trim();
-    if (!cpt) {
-      setDetailError("CPT code is required.");
-      return;
-    }
-    const units = parseInt(lineUnits, 10);
-    if (Number.isNaN(units) || units < 1) {
-      setDetailError("Units must be a positive integer.");
-      return;
-    }
-    const rateDollars = parseFloat(lineRateDollars);
-    if (Number.isNaN(rateDollars) || rateDollars < 0) {
-      setDetailError("Enter a valid rate (USD).");
-      return;
-    }
-    const rate_cents = Math.round(rateDollars * 100);
-    const modifiers = lineModifiers
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean);
-
-    setLineBusy(true);
-    setDetailError(null);
-    try {
-      const res = await fetch(
-        `${API_BASE}/billing-records/${encodeURIComponent(detailId)}/line-items`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            cpt_code: cpt,
-            description: lineDescription.trim() || null,
-            units,
-            rate_cents,
-            is_timed: lineTimed,
-            payment_type: linePaymentType,
-            modifiers,
-          }),
-        },
-      );
-      if (!res.ok) {
-        setDetailError(await res.text().catch(() => res.statusText));
-        return;
-      }
-      setLineFormOpen(false);
-      setLineCpt("");
-      setLineDescription("");
-      setLineUnits("1");
-      setLineRateDollars("");
-      setLineTimed(false);
-      setLinePaymentType("cash");
-      setLineModifiers("");
-      await refreshListAndDetail();
-    } catch (e) {
-      setDetailError(e instanceof Error ? e.message : "Add line item failed");
-    } finally {
-      setLineBusy(false);
-    }
   }
 
   return (
@@ -579,7 +417,7 @@ export default function AdminBillingPage() {
         <div>
           <h1 className={DS_PAGE_TITLE}>Billing</h1>
           <p className={DS_PAGE_SUBTITLE}>
-            CPT billing records and line items
+            Insurance claims, filing deadlines, and audit history
           </p>
         </div>
         <button
@@ -587,7 +425,7 @@ export default function AdminBillingPage() {
           onClick={openCreateModal}
           className={`${DS_PRIMARY_BTN} inline-flex shrink-0 items-center justify-center`}
         >
-          + New Billing Record
+          + New Claim
         </button>
       </div>
 
@@ -597,193 +435,71 @@ export default function AdminBillingPage() {
         </p>
       ) : null}
 
-      <div className={`${DS_FILTER_BAR} mt-8 flex flex-wrap items-end gap-4`}>
-        <label className="block text-sm font-medium text-gray-700">
-          Status
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className={`mt-1 block h-9 w-40 ${DS_INPUT}`}
-          >
-            {STATUS_FILTER_OPTIONS.map((o) => (
-              <option key={o.label} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="block text-sm font-medium text-gray-700">
-          From
-          <input
-            type="date"
-            value={dateFrom}
-            onChange={(e) => setDateFrom(e.target.value)}
-            className={`mt-1 block h-9 ${DS_INPUT}`}
-          />
-        </label>
-        <label className="block text-sm font-medium text-gray-700">
-          To
-          <input
-            type="date"
-            value={dateTo}
-            onChange={(e) => setDateTo(e.target.value)}
-            className={`mt-1 block h-9 ${DS_INPUT}`}
-          />
-        </label>
-        <label className="block min-w-[12rem] flex-1 text-sm font-medium text-gray-700">
-          Search patient
-          <input
-            type="search"
-            value={searchName}
-            onChange={(e) => setSearchName(e.target.value)}
-            placeholder="Filter by name…"
-            className={`mt-1 h-9 w-full ${DS_INPUT}`}
-          />
-        </label>
-        <button
-          type="button"
-          onClick={clearFilters}
-          className={DS_SECONDARY_BTN}
-        >
-          Clear filters
-        </button>
-      </div>
-
       <div className={`${DS_TABLE_WRAP} mt-8`}>
         <div className="overflow-x-auto">
           <table className="min-w-full text-left text-sm">
             <thead className={DS_TABLE_HEAD}>
               <tr>
-                <th className={DS_TH}>Date of Service</th>
                 <th className={DS_TH}>Patient Name</th>
-                <th className={DS_TH}>Billing Type</th>
-                <th className={DS_TH}>Total Billed</th>
-                <th className={`min-w-[12rem] ${DS_TH}`}>Balance</th>
+                <th className={DS_TH}>Payer</th>
+                <th className={DS_TH}>CPT Codes</th>
+                <th className={DS_TH}>Total Amount</th>
+                <th className={DS_TH}>First Treatment Date</th>
+                <th className={DS_TH}>Filing Deadline</th>
+                <th className={DS_TH}>Days Remaining</th>
                 <th className={DS_TH}>Status</th>
-                <th className={`${DS_TH} text-right`}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
+                  <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
                     Loading…
                   </td>
                 </tr>
-              ) : tableRows.length === 0 ? (
+              ) : claims.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-8 text-center text-gray-500">
-                    No billing records found
+                  <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                    No claims found
                   </td>
                 </tr>
               ) : (
-                tableRows.map((r) => {
-                  const p = patientById.get(r.patient_id);
+                claims.map((c) => {
+                  const p = patientById.get(c.patient_id);
                   const name = p ? patientDisplayName(p) : "—";
-                  const bt = (r.billing_type ?? "cash").toLowerCase();
-                  const st = (r.status ?? "draft").toLowerCase();
-                  const paid = amountPaidCents(r);
-                  const billed = Number(r.total_billed_cents) || 0;
-                  const pct = paymentProgressPct(r);
-                  const payments = paymentsByRecord[r.id] ?? [];
+                  const st = (c.status ?? "draft").toLowerCase();
+                  const days = c.days_remaining;
                   return (
-                    <Fragment key={r.id}>
-                      <tr className={DS_TR}>
-                        <td className={DS_TD_PRIMARY}>
-                          {r.date_of_service ?? "—"}
-                        </td>
-                        <td className={DS_TD_PRIMARY}>{name}</td>
-                        <td className={DS_TD_PRIMARY}>
-                          <span className={`capitalize ${billingTypePillClass(bt)}`}>
-                            {r.billing_type ?? "cash"}
-                          </span>
-                        </td>
-                        <td className={DS_TD_PRIMARY}>
-                          {formatUsdFromCents(r.total_billed_cents)}
-                        </td>
-                        <td className={DS_TD_PRIMARY}>
-                          <p className="text-sm text-gray-900">
-                            Paid {formatUsdFromCents(paid)} of{" "}
-                            {formatUsdFromCents(billed)}
-                          </p>
-                          <div className="mt-2 h-1.5 w-full max-w-[11rem] overflow-hidden rounded-full bg-gray-100">
-                            <div
-                              className="h-full rounded-full bg-[#16A34A] transition-[width]"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                        </td>
-                        <td className={DS_TD_PRIMARY}>
-                          <span
-                            className={`capitalize ${billingStatusBadgeClass(st)}`}
-                          >
-                            {r.status ?? "draft"}
-                          </span>
-                        </td>
-                        <td className={`${DS_TD_PRIMARY} text-right`}>
-                          <div className="flex flex-wrap justify-end gap-2">
-                            {showRecordPaymentButton(r) ? (
-                              <button
-                                type="button"
-                                onClick={() => openPaymentModal(r.id)}
-                                className={`${DS_SECONDARY_BTN} px-3 py-2`}
-                              >
-                                Record Payment
-                              </button>
-                            ) : null}
-                            <button
-                              type="button"
-                              onClick={() => void openDetail(r.id)}
-                              className={DS_SECONDARY_BTN}
-                            >
-                              View
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                      {payments.length > 0 ? (
-                        <tr className="border-b border-gray-100 bg-gray-50 last:border-0">
-                          <td colSpan={7} className="px-6 py-3">
-                            <p className="mb-2 text-xs font-medium uppercase tracking-wider text-gray-500">
-                              Payment history
-                            </p>
-                            <div className="overflow-x-auto rounded-lg border border-gray-100 bg-white">
-                              <table className="min-w-full text-left text-xs">
-                                <thead>
-                                  <tr className="border-b border-gray-100 text-gray-500">
-                                    <th className="px-3 py-2 font-medium">Date</th>
-                                    <th className="px-3 py-2 font-medium">Method</th>
-                                    <th className="px-3 py-2 font-medium">Amount</th>
-                                    <th className="px-3 py-2 font-medium">Note</th>
-                                  </tr>
-                                </thead>
-                                <tbody>
-                                  {payments.map((pay) => (
-                                    <tr
-                                      key={pay.id}
-                                      className="border-b border-gray-50 last:border-0"
-                                    >
-                                      <td className="px-3 py-2 text-gray-800">
-                                        {pay.payment_date ?? "—"}
-                                      </td>
-                                      <td className="px-3 py-2 capitalize text-gray-800">
-                                        {pay.payment_method ?? "—"}
-                                      </td>
-                                      <td className="px-3 py-2 font-medium text-gray-900">
-                                        {formatUsdFromCents(pay.amount_cents)}
-                                      </td>
-                                      <td className="max-w-[12rem] truncate px-3 py-2 text-gray-600">
-                                        {(pay.note ?? "").trim() || "—"}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </td>
-                        </tr>
-                      ) : null}
-                    </Fragment>
+                    <tr
+                      key={c.id}
+                      className={`${DS_TR} cursor-pointer`}
+                      onClick={() => openDetail(c.id)}
+                    >
+                      <td className={DS_TD_PRIMARY}>{name}</td>
+                      <td className={DS_TD_PRIMARY}>{c.payer_name ?? "—"}</td>
+                      <td className={`max-w-[10rem] truncate ${DS_TD_PRIMARY}`}>
+                        {formatCodes(c.cpt_codes)}
+                      </td>
+                      <td className={DS_TD_PRIMARY}>
+                        {formatUsd(c.total_amount)}
+                      </td>
+                      <td className={DS_TD_PRIMARY}>
+                        {formatDate(c.first_treatment_date)}
+                      </td>
+                      <td className={DS_TD_PRIMARY}>
+                        {formatDate(c.filing_deadline)}
+                      </td>
+                      <td className={DS_TD_PRIMARY}>
+                        <span className={claimDaysRemainingClass(days)}>
+                          {formatDaysRemaining(days)}
+                        </span>
+                      </td>
+                      <td className={DS_TD_PRIMARY}>
+                        <span className={`capitalize ${claimStatusBadgeClass(st)}`}>
+                          {c.status ?? "draft"}
+                        </span>
+                      </td>
+                    </tr>
                   );
                 })
               )}
@@ -798,101 +514,130 @@ export default function AdminBillingPage() {
             className={`max-h-[90vh] w-full max-w-lg overflow-y-auto ${DS_CARD}`}
             role="dialog"
             aria-modal
-            aria-labelledby="billing-create-title"
+            aria-labelledby="claim-create-title"
           >
             <h2
-              id="billing-create-title"
+              id="claim-create-title"
               className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900"
             >
-              New billing record
+              New insurance claim
             </h2>
             <div className="space-y-4 pt-5">
+              <div>
+                <label className="block text-sm font-medium text-gray-700">
+                  Patient
+                  <input
+                    type="search"
+                    value={patientSearch}
+                    onChange={(e) => {
+                      setPatientSearch(e.target.value);
+                      setSelectedPatientId("");
+                    }}
+                    placeholder="Search by name…"
+                    className={`mt-1 h-9 w-full ${DS_INPUT}`}
+                  />
+                </label>
+                {selectedPatientId ? (
+                  <p className="mt-1 text-xs text-green-700">Patient selected</p>
+                ) : filteredPatients.length > 0 && patientSearch.trim() ? (
+                  <ul className="mt-2 max-h-40 overflow-auto rounded-lg border border-gray-100 bg-gray-50">
+                    {filteredPatients.map((p) => (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          onClick={() => selectPatient(p)}
+                          className="w-full px-3 py-2 text-left text-sm text-gray-900 hover:bg-white"
+                        >
+                          {patientDisplayName(p)}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
               <label className="block text-sm font-medium text-gray-700">
-                Patient
-                <select
-                  value={createPatientId}
-                  onChange={(e) => setCreatePatientId(e.target.value)}
+                Payer name
+                <input
+                  type="text"
+                  value={payerName}
+                  onChange={(e) => setPayerName(e.target.value)}
                   className={`mt-1 h-9 w-full ${DS_INPUT}`}
-                >
-                  <option value="">Select patient…</option>
-                  {patients.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {patientDisplayName(p)}
-                    </option>
-                  ))}
-                </select>
+                />
               </label>
               <label className="block text-sm font-medium text-gray-700">
-                Date of service
+                Payer ID
+                <input
+                  type="text"
+                  value={payerId}
+                  onChange={(e) => setPayerId(e.target.value)}
+                  className={`mt-1 h-9 w-full ${DS_INPUT}`}
+                />
+              </label>
+              <label className="block text-sm font-medium text-gray-700">
+                Policy number
+                <input
+                  type="text"
+                  value={policyNumber}
+                  onChange={(e) => setPolicyNumber(e.target.value)}
+                  className={`mt-1 h-9 w-full ${DS_INPUT}`}
+                />
+              </label>
+              <label className="block text-sm font-medium text-gray-700">
+                Member ID
+                <input
+                  type="text"
+                  value={memberId}
+                  onChange={(e) => setMemberId(e.target.value)}
+                  className={`mt-1 h-9 w-full ${DS_INPUT}`}
+                />
+              </label>
+              <label className="block text-sm font-medium text-gray-700">
+                First treatment date
                 <input
                   type="date"
-                  value={createDateOfService}
-                  onChange={(e) => setCreateDateOfService(e.target.value)}
+                  value={firstTreatmentDate}
+                  onChange={(e) => setFirstTreatmentDate(e.target.value)}
                   className={`mt-1 h-9 w-full ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
-                Billing type
-                <select
-                  value={createBillingType}
-                  onChange={(e) => setCreateBillingType(e.target.value)}
+                Appointment ID
+                <input
+                  type="text"
+                  value={appointmentId}
+                  onChange={(e) => setAppointmentId(e.target.value)}
+                  placeholder="Linked appointment UUID"
+                  className={`mt-1 ${DS_INPUT}`}
+                />
+              </label>
+              <CodeListField
+                label="CPT codes"
+                values={cptCodes}
+                onChange={setCptCodes}
+                placeholder="e.g. 99213"
+              />
+              <CodeListField
+                label="Diagnosis codes"
+                values={diagnosisCodes}
+                onChange={setDiagnosisCodes}
+                placeholder="e.g. M54.5"
+              />
+              <label className="block text-sm font-medium text-gray-700">
+                Total amount (USD)
+                <input
+                  type="number"
+                  min={0}
+                  step="0.01"
+                  value={totalAmount}
+                  onChange={(e) => setTotalAmount(e.target.value)}
                   className={`mt-1 h-9 w-full ${DS_INPUT}`}
-                >
-                  <option value="cash">Cash</option>
-                  <option value="insurance">Insurance</option>
-                  <option value="mixed">Mixed</option>
-                </select>
-              </label>
-              <label className="block text-sm font-medium text-gray-700">
-                Appointment ID (optional)
-                <input
-                  type="text"
-                  value={createAppointmentId}
-                  onChange={(e) => setCreateAppointmentId(e.target.value)}
-                  className={`mt-1 ${DS_INPUT}`}
-                />
-              </label>
-              <label className="block text-sm font-medium text-gray-700">
-                PI case ID (optional)
-                <input
-                  type="text"
-                  value={createPiCaseId}
-                  onChange={(e) => setCreatePiCaseId(e.target.value)}
-                  className={`mt-1 ${DS_INPUT}`}
-                />
-              </label>
-              <label className="block text-sm font-medium text-gray-700">
-                Provider ID (optional)
-                <input
-                  type="text"
-                  value={createProviderId}
-                  onChange={(e) => setCreateProviderId(e.target.value)}
-                  className={`mt-1 ${DS_INPUT}`}
-                />
-              </label>
-              <label className="block text-sm font-medium text-gray-700">
-                Insurance carrier (optional)
-                <input
-                  type="text"
-                  value={createInsurance}
-                  onChange={(e) => setCreateInsurance(e.target.value)}
-                  className={`mt-1 ${DS_INPUT}`}
-                />
-              </label>
-              <label className="block text-sm font-medium text-gray-700">
-                Claim number (optional)
-                <input
-                  type="text"
-                  value={createClaimNumber}
-                  onChange={(e) => setCreateClaimNumber(e.target.value)}
-                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <label className="block text-sm font-medium text-gray-700">
                 Notes (optional)
                 <textarea
-                  value={createNotes}
-                  onChange={(e) => setCreateNotes(e.target.value)}
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
                   rows={2}
                   className={`mt-1 ${DS_INPUT}`}
                 />
@@ -912,87 +657,7 @@ export default function AdminBillingPage() {
                 onClick={() => void submitCreate()}
                 className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
               >
-                {createBusy ? "Saving…" : "Create"}
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {paymentModalRecordId ? (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
-          <div
-            className={`w-full max-w-lg ${DS_CARD}`}
-            role="dialog"
-            aria-modal
-            aria-labelledby="billing-payment-title"
-          >
-            <h2
-              id="billing-payment-title"
-              className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900"
-            >
-              Record payment
-            </h2>
-            <div className="space-y-4 pt-5">
-              <label className="block text-sm font-medium text-gray-700">
-                Amount (USD)
-                <input
-                  type="number"
-                  min={0}
-                  step="0.01"
-                  value={paymentAmountDollars}
-                  onChange={(e) => setPaymentAmountDollars(e.target.value)}
-                  className={`mt-1 h-9 w-full ${DS_INPUT}`}
-                />
-              </label>
-              <label className="block text-sm font-medium text-gray-700">
-                Payment date
-                <input
-                  type="date"
-                  value={paymentDate}
-                  onChange={(e) => setPaymentDate(e.target.value)}
-                  className={`mt-1 h-9 w-full ${DS_INPUT}`}
-                />
-              </label>
-              <label className="block text-sm font-medium text-gray-700">
-                Payment method
-                <select
-                  value={paymentMethod}
-                  onChange={(e) => setPaymentMethod(e.target.value)}
-                  className={`mt-1 h-9 w-full ${DS_INPUT}`}
-                >
-                  {PAYMENT_METHOD_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm font-medium text-gray-700">
-                Note (optional)
-                <textarea
-                  value={paymentNote}
-                  onChange={(e) => setPaymentNote(e.target.value)}
-                  rows={2}
-                  className={`mt-1 ${DS_INPUT}`}
-                />
-              </label>
-            </div>
-            <div className="mt-6 flex justify-end gap-2 border-t border-gray-100 pt-5">
-              <button
-                type="button"
-                onClick={closePaymentModal}
-                className={DS_SECONDARY_BTN}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={paymentBusy}
-                onClick={() => void submitPayment()}
-                className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
-              >
-                {paymentBusy ? "Saving…" : "Submit"}
+                {createBusy ? "Saving…" : "Create claim"}
               </button>
             </div>
           </div>
@@ -1011,15 +676,15 @@ export default function AdminBillingPage() {
             className={`max-h-[90vh] w-full max-w-3xl overflow-y-auto ${DS_CARD}`}
             role="dialog"
             aria-modal
-            aria-labelledby="billing-detail-title"
+            aria-labelledby="claim-detail-title"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4 border-b border-gray-100 pb-4">
               <h2
-                id="billing-detail-title"
+                id="claim-detail-title"
                 className="text-lg font-semibold text-gray-900"
               >
-                Billing record
+                Claim detail
               </h2>
               <button
                 type="button"
@@ -1041,350 +706,113 @@ export default function AdminBillingPage() {
               <p className="pt-5 text-sm text-gray-500">Loading…</p>
             ) : detail ? (
               <div className="space-y-6 pt-5">
-                <div className={DS_CARD}>
-                  <div className="flex flex-wrap gap-6">
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
-                        Patient
-                      </p>
-                      <p className="text-sm font-semibold text-gray-900">
-                        {patientDisplayName(
-                          patientById.get(detail.patient_id) ?? {
-                            id: detail.patient_id,
-                            first_name: "",
-                            last_name: "",
-                          },
-                        )}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
-                        Date of service
-                      </p>
-                      <p className="text-sm font-semibold text-gray-900">
-                        {detail.date_of_service ?? "—"}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
-                        Billing type
-                      </p>
-                      <span
-                        className={`mt-1 capitalize ${billingTypePillClass(
-                          (detail.billing_type ?? "cash").toLowerCase(),
-                        )}`}
-                      >
-                        {detail.billing_type ?? "cash"}
-                      </span>
-                    </div>
-                    <div>
-                      <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
-                        Status
-                      </p>
-                      <span
-                        className={`mt-1 capitalize ${billingStatusBadgeClass(
-                          (detail.status ?? "draft").toLowerCase(),
-                        )}`}
-                      >
-                        {detail.status ?? "draft"}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="mt-6 flex flex-wrap gap-8">
-                    <div>
-                      <p className="text-xs text-gray-500">Total billed</p>
-                      <p className="text-lg font-semibold text-gray-900">
-                        {formatUsdFromCents(detail.total_billed_cents)}
-                      </p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-gray-500">Amount paid</p>
-                      <p className="text-lg font-semibold text-gray-900">
-                        {formatUsdFromCents(amountPaidCents(detail))}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="mt-4 max-w-md">
-                    <p className="text-sm text-gray-700">
-                      Paid {formatUsdFromCents(amountPaidCents(detail))} of{" "}
-                      {formatUsdFromCents(detail.total_billed_cents)}
-                    </p>
-                    <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
-                      <div
-                        className="h-full rounded-full bg-[#16A34A]"
-                        style={{
-                          width: `${paymentProgressPct(detail)}%`,
-                        }}
-                      />
-                    </div>
-                  </div>
-                  {showRecordPaymentButton(detail) ? (
-                    <div className="mt-4">
-                      <button
-                        type="button"
-                        onClick={() => openPaymentModal(detail.id)}
-                        className={DS_SECONDARY_BTN}
-                      >
-                        Record Payment
-                      </button>
-                    </div>
-                  ) : null}
-                  {detailPayments.length > 0 ? (
-                    <div className="mt-6">
-                      <h3 className="mb-2 text-xs font-medium uppercase tracking-wider text-gray-500">
-                        Payment history
-                      </h3>
-                      <div className="overflow-hidden rounded-xl border border-gray-100 bg-white shadow-sm">
-                        <div className="overflow-x-auto">
-                          <table className="min-w-full text-left text-sm">
-                            <thead className={DS_TABLE_HEAD}>
-                              <tr>
-                                <th className={`${DS_TH} px-4`}>Date</th>
-                                <th className={`${DS_TH} px-4`}>Method</th>
-                                <th className={`${DS_TH} px-4`}>Amount</th>
-                                <th className={`${DS_TH} px-4`}>Note</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {detailPayments.map((pay) => (
-                                <tr key={pay.id} className={DS_TR}>
-                                  <td className="px-4 py-3 text-sm text-gray-900">
-                                    {pay.payment_date ?? "—"}
-                                  </td>
-                                  <td className="px-4 py-3 text-sm capitalize text-gray-900">
-                                    {pay.payment_method ?? "—"}
-                                  </td>
-                                  <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                                    {formatUsdFromCents(pay.amount_cents)}
-                                  </td>
-                                  <td className="max-w-[14rem] truncate px-4 py-3 text-sm text-gray-400">
-                                    {(pay.note ?? "").trim() || "—"}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-                  <div className="mt-6 flex flex-wrap items-end gap-3">
-                    <label className="text-sm font-medium text-gray-700">
-                      Update status
-                      <select
-                        value={statusDraft}
-                        onChange={(e) => setStatusDraft(e.target.value)}
-                        className={`ml-2 h-9 ${DS_INPUT} w-auto min-w-[8rem]`}
-                      >
-                        {RECORD_STATUS_OPTIONS.map((s) => (
-                          <option key={s} value={s}>
-                            {s}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <button
-                      type="button"
-                      disabled={statusBusy}
-                      onClick={() => void updateRecordStatus()}
-                      className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
-                    >
-                      {statusBusy ? "Updating…" : "Update Status"}
-                    </button>
+                <div className="flex flex-wrap items-center gap-3">
+                  <span
+                    className={`capitalize ${claimStatusBadgeClass(
+                      (detail.status ?? "draft").toLowerCase(),
+                    )}`}
+                  >
+                    {detail.status ?? "draft"}
+                  </span>
+                  <span
+                    className={`text-sm ${claimDaysRemainingClass(detail.days_remaining)}`}
+                  >
+                    {formatDaysRemaining(detail.days_remaining)} until filing deadline
+                  </span>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <DetailField
+                    label="Patient"
+                    value={
+                      patientById.get(detail.patient_id)
+                        ? patientDisplayName(patientById.get(detail.patient_id)!)
+                        : detail.patient_id
+                    }
+                  />
+                  <DetailField label="Payer" value={detail.payer_name} />
+                  <DetailField label="Payer ID" value={detail.payer_id} />
+                  <DetailField label="Policy number" value={detail.policy_number} />
+                  <DetailField label="Member ID" value={detail.member_id} />
+                  <DetailField
+                    label="First treatment date"
+                    value={formatDate(detail.first_treatment_date)}
+                  />
+                  <DetailField
+                    label="Filing deadline"
+                    value={formatDate(detail.filing_deadline)}
+                  />
+                  <DetailField
+                    label="Total amount"
+                    value={formatUsd(detail.total_amount)}
+                  />
+                  <DetailField label="CPT codes" value={formatCodes(detail.cpt_codes)} />
+                  <DetailField
+                    label="Diagnosis codes"
+                    value={formatCodes(detail.diagnosis_codes)}
+                  />
+                  <DetailField label="Appointment ID" value={detail.appointment_id} />
+                  <DetailField label="Clinician ID" value={detail.clinician_id} />
+                  <DetailField
+                    label="Created"
+                    value={formatAuditTime(detail.created_at)}
+                  />
+                  <DetailField
+                    label="Updated"
+                    value={formatAuditTime(detail.updated_at)}
+                  />
+                  <div className="sm:col-span-2">
+                    <DetailField label="Notes" value={detail.notes?.trim() || "—"} />
                   </div>
                 </div>
 
                 <div>
                   <h3 className="text-xs font-medium uppercase tracking-wider text-gray-500">
-                    Line items
+                    Audit log
                   </h3>
-                  <div className="mt-3 overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-                    <div className="overflow-x-auto">
-                      <table className="min-w-full text-left text-sm">
-                        <thead className={DS_TABLE_HEAD}>
-                          <tr>
-                            <th className={DS_TH}>CPT</th>
-                            <th className={DS_TH}>Description</th>
-                            <th className={DS_TH}>Units</th>
-                            <th className={DS_TH}>Rate</th>
-                            <th className={DS_TH}>Total</th>
-                            <th className={DS_TH}>Payment</th>
-                            <th className={DS_TH}>Modifiers</th>
-                            <th className={`${DS_TH} text-right`}>Delete</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {(detail.line_items ?? []).length === 0 ? (
-                            <tr>
-                              <td
-                                colSpan={8}
-                                className="px-6 py-4 text-center text-gray-500"
-                              >
-                                No line items
-                              </td>
-                            </tr>
-                          ) : (
-                            (detail.line_items ?? []).map((li) => {
-                              const mods = li.modifiers;
-                              const modStr =
-                                Array.isArray(mods) && mods.length > 0
-                                  ? mods.join(", ")
-                                  : "—";
-                              return (
-                                <tr key={li.id} className={DS_TR}>
-                                  <td className={`${DS_TD_PRIMARY} font-mono text-xs`}>
-                                    {li.cpt_code ?? "—"}
-                                  </td>
-                                  <td className={`max-w-[10rem] truncate ${DS_TD_PRIMARY}`}>
-                                    {li.description ?? "—"}
-                                  </td>
-                                  <td className={DS_TD_PRIMARY}>{li.units ?? "—"}</td>
-                                  <td className={DS_TD_PRIMARY}>
-                                    {formatUsdFromCents(li.rate_cents)}
-                                  </td>
-                                  <td className={`${DS_TD_PRIMARY} font-medium`}>
-                                    {formatUsdFromCents(li.total_cents)}
-                                  </td>
-                                  <td className={`${DS_TD_PRIMARY} capitalize`}>
-                                    {li.payment_type ?? "—"}
-                                  </td>
-                                  <td className={`${DS_TD_PRIMARY} text-xs text-gray-400`}>
-                                    {modStr}
-                                  </td>
-                                  <td className={`${DS_TD_PRIMARY} text-right`}>
-                                    <button
-                                      type="button"
-                                      disabled={deleteBusyId === li.id}
-                                      onClick={() => void deleteLineItem(li.id)}
-                                      className="text-sm font-medium text-red-500 transition-colors hover:text-red-700 disabled:opacity-50"
-                                    >
-                                      {deleteBusyId === li.id ? "…" : "Delete"}
-                                    </button>
-                                  </td>
-                                </tr>
-                              );
-                            })
-                          )}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
+                  {(detail.audit_log ?? []).length === 0 ? (
+                    <p className="mt-3 text-sm text-gray-500">No audit events yet.</p>
+                  ) : (
+                    <ol className="relative mt-4 space-y-0 border-l border-gray-200 pl-6">
+                      {(detail.audit_log ?? []).map((entry, index) => (
+                        <li key={entry.id ?? index} className="relative pb-6 last:pb-0">
+                          <span
+                            className="absolute -left-[1.35rem] top-1.5 h-2.5 w-2.5 rounded-full border-2 border-white bg-[var(--color-primary,#16A34A)]"
+                            aria-hidden
+                          />
+                          <p className="text-sm font-medium text-gray-900">
+                            {formatAuditLabel(entry)}
+                          </p>
+                          <p className="mt-0.5 text-xs text-gray-500">
+                            {formatAuditTime(entry.created_at)}
+                          </p>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
                 </div>
-
-                {!lineFormOpen ? (
-                  <button
-                    type="button"
-                    onClick={() => setLineFormOpen(true)}
-                    className={DS_SECONDARY_BTN}
-                  >
-                    Add Line Item
-                  </button>
-                ) : (
-                  <div className={DS_CARD}>
-                    <p className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900">
-                      New line item
-                    </p>
-                    <div className="grid gap-4 pt-5 sm:grid-cols-2">
-                      <label className="block text-sm font-medium text-gray-700">
-                        CPT code
-                        <input
-                          type="text"
-                          value={lineCpt}
-                          onChange={(e) => setLineCpt(e.target.value)}
-                          className={`mt-1 ${DS_INPUT}`}
-                        />
-                      </label>
-                      <label className="block text-sm font-medium text-gray-700">
-                        Description
-                        <input
-                          type="text"
-                          value={lineDescription}
-                          onChange={(e) => setLineDescription(e.target.value)}
-                          className={`mt-1 ${DS_INPUT}`}
-                        />
-                      </label>
-                      <label className="block text-sm font-medium text-gray-700">
-                        Units
-                        <input
-                          type="number"
-                          min={1}
-                          step={1}
-                          value={lineUnits}
-                          onChange={(e) => setLineUnits(e.target.value)}
-                          className={`mt-1 ${DS_INPUT}`}
-                        />
-                      </label>
-                      <label className="block text-sm font-medium text-gray-700">
-                        Rate (USD)
-                        <input
-                          type="number"
-                          min={0}
-                          step="0.01"
-                          value={lineRateDollars}
-                          onChange={(e) => setLineRateDollars(e.target.value)}
-                          className={`mt-1 ${DS_INPUT}`}
-                        />
-                      </label>
-                      <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
-                        <input
-                          type="checkbox"
-                          checked={lineTimed}
-                          onChange={(e) => setLineTimed(e.target.checked)}
-                          className="h-4 w-4 rounded border-gray-300"
-                          style={{ accentColor: "#16A34A" }}
-                        />
-                        Is timed
-                      </label>
-                      <label className="block text-sm font-medium text-gray-700">
-                        Payment type
-                        <select
-                          value={linePaymentType}
-                          onChange={(e) =>
-                            setLinePaymentType(
-                              e.target.value as "cash" | "insurance",
-                            )
-                          }
-                          className={`mt-1 h-9 w-full ${DS_INPUT}`}
-                        >
-                          <option value="cash">Cash</option>
-                          <option value="insurance">Insurance</option>
-                        </select>
-                      </label>
-                      <label className="block text-sm font-medium text-gray-700 sm:col-span-2">
-                        Modifiers (comma-separated)
-                        <input
-                          type="text"
-                          value={lineModifiers}
-                          onChange={(e) => setLineModifiers(e.target.value)}
-                          placeholder="e.g. 59, LT"
-                          className={`mt-1 ${DS_INPUT}`}
-                        />
-                      </label>
-                    </div>
-                    <div className="mt-6 flex gap-2 border-t border-gray-100 pt-5">
-                      <button
-                        type="button"
-                        onClick={() => setLineFormOpen(false)}
-                        className={DS_SECONDARY_BTN}
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        disabled={lineBusy}
-                        onClick={() => void submitLineItem()}
-                        className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
-                      >
-                        {lineBusy ? "Saving…" : "Submit"}
-                      </button>
-                    </div>
-                  </div>
-                )}
               </div>
             ) : null}
           </div>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function DetailField({
+  label,
+  value,
+}: {
+  label: string;
+  value: string | null | undefined;
+}) {
+  return (
+    <div>
+      <p className="text-xs font-medium uppercase tracking-wider text-gray-500">
+        {label}
+      </p>
+      <p className="mt-1 text-sm font-medium text-gray-900">{value ?? "—"}</p>
     </div>
   );
 }

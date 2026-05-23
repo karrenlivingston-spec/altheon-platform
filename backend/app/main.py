@@ -23,7 +23,8 @@ from app.routers import (
     patients,
     legal_requests,
     memberships,
-    billing as billing_router,
+    billing as billing_claims_router,
+    billing_payments as billing_payments_router,
     surveys,
     intake as intake_router,
     pi_cases as pi_cases_api_router,
@@ -62,8 +63,11 @@ app.include_router(
 app.include_router(next_available.router, prefix="/next-available", tags=["next-available"])
 app.include_router(memberships.router, tags=["Memberships"])
 app.include_router(
-    billing_router.router, prefix="/billing-records", tags=["billing-payments"]
+    billing_payments_router.router,
+    prefix="/billing-records",
+    tags=["billing-payments"],
 )
+app.include_router(billing_claims_router.router, prefix="/billing", tags=["billing"])
 app.include_router(legal_router)
 app.include_router(surveys.router)
 app.include_router(intake_router.router, prefix="", tags=["intake"])
@@ -900,7 +904,7 @@ def _recalculate_billing_record_total(billing_record_id: str) -> None:
     )
     _handle_supabase_error(upd)
     try:
-        billing_router.recalculate_amount_paid_and_status(billing_record_id)
+        billing_payments_router.recalculate_amount_paid_and_status(billing_record_id)
     except HTTPException:
         raise
     except Exception:

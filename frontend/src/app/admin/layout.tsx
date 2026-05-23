@@ -330,6 +330,16 @@ function AdminAuthenticatedShellInner({
                 Groups
               </span>
             </Link>
+            <Link
+              href="/admin/billing"
+              className={navLinkClass("/admin/billing")}
+              onClick={() => setSidebarOpen(false)}
+            >
+              <span className="flex items-center gap-3">
+                <Receipt className={navIconClass("/admin/billing")} aria-hidden />
+                Billing
+              </span>
+            </Link>
             <div className="mt-8" aria-hidden />
             <Link
               href="/admin/memberships"
@@ -342,16 +352,6 @@ function AdminAuthenticatedShellInner({
                   aria-hidden
                 />
                 Memberships
-              </span>
-            </Link>
-            <Link
-              href="/admin/billing"
-              className={navLinkClass("/admin/billing")}
-              onClick={() => setSidebarOpen(false)}
-            >
-              <span className="flex items-center gap-3">
-                <Receipt className={navIconClass("/admin/billing")} aria-hidden />
-                Billing
               </span>
             </Link>
             <Link

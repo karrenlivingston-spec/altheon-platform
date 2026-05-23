@@ -138,6 +138,35 @@ export function dmeBillingStatusBadgeClass(status: string): string {
   return `${BADGE} bg-gray-100 text-gray-500`;
 }
 
+/** Insurance claim workflow statuses */
+export function claimStatusBadgeClass(status: string): string {
+  const s = status.toLowerCase();
+  switch (s) {
+    case "draft":
+      return `${BADGE} bg-gray-100 text-gray-600`;
+    case "submitted":
+      return `${BADGE} bg-blue-50 text-blue-700`;
+    case "approved":
+      return `${BADGE} bg-green-50 text-green-700`;
+    case "denied":
+      return `${BADGE} bg-red-50 text-red-600`;
+    case "resubmitted":
+      return `${BADGE} bg-amber-50 text-amber-700`;
+    default:
+      return `${BADGE} bg-gray-100 text-gray-500`;
+  }
+}
+
+/** Days until filing deadline (insurance claims table) */
+export function claimDaysRemainingClass(days: number | null | undefined): string {
+  if (days === null || days === undefined) {
+    return "text-gray-500";
+  }
+  if (days > 10) return "font-medium text-green-700";
+  if (days >= 5) return "font-medium text-amber-700";
+  return "font-medium text-red-600";
+}
+
 /** Billing type (cash / insurance / mixed) */
 export function billingTypePillClass(t: string): string {
   const s = t.toLowerCase();
