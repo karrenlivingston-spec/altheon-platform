@@ -3,6 +3,7 @@ uvicorn
 supabase
 anthropic
 requests
+httpx
 python-dotenv
 python-multipart
 pytz

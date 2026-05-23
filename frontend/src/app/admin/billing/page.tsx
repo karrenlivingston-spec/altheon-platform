@@ -112,6 +112,22 @@ function formatAuditLabel(entry: AuditLogEntry): string {
   return entry.action || "Event";
 }
 
+async function parseApiError(res: Response): Promise<string> {
+  const text = await res.text().catch(() => "");
+  if (!text) return res.statusText || `HTTP ${res.status}`;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && "detail" in parsed) {
+      const detail = (parsed as { detail: unknown }).detail;
+      if (typeof detail === "string") return detail;
+      return JSON.stringify(detail);
+    }
+  } catch {
+    /* plain text body */
+  }
+  return text;
+}
+
 function formatAuditTime(value: string | null | undefined): string {
   if (!value) return "—";
   try {
@@ -222,6 +238,10 @@ export default function AdminInsuranceBillingPage() {
   const [detail, setDetail] = useState<ClaimDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
+  const [detailActionError, setDetailActionError] = useState<string | null>(null);
+  const [detailSuccess, setDetailSuccess] = useState<string | null>(null);
+  const [submitBusy, setSubmitBusy] = useState(false);
+  const [checkStatusBusy, setCheckStatusBusy] = useState(false);
 
   const patientById = useMemo(() => {
     const m = new Map<string, PatientRow>();
@@ -270,9 +290,11 @@ export default function AdminInsuranceBillingPage() {
     }
   }, [clinicId]);
 
-  const loadDetail = useCallback(async (claimId: string) => {
-    setDetailLoading(true);
-    setDetailError(null);
+  const loadDetail = useCallback(async (claimId: string, silent = false) => {
+    if (!silent) {
+      setDetailLoading(true);
+      setDetailError(null);
+    }
     try {
       const res = await fetch(
         `${API_BASE}/billing/claims/${encodeURIComponent(claimId)}`,
@@ -293,7 +315,7 @@ export default function AdminInsuranceBillingPage() {
       setDetailError(e instanceof Error ? e.message : "Failed to load claim");
       setDetail(null);
     } finally {
-      setDetailLoading(false);
+      if (!silent) setDetailLoading(false);
     }
   }, []);
 
@@ -388,6 +410,8 @@ export default function AdminInsuranceBillingPage() {
 
   function openDetail(claimId: string) {
     setDetailId(claimId);
+    setDetailActionError(null);
+    setDetailSuccess(null);
     void loadDetail(claimId);
   }
 
@@ -395,6 +419,60 @@ export default function AdminInsuranceBillingPage() {
     setDetailId(null);
     setDetail(null);
     setDetailError(null);
+    setDetailActionError(null);
+    setDetailSuccess(null);
+    setSubmitBusy(false);
+    setCheckStatusBusy(false);
+  }
+
+  async function submitClaim() {
+    if (!detailId) return;
+    setSubmitBusy(true);
+    setDetailActionError(null);
+    setDetailSuccess(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/billing/claims/${encodeURIComponent(detailId)}/submit`,
+        { method: "POST", headers: await authHeaders() },
+      );
+      if (!res.ok) {
+        setDetailActionError(await parseApiError(res));
+        return;
+      }
+      setDetailSuccess("Claim submitted successfully.");
+      await loadClaims();
+      await loadDetail(detailId, true);
+    } catch (e) {
+      setDetailActionError(
+        e instanceof Error ? e.message : "Failed to submit claim",
+      );
+    } finally {
+      setSubmitBusy(false);
+    }
+  }
+
+  async function checkClaimStatus() {
+    if (!detailId) return;
+    setCheckStatusBusy(true);
+    setDetailActionError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/billing/claims/${encodeURIComponent(detailId)}/status`,
+        { headers: await authHeaders() },
+      );
+      if (!res.ok) {
+        setDetailActionError(await parseApiError(res));
+        return;
+      }
+      await loadClaims();
+      await loadDetail(detailId, true);
+    } catch (e) {
+      setDetailActionError(
+        e instanceof Error ? e.message : "Failed to check claim status",
+      );
+    } finally {
+      setCheckStatusBusy(false);
+    }
   }
 
   return (
@@ -678,6 +756,18 @@ export default function AdminInsuranceBillingPage() {
               </p>
             ) : null}
 
+            {detailActionError ? (
+              <p className="mt-4 rounded-xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
+                {detailActionError}
+              </p>
+            ) : null}
+
+            {detailSuccess ? (
+              <p className="mt-4 rounded-xl border border-green-100 bg-green-50/80 px-4 py-3 text-sm text-green-800">
+                {detailSuccess}
+              </p>
+            ) : null}
+
             {detailLoading ? (
               <p className="pt-5 text-sm text-gray-500">Loading…</p>
             ) : detail ? (
@@ -696,6 +786,58 @@ export default function AdminInsuranceBillingPage() {
                     {formatDaysRemaining(detail.days_remaining)} until filing deadline
                   </span>
                 </div>
+
+                {(() => {
+                  const st = (detail.status ?? "draft").toLowerCase();
+                  const showSubmit = st === "draft";
+                  const showCheckStatus =
+                    st === "submitted" || st === "resubmitted";
+                  if (!showSubmit && !showCheckStatus) return null;
+                  return (
+                    <div className="flex flex-wrap gap-2">
+                      {showSubmit ? (
+                        <button
+                          type="button"
+                          disabled={submitBusy || checkStatusBusy}
+                          onClick={() => void submitClaim()}
+                          className={`${DS_PRIMARY_BTN} inline-flex items-center justify-center gap-2 disabled:opacity-60`}
+                        >
+                          {submitBusy ? (
+                            <>
+                              <span
+                                className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+                                aria-hidden
+                              />
+                              Submitting…
+                            </>
+                          ) : (
+                            "Submit Claim"
+                          )}
+                        </button>
+                      ) : null}
+                      {showCheckStatus ? (
+                        <button
+                          type="button"
+                          disabled={submitBusy || checkStatusBusy}
+                          onClick={() => void checkClaimStatus()}
+                          className={`${DS_SECONDARY_BTN} inline-flex items-center justify-center gap-2 disabled:opacity-60`}
+                        >
+                          {checkStatusBusy ? (
+                            <>
+                              <span
+                                className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-gray-200 border-t-[var(--color-primary,#16A34A)]"
+                                aria-hidden
+                              />
+                              Checking…
+                            </>
+                          ) : (
+                            "Check Status"
+                          )}
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })()}
 
                 <div className="grid gap-4 sm:grid-cols-2">
                   <DetailField
