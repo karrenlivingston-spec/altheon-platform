@@ -56,7 +56,7 @@ def _shape_claim(row: dict[str, Any]) -> dict[str, Any]:
 def _fetch_claim(claim_id: str) -> dict[str, Any]:
     try:
         resp = (
-            supabase.table("claims")
+            supabase.table("insurance_claims")
             .select("*")
             .eq("id", claim_id)
             .limit(1)
@@ -154,7 +154,7 @@ def list_claims(clinic_id: str = Query(...)):
         raise HTTPException(status_code=400, detail="clinic_id is required")
     try:
         resp = (
-            supabase.table("claims")
+            supabase.table("insurance_claims")
             .select("*")
             .eq("clinic_id", cid)
             .order("filing_deadline")
@@ -173,7 +173,7 @@ def list_claims(clinic_id: str = Query(...)):
 def create_claim(body: CreateClaimBody):
     row = _claim_row_from_create(body)
     try:
-        ins = supabase.table("claims").insert(row).execute()
+        ins = supabase.table("insurance_claims").insert(row).execute()
         _handle_supabase_error(ins)
     except HTTPException:
         raise
@@ -248,7 +248,7 @@ def patch_claim(claim_id: str, body: PatchClaimBody):
     data["updated_at"] = _now_iso()
 
     try:
-        upd = supabase.table("claims").update(data).eq("id", claim_id).execute()
+        upd = supabase.table("insurance_claims").update(data).eq("id", claim_id).execute()
         _handle_supabase_error(upd)
     except HTTPException:
         raise
@@ -290,7 +290,7 @@ def delete_claim(claim_id: str):
             detail="Only draft claims can be deleted",
         )
     try:
-        dele = supabase.table("claims").delete().eq("id", claim_id).execute()
+        dele = supabase.table("insurance_claims").delete().eq("id", claim_id).execute()
         _handle_supabase_error(dele)
     except HTTPException:
         raise
