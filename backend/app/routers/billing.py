@@ -96,8 +96,8 @@ def _insert_audit_log(
 class CreateClaimBody(BaseModel):
     clinic_id: str
     patient_id: str
-    clinician_id: str
-    appointment_id: str
+    clinician_id: Optional[str] = None
+    appointment_id: Optional[str] = None
     first_treatment_date: date
     payer_name: str
     payer_id: str
@@ -126,12 +126,19 @@ class PatchClaimBody(BaseModel):
     filing_deadline: Optional[date] = None
 
 
+def _optional_fk_id(value: Optional[str]) -> Optional[str]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    return s if s else None
+
+
 def _claim_row_from_create(body: CreateClaimBody) -> dict[str, Any]:
     row: dict[str, Any] = {
         "clinic_id": body.clinic_id.strip(),
         "patient_id": body.patient_id.strip(),
-        "clinician_id": body.clinician_id.strip(),
-        "appointment_id": body.appointment_id.strip(),
+        "clinician_id": _optional_fk_id(body.clinician_id),
+        "appointment_id": _optional_fk_id(body.appointment_id),
         "first_treatment_date": body.first_treatment_date.isoformat(),
         "payer_name": body.payer_name.strip(),
         "payer_id": body.payer_id.strip(),

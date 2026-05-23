@@ -197,8 +197,7 @@ function CodeListField({
 }
 
 export default function AdminInsuranceBillingPage() {
-  const { clinicId, me } = useClinic();
-  const clinicUserId = (me?.clinic_user_id ?? "").trim();
+  const { clinicId } = useClinic();
 
   const [claims, setClaims] = useState<ClaimRow[]>([]);
   const [patients, setPatients] = useState<PatientRow[]>([]);
@@ -213,7 +212,6 @@ export default function AdminInsuranceBillingPage() {
   const [policyNumber, setPolicyNumber] = useState("");
   const [memberId, setMemberId] = useState("");
   const [firstTreatmentDate, setFirstTreatmentDate] = useState("");
-  const [appointmentId, setAppointmentId] = useState("");
   const [cptCodes, setCptCodes] = useState<string[]>([""]);
   const [diagnosisCodes, setDiagnosisCodes] = useState<string[]>([""]);
   const [totalAmount, setTotalAmount] = useState("");
@@ -323,7 +321,6 @@ export default function AdminInsuranceBillingPage() {
     setPolicyNumber("");
     setMemberId("");
     setFirstTreatmentDate("");
-    setAppointmentId("");
     setCptCodes([""]);
     setDiagnosisCodes([""]);
     setTotalAmount("");
@@ -341,10 +338,6 @@ export default function AdminInsuranceBillingPage() {
       setError("Select a patient.");
       return;
     }
-    if (!clinicUserId) {
-      setError("Your clinic user profile is required to file claims. Sign in again or contact support.");
-      return;
-    }
     if (!firstTreatmentDate) {
       setError("First treatment date is required.");
       return;
@@ -360,11 +353,6 @@ export default function AdminInsuranceBillingPage() {
     }
     const cpt = cptCodes.map((c) => c.trim()).filter(Boolean);
     const dx = diagnosisCodes.map((c) => c.trim()).filter(Boolean);
-    if (!appointmentId.trim()) {
-      setError("Appointment ID is required to create a claim.");
-      return;
-    }
-
     setCreateBusy(true);
     setError(null);
     try {
@@ -374,8 +362,6 @@ export default function AdminInsuranceBillingPage() {
         body: JSON.stringify({
           clinic_id: clinicId,
           patient_id: selectedPatientId,
-          clinician_id: clinicUserId,
-          appointment_id: appointmentId.trim(),
           first_treatment_date: firstTreatmentDate,
           payer_name: payerName.trim(),
           payer_id: payerId.trim(),
@@ -598,16 +584,6 @@ export default function AdminInsuranceBillingPage() {
                   value={firstTreatmentDate}
                   onChange={(e) => setFirstTreatmentDate(e.target.value)}
                   className={`mt-1 h-9 w-full ${DS_INPUT}`}
-                />
-              </label>
-              <label className="block text-sm font-medium text-gray-700">
-                Appointment ID
-                <input
-                  type="text"
-                  value={appointmentId}
-                  onChange={(e) => setAppointmentId(e.target.value)}
-                  placeholder="Linked appointment UUID"
-                  className={`mt-1 ${DS_INPUT}`}
                 />
               </label>
               <CodeListField
