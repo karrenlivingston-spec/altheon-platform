@@ -7,6 +7,12 @@
 #   Schedule: 0 23 * * *
 #   (23:00 UTC — align with your practice’s Eastern-time policy; adjust for DST if needed.)
 #
+# --- Cron job: intake reminders (initial ~48h + follow-up ~24h before appointment) ---
+#
+#   Command:  curl -f -X POST https://altheon-platform.onrender.com/intake/send-reminders
+#   Schedule: 0 6,12,18 * * *
+#   (06:00, 12:00, and 18:00 UTC daily — three passes to hit 47–49h and 23–25h windows.)
+#
 # Ensure the web service has env: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN,
 # TWILIO_MESSAGING_SERVICE_SID, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY,
-# etc.
+# FRONTEND_URL, etc.

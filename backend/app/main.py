@@ -31,6 +31,7 @@ from app.routers import (
     clinical_notes as clinical_notes_api_router,
     soap_dictation as soap_dictation_router,
     dme as dme_router,
+    measurements as measurements_router,
 )
 from app.routes.legal import router as legal_router
 from routers import groups as groups_router
@@ -77,6 +78,7 @@ app.include_router(
 )
 app.include_router(soap_dictation_router.router, prefix="")
 app.include_router(dme_router.router, prefix="", tags=["dme"])
+app.include_router(measurements_router.router, prefix="")
 app.include_router(groups_router.router, prefix="/groups", tags=["groups"])
 app.include_router(groups_router.patients_groups_router, tags=["groups"])
 app.include_router(superadmin_router.router, prefix="/superadmin", tags=["superadmin"])
