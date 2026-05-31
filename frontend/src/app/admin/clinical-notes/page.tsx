@@ -23,6 +23,7 @@ import {
   AmbientScribe,
   type SoapFromScribe,
 } from "@/components/clinical-notes/AmbientScribe";
+import { MeasurementModule } from "@/components/clinical-notes/MeasurementModule";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -163,6 +164,7 @@ export default function AdminClinicalNotesPage() {
   const [draftSupervisingPtId, setDraftSupervisingPtId] = useState("");
   const [draftSubjective, setDraftSubjective] = useState("");
   const [draftObjective, setDraftObjective] = useState("");
+  const [draftAppointmentId, setDraftAppointmentId] = useState("");
   const [draftAssessment, setDraftAssessment] = useState("");
   const [draftPlan, setDraftPlan] = useState("");
   const [editorBusy, setEditorBusy] = useState(false);
@@ -331,6 +333,7 @@ export default function AdminClinicalNotesPage() {
     setDraftSupervisingPtId("");
     setDraftSubjective("");
     setDraftObjective("");
+    setDraftAppointmentId("");
     setDraftAssessment("");
     setDraftPlan("");
     setPatientInputValue("");
@@ -366,6 +369,7 @@ export default function AdminClinicalNotesPage() {
       setDraftSupervisingPtId((row.supervising_pt_id ?? "").trim());
       setDraftSubjective(row.subjective ?? "");
       setDraftObjective(row.objective ?? "");
+      setDraftAppointmentId((row.appointment_id ?? "").trim());
       setDraftAssessment(row.assessment ?? "");
       setDraftPlan(row.plan ?? "");
       const picked = patients.find((x) => x.id === row.patient_id);
@@ -1044,6 +1048,27 @@ export default function AdminClinicalNotesPage() {
                   className={`mt-1 min-h-[120px] ${DS_INPUT}`}
                 />
               </label>
+              <label className="block text-sm font-medium text-gray-700">
+                Appointment ID (for measurements)
+                <input
+                  type="text"
+                  value={draftAppointmentId}
+                  onChange={(e) => setDraftAppointmentId(e.target.value)}
+                  placeholder="Link to an appointment UUID"
+                  className={`mt-1 h-9 ${DS_INPUT}`}
+                />
+              </label>
+              {draftAppointmentId.trim() ? (
+                <MeasurementModule
+                  appointmentId={draftAppointmentId.trim()}
+                  clinicId={clinicId}
+                />
+              ) : (
+                <p className="text-xs text-gray-500">
+                  Enter an appointment ID above to record structured measurements
+                  in the Objective section.
+                </p>
+              )}
               <label className="block text-sm font-medium text-gray-700">
                 Assessment — clinical reasoning
                 <textarea

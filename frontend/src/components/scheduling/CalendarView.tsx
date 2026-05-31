@@ -23,6 +23,8 @@ import {
 } from "react";
 import { Printer } from "lucide-react";
 
+import { MeasurementModule } from "@/components/clinical-notes/MeasurementModule";
+
 import {
   addDaysToYmd,
   findMondayYmdOfWeekContaining,
@@ -905,7 +907,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
 
       {detailAppt ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
-          <div className="w-full max-w-2xl rounded-xl bg-white p-5 shadow-xl">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-5 shadow-xl">
             <div
               id={intakePrintReady ? "intake-print-area" : undefined}
             >
@@ -1079,6 +1081,18 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
                 </div>
               ) : null}
             </div>
+            <section className="mt-4 border-t border-slate-100 pt-4">
+              <h3
+                className="text-sm font-semibold uppercase tracking-wide"
+                style={{ color: "#1A6B8A" }}
+              >
+                Objective — measurements
+              </h3>
+              <MeasurementModule
+                appointmentId={detailAppt.id}
+                clinicId={clinicId}
+              />
+            </section>
             <button
               type="button"
               className="intake-print-close-btn mt-4 w-full rounded-lg border border-black/10 py-2 text-sm"

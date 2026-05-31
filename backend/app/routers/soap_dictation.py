@@ -104,16 +104,64 @@ def _claude_soap_from_transcript(transcript: str) -> str:
     return "".join(text_parts).strip()
 
 
-@router.post("/soap-dictation/transcribe-and-generate")
-async def transcribe_and_generate(
-    audio: UploadFile = File(..., description="Recorded session audio"),
-    clinic_id: str = Form(...),
-    patient_id: str = Form(default=""),
-):
-    """Transcribe audio with ElevenLabs Scribe, then structure into SOAP with Claude Haiku."""
-    _ = clinic_id.strip()
-    _ = (patient_id or "").strip()
+def _elevenlabs_transcribe_file(tmp_path: str) -> str:
+    eleven_key = (os.environ.get("ELEVENLABS_API_KEY") or "").strip()
+    if not eleven_key:
+        raise HTTPException(
+            status_code=500,
+            detail="ELEVENLABS_API_KEY is not configured",
+        )
 
+    try:
+        with open(tmp_path, "rb") as fp:
+            resp = requests.post(
+                "https://api.elevenlabs.io/v1/speech-to-text",
+                headers={"xi-api-key": eleven_key},
+                data={"model_id": "scribe_v1"},
+                files={
+                    "file": (
+                        Path(tmp_path).name,
+                        fp,
+                        "application/octet-stream",
+                    ),
+                },
+                timeout=300,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"ElevenLabs transcription failed: {exc}",
+        ) from exc
+
+    if not resp.ok:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"ElevenLabs transcription failed: HTTP {resp.status_code} "
+                f"{resp.text[:2000]}"
+            ),
+        )
+
+    try:
+        payload = resp.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"ElevenLabs returned invalid JSON: {exc}",
+        ) from exc
+
+    transcript = str(payload.get("text") or "").strip()
+    if not transcript:
+        raise HTTPException(
+            status_code=500,
+            detail="ElevenLabs returned an empty transcript",
+        )
+    return transcript
+
+
+async def _transcribe_upload(audio: UploadFile) -> str:
     suffix = Path(audio.filename or "audio").suffix
     if not suffix or len(suffix) > 10:
         suffix = ".bin"
@@ -130,83 +178,55 @@ async def transcribe_and_generate(
         finally:
             os.close(fd)
 
-        eleven_key = (os.environ.get("ELEVENLABS_API_KEY") or "").strip()
-        if not eleven_key:
-            raise HTTPException(
-                status_code=500,
-                detail="ELEVENLABS_API_KEY is not configured",
-            )
-
-        try:
-            with open(tmp_path, "rb") as fp:
-                resp = requests.post(
-                    "https://api.elevenlabs.io/v1/speech-to-text",
-                    headers={"xi-api-key": eleven_key},
-                    data={"model_id": "scribe_v1"},
-                    files={
-                        "file": (
-                            Path(tmp_path).name,
-                            fp,
-                            "application/octet-stream",
-                        ),
-                    },
-                    timeout=300,
-                )
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"ElevenLabs transcription failed: {exc}",
-            ) from exc
-
-        if not resp.ok:
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    f"ElevenLabs transcription failed: HTTP {resp.status_code} "
-                    f"{resp.text[:2000]}"
-                ),
-            )
-
-        try:
-            payload = resp.json()
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"ElevenLabs returned invalid JSON: {exc}",
-            ) from exc
-
-        transcript = str(payload.get("text") or "").strip()
-        if not transcript:
-            raise HTTPException(
-                status_code=500,
-                detail="ElevenLabs returned an empty transcript",
-            )
-
-        try:
-            soap_raw = _claude_soap_from_transcript(transcript)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Claude SOAP generation failed: {exc}",
-            ) from exc
-
-        sections = _parse_soap_sections(soap_raw)
-
-        return {
-            "transcript": transcript,
-            "subjective": sections["subjective"],
-            "objective": sections["objective"],
-            "assessment": sections["assessment"],
-            "plan": sections["plan"],
-            "status": "success",
-        }
+        return _elevenlabs_transcribe_file(tmp_path)
     finally:
         if tmp_path:
             try:
                 os.unlink(tmp_path)
             except OSError:
                 pass
+
+
+@router.post("/soap-dictation/transcribe")
+async def transcribe_only(
+    audio: UploadFile = File(..., description="Recorded audio"),
+    clinic_id: str = Form(default=""),
+):
+    """Transcribe audio with ElevenLabs Scribe; returns transcript text only."""
+    _ = (clinic_id or "").strip()
+    transcript = await _transcribe_upload(audio)
+    return {"transcript": transcript}
+
+
+@router.post("/soap-dictation/transcribe-and-generate")
+async def transcribe_and_generate(
+    audio: UploadFile = File(..., description="Recorded session audio"),
+    clinic_id: str = Form(...),
+    patient_id: str = Form(default=""),
+):
+    """Transcribe audio with ElevenLabs Scribe, then structure into SOAP with Claude Haiku."""
+    _ = clinic_id.strip()
+    _ = (patient_id or "").strip()
+
+    transcript = await _transcribe_upload(audio)
+
+    try:
+        soap_raw = _claude_soap_from_transcript(transcript)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Claude SOAP generation failed: {exc}",
+        ) from exc
+
+    sections = _parse_soap_sections(soap_raw)
+
+    return {
+        "transcript": transcript,
+        "subjective": sections["subjective"],
+        "objective": sections["objective"],
+        "assessment": sections["assessment"],
+        "plan": sections["plan"],
+        "status": "success",
+    }
