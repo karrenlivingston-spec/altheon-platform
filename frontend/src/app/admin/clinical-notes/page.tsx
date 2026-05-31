@@ -19,15 +19,90 @@ import {
 } from "@/app/admin/designSystem";
 
 import { useClinic } from "@/app/admin/ClinicContext";
+import { supabase } from "@/lib/supabase";
 import {
   AmbientScribe,
   type SoapFromScribe,
 } from "@/components/clinical-notes/AmbientScribe";
 import { MeasurementModule } from "@/components/clinical-notes/MeasurementModule";
 
-const API_BASE = "https://altheon-platform.onrender.com";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
 
 const MEASUREMENT_CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
+
+const UPCOMING_APPOINTMENT_STATUSES = new Set(["scheduled", "confirmed"]);
+
+type AppointmentListRow = {
+  id: string;
+  patient_id?: string;
+  start_time?: string;
+  status?: string;
+};
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token ?? "";
+  const h: Record<string, string> = {};
+  if (token) h.Authorization = `Bearer ${token}`;
+  return h;
+}
+
+function normalizeAppointmentStatus(status: string | null | undefined): string {
+  return String(status ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
+}
+
+function pickAppointmentIdForPatient(
+  rows: AppointmentListRow[],
+  patientId: string,
+): string {
+  const pid = patientId.trim();
+  if (!pid) return "";
+
+  const forPatient = rows.filter(
+    (r) => String(r.patient_id ?? "").trim() === pid,
+  );
+  if (forPatient.length === 0) return "";
+
+  const now = Date.now();
+
+  const upcoming = forPatient
+    .filter((r) => {
+      const st = normalizeAppointmentStatus(r.status);
+      if (!UPCOMING_APPOINTMENT_STATUSES.has(st)) return false;
+      const t = Date.parse(String(r.start_time ?? ""));
+      return !Number.isNaN(t) && t >= now;
+    })
+    .sort(
+      (a, b) =>
+        Date.parse(String(a.start_time ?? "")) -
+        Date.parse(String(b.start_time ?? "")),
+    );
+
+  if (upcoming.length > 0) {
+    return String(upcoming[0].id ?? "").trim();
+  }
+
+  const past = forPatient
+    .filter((r) => {
+      const t = Date.parse(String(r.start_time ?? ""));
+      return !Number.isNaN(t) && t < now;
+    })
+    .sort(
+      (a, b) =>
+        Date.parse(String(b.start_time ?? "")) -
+        Date.parse(String(a.start_time ?? "")),
+    );
+
+  if (past.length > 0) {
+    return String(past[0].id ?? "").trim();
+  }
+
+  return "";
+}
 
 type PatientRow = {
   id: string;
@@ -188,6 +263,7 @@ export default function AdminClinicalNotesPage() {
   const handleSoapFromScribe = useCallback((soap: SoapFromScribe) => {
     setEditingId(null);
     setDraftPatientId("");
+    setDraftAppointmentId("");
     setPatientInputValue("");
     setPatientPickerOpen(false);
     setDraftNoteType("daily_note");
@@ -327,6 +403,42 @@ export default function AdminClinicalNotesPage() {
       }
     };
   }, [activeTab, hasPendingAi, loadMyNotes]);
+
+  const resolveAppointmentForPatient = useCallback(async (patientId: string) => {
+    const pid = patientId.trim();
+    if (!pid) {
+      setDraftAppointmentId("");
+      return;
+    }
+    try {
+      const params = new URLSearchParams({
+        clinic_id: MEASUREMENT_CLINIC_ID,
+        patient_id: pid,
+      });
+      const res = await fetch(`${API_BASE}/appointments?${params.toString()}`, {
+        headers: await authHeaders(),
+      });
+      if (!res.ok) {
+        setDraftAppointmentId("");
+        return;
+      }
+      const data: unknown = await res.json();
+      const rows = Array.isArray(data) ? (data as AppointmentListRow[]) : [];
+      setDraftAppointmentId(pickAppointmentIdForPatient(rows, pid));
+    } catch {
+      setDraftAppointmentId("");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!editorOpen || editingId) return;
+    const pid = draftPatientId.trim();
+    if (!pid) {
+      setDraftAppointmentId("");
+      return;
+    }
+    void resolveAppointmentForPatient(pid);
+  }, [editorOpen, editingId, draftPatientId, resolveAppointmentForPatient]);
 
   function resetEditor() {
     setEditingId(null);
@@ -958,6 +1070,7 @@ export default function AdminClinicalNotesPage() {
                     const v = e.target.value;
                     setPatientInputValue(v);
                     setDraftPatientId("");
+                    setDraftAppointmentId("");
                     setPatientPickerOpen(true);
                   }}
                   onFocus={() => {
@@ -1056,16 +1169,6 @@ export default function AdminClinicalNotesPage() {
                   clinicId={MEASUREMENT_CLINIC_ID}
                 />
               ) : null}
-              <label className="block text-sm font-medium text-gray-700">
-                Appointment ID (for measurements)
-                <input
-                  type="text"
-                  value={draftAppointmentId}
-                  onChange={(e) => setDraftAppointmentId(e.target.value)}
-                  placeholder="Link to an appointment UUID"
-                  className={`mt-1 h-9 ${DS_INPUT}`}
-                />
-              </label>
               <label className="block text-sm font-medium text-gray-700">
                 Assessment — clinical reasoning
                 <textarea
