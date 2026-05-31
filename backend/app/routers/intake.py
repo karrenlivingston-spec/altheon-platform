@@ -2,7 +2,7 @@
 
 Environment (reminder + token links):
   FRONTEND_URL — required for POST /intake/send-reminders SMS links (e.g. https://app.example.com).
-  Cron schedule (Render): 0 6,12,18 * * * — three runs daily.
+  Cron schedule (Render): 0 6,12,18 * * * — ~24h safety-net for missed booking intake SMS.
   INTAKE_SECRET — existing webhook auth for POST /intake.
 
 stdlib: secrets (token_urlsafe) — no PyPI package.
@@ -380,6 +380,122 @@ def _appointments_in_hours_window(hours_lo: float, hours_hi: float) -> list[dict
         return []
 
 
+def _intake_sms_sent(appointment_id: str, message_type: str) -> bool:
+    aid = str(appointment_id or "").strip()
+    if not aid:
+        return False
+    try:
+        resp = (
+            supabase.table("sms_logs")
+            .select("id")
+            .eq("appointment_id", aid)
+            .eq("message_type", message_type)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+        return bool(resp.data)
+    except Exception:
+        logger.exception("sms_logs lookup failed appointment_id=%s", aid)
+        return False
+
+
+def _days_until_appointment(start_time: Any) -> int:
+    start_dt = _parse_start_dt(start_time)
+    now = datetime.now(timezone.utc)
+    delta = start_dt - now
+    days = int(delta.total_seconds() // 86400)
+    if delta.total_seconds() > 0 and delta.total_seconds() % 86400:
+        days += 1
+    return max(1, days)
+
+
+def _ensure_intake_token(
+    appointment_id: str,
+    patient_id: str,
+    clinic_id: str,
+    start_time: Any,
+    clinic_tz: str,
+) -> Optional[str]:
+    existing = _get_intake_token_for_appointment(appointment_id)
+    if existing:
+        tok = str(existing.get("token") or "").strip()
+        return tok or None
+    token = secrets.token_urlsafe(32)
+    start_dt = _parse_start_dt(start_time)
+    expires_dt = _token_expires_at_utc(start_dt, clinic_tz)
+    ins = (
+        supabase.table("intake_tokens")
+        .insert(
+            {
+                "patient_id": patient_id,
+                "appointment_id": appointment_id,
+                "clinic_id": clinic_id,
+                "token": token,
+                "expires_at": expires_dt.isoformat(),
+                "used": False,
+            }
+        )
+        .execute()
+    )
+    _handle_supabase_error(ins)
+    if not ins.data:
+        return None
+    return token
+
+
+def send_booking_intake_sms(
+    *,
+    appointment_id: str,
+    patient_id: str,
+    clinic_id: str,
+    start_time_iso: str,
+    patient_phone: Optional[str],
+    patient_first_name: str = "",
+    preferred_language: Optional[str] = None,
+) -> Optional[str]:
+    """Create intake token if needed and send initial intake SMS at booking."""
+    if not (patient_phone and str(patient_phone).strip()):
+        return None
+    if _intake_sms_sent(appointment_id, "intake_reminder"):
+        return None
+
+    base = (os.environ.get("FRONTEND_URL") or "").strip()
+    if not base:
+        logger.warning("FRONTEND_URL not set; skipping booking intake SMS")
+        return None
+
+    clinic_tz = _fetch_clinic_timezone(clinic_id, {})
+    token = _ensure_intake_token(
+        appointment_id,
+        patient_id,
+        clinic_id,
+        start_time_iso,
+        clinic_tz,
+    )
+    if not token:
+        return None
+
+    days = _days_until_appointment(start_time_iso)
+    clinic_name = _fetch_clinic_display_name(clinic_id)
+    pref = _normalize_pref_lang(preferred_language)
+    body = _reminder_sms_body(
+        pref,
+        patient_first_name,
+        clinic_name,
+        days,
+        token,
+        base,
+    )
+    return send_sms(
+        _to_e164_us(str(patient_phone)),
+        body,
+        patient_id=patient_id,
+        appointment_id=appointment_id,
+        message_type="intake_reminder",
+    )
+
+
 @router.post("/intake")
 def submit_intake(
     body: IntakeSubmission,
@@ -531,112 +647,24 @@ def list_intakes_for_patient(
 
 @router.post("/intake/send-reminders")
 def send_intake_reminders():
-    """Cron (0 6,12,18 * * *): initial intake SMS ~48h before; follow-up ~24h if unused token."""
-    try:
-        base = (os.environ.get("FRONTEND_URL") or "").strip()
-        if not base:
-            raise HTTPException(
-                status_code=500,
-                detail="FRONTEND_URL environment variable is not set",
-            )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    """Cron (~24h before): nudge patients who have not completed intake."""
+    base = (os.environ.get("FRONTEND_URL") or "").strip()
+    if not base:
+        raise HTTPException(
+            status_code=500,
+            detail="FRONTEND_URL environment variable is not set",
+        )
 
-    initial_sent = 0
-    initial_skipped = 0
-    followup_sent = 0
-    followup_skipped = 0
+    sent = 0
+    skipped = 0
     errors = 0
-    tz_cache: dict[str, str] = {}
 
-    for ap in _appointments_in_hours_window(47, 49):
+    for ap in _appointments_in_hours_window(20, 28):
         st_ap = str(ap.get("status") or "").lower().replace(" ", "_")
         if st_ap in ("cancelled", "canceled", "completed"):
-            initial_skipped += 1
-            continue
-        appt_id = str(ap.get("id") or "").strip()
-        patient_id = str(ap.get("patient_id") or "").strip()
-        clinic_id = str(ap.get("clinic_id") or "").strip()
-        if not appt_id or not patient_id or not clinic_id:
-            errors += 1
+            skipped += 1
             continue
 
-        try:
-            if _intake_token_exists_for_appointment(appt_id):
-                initial_skipped += 1
-                continue
-
-            token = secrets.token_urlsafe(32)
-            clinic_tz = _fetch_clinic_timezone(clinic_id, tz_cache)
-            start_dt = _parse_start_dt(ap.get("start_time"))
-            expires_dt = _token_expires_at_utc(start_dt, clinic_tz)
-
-            ins_tok = (
-                supabase.table("intake_tokens")
-                .insert(
-                    {
-                        "patient_id": patient_id,
-                        "appointment_id": appt_id,
-                        "clinic_id": clinic_id,
-                        "token": token,
-                        "expires_at": expires_dt.isoformat(),
-                        "used": False,
-                    }
-                )
-                .execute()
-            )
-            _handle_supabase_error(ins_tok)
-            if not ins_tok.data:
-                errors += 1
-                continue
-
-            pt_resp = (
-                supabase.table("patients")
-                .select("first_name, phone, preferred_language")
-                .eq("id", patient_id)
-                .limit(1)
-                .execute()
-            )
-            _handle_supabase_error(pt_resp)
-            prow = (pt_resp.data or [None])[0]
-            if not isinstance(prow, dict):
-                errors += 1
-                continue
-            phone = prow.get("phone")
-            fname = (prow.get("first_name") or "").strip()
-            pref = _normalize_pref_lang(prow.get("preferred_language"))
-            if not phone:
-                errors += 1
-                continue
-
-            clinic_name = _fetch_clinic_display_name(clinic_id)
-            sms_body = _reminder_sms_body(pref, fname, clinic_name, 2, token, base)
-            sid = send_sms(
-                _to_e164_us(str(phone)),
-                sms_body,
-                patient_id=patient_id,
-                appointment_id=appt_id,
-                message_type="intake_reminder",
-            )
-            if sid is None:
-                errors += 1
-            else:
-                initial_sent += 1
-        except Exception:
-            logger.exception(
-                "intake initial reminder failed appt_id=%s patient_id=%s",
-                appt_id,
-                patient_id,
-            )
-            errors += 1
-
-    for ap in _appointments_in_hours_window(23, 25):
-        st_ap = str(ap.get("status") or "").lower().replace(" ", "_")
-        if st_ap in ("cancelled", "canceled", "completed"):
-            followup_skipped += 1
-            continue
         appt_id = str(ap.get("id") or "").strip()
         patient_id = str(ap.get("patient_id") or "").strip()
         if not appt_id or not patient_id:
@@ -645,11 +673,16 @@ def send_intake_reminders():
 
         try:
             tok_row = _get_intake_token_for_appointment(appt_id)
-            if not tok_row:
-                followup_skipped += 1
+            if not tok_row or _is_token_used(tok_row):
+                skipped += 1
                 continue
-            if _is_token_used(tok_row):
-                followup_skipped += 1
+
+            if _intake_sms_sent(appt_id, "intake_reminder"):
+                skipped += 1
+                continue
+
+            if _intake_sms_sent(appt_id, "intake_followup_reminder"):
+                skipped += 1
                 continue
 
             token = str(tok_row.get("token") or "").strip()
@@ -666,18 +699,14 @@ def send_intake_reminders():
             )
             _handle_supabase_error(pt_resp)
             prow = (pt_resp.data or [None])[0]
-            if not isinstance(prow, dict):
-                errors += 1
-                continue
-            phone = prow.get("phone")
-            pref = _normalize_pref_lang(prow.get("preferred_language"))
-            if not phone:
+            if not isinstance(prow, dict) or not prow.get("phone"):
                 errors += 1
                 continue
 
+            pref = _normalize_pref_lang(prow.get("preferred_language"))
             sms_body = _followup_sms_body(pref, token, base)
             sid = send_sms(
-                _to_e164_us(str(phone)),
+                _to_e164_us(str(prow["phone"])),
                 sms_body,
                 patient_id=patient_id,
                 appointment_id=appt_id,
@@ -686,24 +715,16 @@ def send_intake_reminders():
             if sid is None:
                 errors += 1
             else:
-                followup_sent += 1
+                sent += 1
         except Exception:
             logger.exception(
-                "intake follow-up reminder failed appt_id=%s patient_id=%s",
+                "intake 24h reminder failed appt_id=%s patient_id=%s",
                 appt_id,
                 patient_id,
             )
             errors += 1
 
-    return {
-        "initial_sent": initial_sent,
-        "initial_skipped": initial_skipped,
-        "followup_sent": followup_sent,
-        "followup_skipped": followup_skipped,
-        "sent": initial_sent + followup_sent,
-        "skipped": initial_skipped + followup_skipped,
-        "errors": errors,
-    }
+    return {"sent": sent, "skipped": skipped, "errors": errors}
 
 
 def _parse_expires_at(raw: Any) -> datetime:

@@ -15,6 +15,7 @@ from app.google_calendar import (
     delete_calendar_event,
     update_calendar_event,
 )
+from app.routers.intake import send_booking_intake_sms
 from app.sms import send_sms
 
 router = APIRouter()
@@ -1487,6 +1488,9 @@ def create_appointment(payload: CreateAppointmentRequest):
             appointment_id,
         )
 
+    phone_out: Any = payload.patient_phone
+    fname = (payload.patient_first_name or "").strip()
+    pref_lang = pref_stored
     try:
         pt_msg = (
             supabase.table("patients")
@@ -1515,6 +1519,23 @@ def create_appointment(payload: CreateAppointmentRequest):
     except Exception:
         logger.exception(
             "confirmation SMS failed appointment_id=%s patient_id=%s",
+            appointment_id,
+            patient_id,
+        )
+
+    try:
+        send_booking_intake_sms(
+            appointment_id=appointment_id,
+            patient_id=patient_id,
+            clinic_id=payload.clinic_id,
+            start_time_iso=start_iso,
+            patient_phone=phone_out,
+            patient_first_name=fname,
+            preferred_language=pref_lang,
+        )
+    except Exception:
+        logger.exception(
+            "booking intake SMS failed appointment_id=%s patient_id=%s",
             appointment_id,
             patient_id,
         )
