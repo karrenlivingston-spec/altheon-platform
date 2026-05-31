@@ -6,6 +6,15 @@ const nextConfig: NextConfig = {
       { source: "/dashboard/clinics", destination: "/admin/clinics" },
     ];
   },
+  async redirects() {
+    return [
+      {
+        source: "/",
+        destination: "/admin",
+        permanent: false,
+      },
+    ];
+  },
 };
 
 export default nextConfig;
