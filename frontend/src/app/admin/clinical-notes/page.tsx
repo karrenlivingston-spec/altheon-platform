@@ -27,6 +27,8 @@ import { MeasurementModule } from "@/components/clinical-notes/MeasurementModule
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
+const MEASUREMENT_CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
+
 type PatientRow = {
   id: string;
   first_name?: string;
@@ -1048,6 +1050,12 @@ export default function AdminClinicalNotesPage() {
                   className={`mt-1 min-h-[120px] ${DS_INPUT}`}
                 />
               </label>
+              {draftAppointmentId.trim() ? (
+                <MeasurementModule
+                  appointmentId={draftAppointmentId.trim()}
+                  clinicId={MEASUREMENT_CLINIC_ID}
+                />
+              ) : null}
               <label className="block text-sm font-medium text-gray-700">
                 Appointment ID (for measurements)
                 <input
@@ -1058,17 +1066,6 @@ export default function AdminClinicalNotesPage() {
                   className={`mt-1 h-9 ${DS_INPUT}`}
                 />
               </label>
-              {draftAppointmentId.trim() ? (
-                <MeasurementModule
-                  appointmentId={draftAppointmentId.trim()}
-                  clinicId={clinicId}
-                />
-              ) : (
-                <p className="text-xs text-gray-500">
-                  Enter an appointment ID above to record structured measurements
-                  in the Objective section.
-                </p>
-              )}
               <label className="block text-sm font-medium text-gray-700">
                 Assessment — clinical reasoning
                 <textarea
