@@ -55,6 +55,7 @@ app.add_middleware(
 )
 
 app.include_router(slots.router, prefix="/slots", tags=["slots"])
+app.include_router(measurements_router.router, prefix="")
 app.include_router(appointments.router, prefix="/appointments", tags=["appointments"])
 app.include_router(availability.router, tags=["availability"])
 app.include_router(patients.router, prefix="/patients", tags=["patients"])
@@ -78,7 +79,6 @@ app.include_router(
 )
 app.include_router(soap_dictation_router.router, prefix="")
 app.include_router(dme_router.router, prefix="", tags=["dme"])
-app.include_router(measurements_router.router, prefix="")
 app.include_router(groups_router.router, prefix="/groups", tags=["groups"])
 app.include_router(groups_router.patients_groups_router, tags=["groups"])
 app.include_router(superadmin_router.router, prefix="/superadmin", tags=["superadmin"])
