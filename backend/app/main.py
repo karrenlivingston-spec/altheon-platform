@@ -32,6 +32,7 @@ from app.routers import (
     soap_dictation as soap_dictation_router,
     dme as dme_router,
     measurements as measurements_router,
+    outcome_measures as outcome_measures_router,
 )
 from app.routes.legal import router as legal_router
 from routers import groups as groups_router
@@ -56,6 +57,7 @@ app.add_middleware(
 
 app.include_router(slots.router, prefix="/slots", tags=["slots"])
 app.include_router(measurements_router.router, prefix="")
+app.include_router(outcome_measures_router.router, prefix="")
 app.include_router(appointments.router, prefix="/appointments", tags=["appointments"])
 app.include_router(availability.router, tags=["availability"])
 app.include_router(patients.router, prefix="/patients", tags=["patients"])
