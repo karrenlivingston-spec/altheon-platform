@@ -47,6 +47,7 @@ def _resolve_bearer_user_id(authorization: Optional[str]) -> str:
     try:
         auth_response = supabase.auth.get_user(token)
     except Exception as exc:
+        logger.exception("outcome_measures auth.get_user failed")
         raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
 
     user_obj = getattr(auth_response, "user", None)
@@ -75,7 +76,12 @@ def _assert_user_has_clinic_access(user_id: str, clinic_id: str) -> None:
     except HTTPException:
         raise
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception(
+            "clinic_users lookup failed user_id=%s clinic_id=%s",
+            user_id,
+            clinic_id,
+        )
+        raise HTTPException(status_code=500, detail="Failed to verify clinic access") from exc
     if not access.data:
         raise HTTPException(status_code=403, detail="No clinic access for user")
 
@@ -104,14 +110,20 @@ def _fetch_token_row(token: str) -> Optional[dict[str, Any]]:
     t = (token or "").strip()
     if not t:
         return None
-    resp = (
-        supabase.table("outcome_measure_tokens")
-        .select("id, token, patient_id, clinic_id, form_type, completed")
-        .eq("token", t)
-        .limit(1)
-        .execute()
-    )
-    _handle_supabase_error(resp)
+    try:
+        resp = (
+            supabase.table("outcome_measure_tokens")
+            .select("id, token, patient_id, clinic_id, form_type, completed")
+            .eq("token", t)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("outcome_measure_tokens lookup failed token=%s", t[:8])
+        raise HTTPException(status_code=500, detail="Failed to load outcome measure token") from exc
     rows = resp.data or []
     return rows[0] if rows else None
 
@@ -122,15 +134,28 @@ def _is_completed(row: dict[str, Any]) -> bool:
 
 
 def _assert_patient_in_clinic(patient_id: str, clinic_id: str) -> None:
-    resp = (
-        supabase.table("patients")
-        .select("id")
-        .eq("id", patient_id)
-        .eq("clinic_id", clinic_id)
-        .limit(1)
-        .execute()
-    )
-    _handle_supabase_error(resp)
+    try:
+        resp = (
+            supabase.table("patient_clinic_access")
+            .select("id")
+            .eq("patient_id", patient_id)
+            .eq("clinic_id", clinic_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "patient_clinic_access lookup failed patient_id=%s clinic_id=%s",
+            patient_id,
+            clinic_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to verify patient clinic access",
+        ) from exc
     if not resp.data:
         raise HTTPException(status_code=404, detail="Patient not found in clinic")
 
@@ -244,74 +269,85 @@ def send_outcome_measure(
     body: SendOutcomeMeasureBody,
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
-    user_id = _resolve_bearer_user_id(authorization)
-    form_type = _normalize_form_type(body.form_type)
-    patient_id = body.patient_id.strip()
-    clinic_id = body.clinic_id.strip()
+    try:
+        user_id = _resolve_bearer_user_id(authorization)
+        form_type = _normalize_form_type(body.form_type)
+        patient_id = body.patient_id.strip()
+        clinic_id = body.clinic_id.strip()
 
-    _assert_user_has_clinic_access(user_id, clinic_id)
-    _assert_patient_in_clinic(patient_id, clinic_id)
+        _assert_user_has_clinic_access(user_id, clinic_id)
+        _assert_patient_in_clinic(patient_id, clinic_id)
 
-    pt_resp = (
-        supabase.table("patients")
-        .select("first_name, phone")
-        .eq("id", patient_id)
-        .limit(1)
-        .execute()
-    )
-    _handle_supabase_error(pt_resp)
-    pt_row = (pt_resp.data or [None])[0]
-    if not isinstance(pt_row, dict):
-        raise HTTPException(status_code=404, detail="Patient not found")
-
-    phone = (pt_row.get("phone") or "").strip()
-    if not phone:
-        raise HTTPException(status_code=400, detail="Patient has no phone number on file")
-
-    token = secrets.token_urlsafe(32)
-    ins = (
-        supabase.table("outcome_measure_tokens")
-        .insert(
-            {
-                "token": token,
-                "patient_id": patient_id,
-                "clinic_id": clinic_id,
-                "form_type": form_type,
-                "completed": False,
-            }
+        pt_resp = (
+            supabase.table("patients")
+            .select("first_name, phone")
+            .eq("id", patient_id)
+            .limit(1)
+            .execute()
         )
-        .execute()
-    )
-    _handle_supabase_error(ins)
-    if not ins.data:
-        raise HTTPException(status_code=500, detail="Failed to create outcome measure token")
+        _handle_supabase_error(pt_resp)
+        pt_row = (pt_resp.data or [None])[0]
+        if not isinstance(pt_row, dict):
+            raise HTTPException(status_code=404, detail="Patient not found")
 
-    link = f"{OUTCOMES_BASE_URL}/{token}"
-    fname = (pt_row.get("first_name") or "").strip() or "there"
-    form_label = {
-        "ndi": "Neck Disability Index",
-        "odi": "Oswestry Disability Index",
-        "quickdash": "QuickDASH",
-    }[form_type]
-    sms_body = (
-        f"Hi {fname}, please complete your {form_label} outcome measure: {link}"
-    )
+        phone = (pt_row.get("phone") or "").strip()
+        if not phone:
+            raise HTTPException(status_code=400, detail="Patient has no phone number on file")
 
-    sid = send_sms(
-        _to_e164_us(phone),
-        sms_body,
-        patient_id=patient_id,
-        message_type="outcome_measure",
-    )
-    if sid is None:
-        raise HTTPException(status_code=502, detail="Failed to send SMS")
+        token = secrets.token_urlsafe(32)
+        ins = (
+            supabase.table("outcome_measure_tokens")
+            .insert(
+                {
+                    "token": token,
+                    "patient_id": patient_id,
+                    "clinic_id": clinic_id,
+                    "form_type": form_type,
+                    "completed": False,
+                }
+            )
+            .execute()
+        )
+        _handle_supabase_error(ins)
+        if not ins.data:
+            raise HTTPException(status_code=500, detail="Failed to create outcome measure token")
 
-    return {
-        "success": True,
-        "token": token,
-        "link": link,
-        "twilio_sid": sid,
-    }
+        link = f"{OUTCOMES_BASE_URL}/{token}"
+        fname = (pt_row.get("first_name") or "").strip() or "there"
+        form_label = {
+            "ndi": "Neck Disability Index",
+            "odi": "Oswestry Disability Index",
+            "quickdash": "QuickDASH",
+        }[form_type]
+        sms_body = (
+            f"Hi {fname}, please complete your {form_label} outcome measure: {link}"
+        )
+
+        sid = send_sms(
+            _to_e164_us(phone),
+            sms_body,
+            patient_id=patient_id,
+            message_type="outcome_measure",
+        )
+        if sid is None:
+            raise HTTPException(status_code=502, detail="Failed to send SMS")
+
+        return {
+            "success": True,
+            "token": token,
+            "link": link,
+            "twilio_sid": sid,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "send_outcome_measure failed patient_id=%s clinic_id=%s form_type=%s",
+            body.patient_id,
+            body.clinic_id,
+            body.form_type,
+        )
+        raise HTTPException(status_code=500, detail="Failed to send outcome measure") from exc
 
 
 @router.get("/outcome-measures/patient/{patient_id}")
@@ -320,113 +356,135 @@ def list_patient_outcome_measures(
     clinic_id: str = Query(..., min_length=1),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
-    user_id = _resolve_bearer_user_id(authorization)
-    pid = patient_id.strip()
-    cid = clinic_id.strip()
-    if not pid:
-        raise HTTPException(status_code=400, detail="patient_id is required")
+    try:
+        user_id = _resolve_bearer_user_id(authorization)
+        pid = patient_id.strip()
+        cid = clinic_id.strip()
+        if not pid:
+            raise HTTPException(status_code=400, detail="patient_id is required")
 
-    _assert_user_has_clinic_access(user_id, cid)
-    _assert_patient_in_clinic(pid, cid)
+        _assert_user_has_clinic_access(user_id, cid)
+        _assert_patient_in_clinic(pid, cid)
 
-    resp = (
-        supabase.table("outcome_measure_results")
-        .select(
-            "id, patient_id, clinic_id, form_type, score, percentage, "
-            "interpretation, answers, completed_at"
+        resp = (
+            supabase.table("outcome_measure_results")
+            .select(
+                "id, patient_id, clinic_id, form_type, score, percentage, "
+                "interpretation, answers, completed_at"
+            )
+            .eq("patient_id", pid)
+            .eq("clinic_id", cid)
+            .order("completed_at", desc=True)
+            .execute()
         )
-        .eq("patient_id", pid)
-        .eq("clinic_id", cid)
-        .order("completed_at", desc=True)
-        .execute()
-    )
-    _handle_supabase_error(resp)
-    return {"results": resp.data or []}
+        _handle_supabase_error(resp)
+        return {"results": resp.data or []}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "list_patient_outcome_measures failed patient_id=%s clinic_id=%s",
+            patient_id,
+            clinic_id,
+        )
+        raise HTTPException(status_code=500, detail="Failed to load outcome measures") from exc
 
 
 @router.get("/outcome-measures/{token}")
 def get_outcome_measure_form(token: str):
-    row = _fetch_token_row(token)
-    if not row:
-        raise HTTPException(status_code=404, detail="Token not found")
-    if _is_completed(row):
-        return {"status": "already_completed"}
+    try:
+        row = _fetch_token_row(token)
+        if not row:
+            raise HTTPException(status_code=404, detail="Token not found")
+        if _is_completed(row):
+            return {"status": "already_completed"}
 
-    patient_id = str(row.get("patient_id") or "").strip()
-    if not patient_id:
-        raise HTTPException(status_code=500, detail="Invalid token row")
+        patient_id = str(row.get("patient_id") or "").strip()
+        if not patient_id:
+            raise HTTPException(status_code=500, detail="Invalid token row")
 
-    pt_resp = (
-        supabase.table("patients")
-        .select("first_name")
-        .eq("id", patient_id)
-        .limit(1)
-        .execute()
-    )
-    _handle_supabase_error(pt_resp)
-    pt_row = (pt_resp.data or [None])[0]
-    if not isinstance(pt_row, dict):
-        raise HTTPException(status_code=404, detail="Patient not found")
+        pt_resp = (
+            supabase.table("patients")
+            .select("first_name")
+            .eq("id", patient_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(pt_resp)
+        pt_row = (pt_resp.data or [None])[0]
+        if not isinstance(pt_row, dict):
+            raise HTTPException(status_code=404, detail="Patient not found")
 
-    return {
-        "status": "valid",
-        "form_type": row.get("form_type"),
-        "patient_first_name": pt_row.get("first_name"),
-    }
+        return {
+            "status": "valid",
+            "form_type": row.get("form_type"),
+            "patient_first_name": pt_row.get("first_name"),
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("get_outcome_measure_form failed token=%s", (token or "")[:8])
+        raise HTTPException(status_code=500, detail="Failed to load outcome measure form") from exc
 
 
 @router.post("/outcome-measures/{token}/submit")
 def submit_outcome_measure(token: str, body: SubmitOutcomeMeasureBody):
-    row = _fetch_token_row(token)
-    if not row:
-        raise HTTPException(status_code=404, detail="Token not found")
-    if _is_completed(row):
-        raise HTTPException(status_code=400, detail="This form has already been completed")
+    try:
+        row = _fetch_token_row(token)
+        if not row:
+            raise HTTPException(status_code=404, detail="Token not found")
+        if _is_completed(row):
+            raise HTTPException(status_code=400, detail="This form has already been completed")
 
-    form_type = _normalize_form_type(str(row.get("form_type") or ""))
-    _validate_answers(form_type, body.answers)
-    scores = _calculate_scores(form_type, body.answers)
+        form_type = _normalize_form_type(str(row.get("form_type") or ""))
+        _validate_answers(form_type, body.answers)
+        scores = _calculate_scores(form_type, body.answers)
 
-    patient_id = str(row.get("patient_id") or "").strip()
-    clinic_id = str(row.get("clinic_id") or "").strip()
-    token_id = str(row.get("id") or "").strip()
-    if not patient_id or not clinic_id or not token_id:
-        raise HTTPException(status_code=500, detail="Invalid token row")
+        patient_id = str(row.get("patient_id") or "").strip()
+        clinic_id = str(row.get("clinic_id") or "").strip()
+        token_id = str(row.get("id") or "").strip()
+        if not patient_id or not clinic_id or not token_id:
+            raise HTTPException(status_code=500, detail="Invalid token row")
 
-    completed_at = datetime.now(timezone.utc).isoformat()
-    ins = (
-        supabase.table("outcome_measure_results")
-        .insert(
-            {
-                "patient_id": patient_id,
-                "clinic_id": clinic_id,
-                "form_type": form_type,
-                "score": scores["score"],
-                "percentage": scores["percentage"],
-                "interpretation": scores["interpretation"],
-                "answers": body.answers,
-                "completed_at": completed_at,
-            }
+        completed_at = datetime.now(timezone.utc).isoformat()
+        ins = (
+            supabase.table("outcome_measure_results")
+            .insert(
+                {
+                    "patient_id": patient_id,
+                    "clinic_id": clinic_id,
+                    "form_type": form_type,
+                    "score": scores["score"],
+                    "percentage": scores["percentage"],
+                    "interpretation": scores["interpretation"],
+                    "answers": body.answers,
+                    "completed_at": completed_at,
+                }
+            )
+            .execute()
         )
-        .execute()
-    )
-    _handle_supabase_error(ins)
-    if not ins.data:
-        raise HTTPException(status_code=500, detail="Failed to save outcome measure result")
+        _handle_supabase_error(ins)
+        if not ins.data:
+            raise HTTPException(status_code=500, detail="Failed to save outcome measure result")
 
-    upd = (
-        supabase.table("outcome_measure_tokens")
-        .update({"completed": True})
-        .eq("id", token_id)
-        .execute()
-    )
-    _handle_supabase_error(upd)
+        upd = (
+            supabase.table("outcome_measure_tokens")
+            .update({"completed": True})
+            .eq("id", token_id)
+            .execute()
+        )
+        _handle_supabase_error(upd)
 
-    result_row = ins.data[0]
-    return {
-        "success": True,
-        "score": scores["score"],
-        "percentage": scores["percentage"],
-        "interpretation": scores["interpretation"],
-        "result": result_row,
-    }
+        result_row = ins.data[0]
+        return {
+            "success": True,
+            "score": scores["score"],
+            "percentage": scores["percentage"],
+            "interpretation": scores["interpretation"],
+            "result": result_row,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("submit_outcome_measure failed token=%s", (token or "")[:8])
+        raise HTTPException(status_code=500, detail="Failed to submit outcome measure") from exc

@@ -46,6 +46,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://altheon-platform.vercel.app",
+        "https://www.altheon.app",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
@@ -55,6 +56,7 @@ app.add_middleware(
     expose_headers=["*"],
 )
 
+# Routers are registered after CORS middleware so all routes receive CORS headers.
 app.include_router(slots.router, prefix="/slots", tags=["slots"])
 app.include_router(measurements_router.router, prefix="")
 app.include_router(outcome_measures_router.router, prefix="")
