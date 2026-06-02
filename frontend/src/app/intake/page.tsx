@@ -64,11 +64,8 @@ export default function IntakePage() {
             <span className="text-3xl leading-none">✓</span>
           </div>
           <h2 className="text-xl font-semibold tracking-tight text-white sm:text-2xl">
-            Thank you! Your intake is complete.
+            Your intake form is now complete.
           </h2>
-          <p className="mt-4 text-base leading-relaxed text-[#c7eae4]">
-            Please have a seat — the team will call you shortly.
-          </p>
         </div>
       </div>
     );
