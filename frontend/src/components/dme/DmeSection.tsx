@@ -370,9 +370,15 @@ function DmeSignatureCapture({
 export type DmeSectionProps = {
   clinicId: string;
   patientId: string;
+  /** Delay initial fetch to avoid concurrent API bursts (ms). */
+  loadDelayMs?: number;
 };
 
-export function DmeSection({ clinicId, patientId }: DmeSectionProps) {
+export function DmeSection({
+  clinicId,
+  patientId,
+  loadDelayMs = 0,
+}: DmeSectionProps) {
   const [rows, setRows] = useState<DmeRecord[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -422,13 +428,15 @@ export function DmeSection({ clinicId, patientId }: DmeSectionProps) {
 
   useEffect(() => {
     let cancelled = false;
-    queueMicrotask(() => {
+    const delay = Math.max(0, loadDelayMs);
+    const timer = window.setTimeout(() => {
       if (!cancelled) void load();
-    });
+    }, delay);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [load]);
+  }, [load, loadDelayMs]);
 
   function openAdd() {
     setError(null);

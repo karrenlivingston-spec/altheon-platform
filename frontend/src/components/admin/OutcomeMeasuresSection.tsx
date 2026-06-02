@@ -63,9 +63,11 @@ function formatScore(value: number | null | undefined): string {
 export function OutcomeMeasuresSection({
   clinicId,
   patientId,
+  loadDelayMs = 0,
 }: {
   clinicId: string;
   patientId: string;
+  loadDelayMs?: number;
 }) {
   const [results, setResults] = useState<OutcomeResultRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -105,8 +107,16 @@ export function OutcomeMeasuresSection({
   }, [patientId, clinicId]);
 
   useEffect(() => {
-    void loadResults();
-  }, [loadResults]);
+    let cancelled = false;
+    const delay = Math.max(0, loadDelayMs);
+    const timer = window.setTimeout(() => {
+      if (!cancelled) void loadResults();
+    }, delay);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [loadResults, loadDelayMs]);
 
   async function handleSend() {
     if (!patientId || !clinicId) return;

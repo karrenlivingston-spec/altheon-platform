@@ -45,11 +45,13 @@ async function authHeaders(): Promise<Record<string, string>> {
 export type PatientGroupsSectionProps = {
   clinicId: string;
   patientId: string;
+  loadDelayMs?: number;
 };
 
 export function PatientGroupsSection({
   clinicId,
   patientId,
+  loadDelayMs = 0,
 }: PatientGroupsSectionProps) {
   const [groups, setGroups] = useState<PatientGroupRow[]>([]);
   const [clinicGroups, setClinicGroups] = useState<ClinicGroupRow[]>([]);
@@ -111,13 +113,19 @@ export function PatientGroupsSection({
 
   useEffect(() => {
     let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) void loadPatientGroups();
-    });
+    const delay = Math.max(0, loadDelayMs);
+    const timer = window.setTimeout(() => {
+      if (cancelled) return;
+      void (async () => {
+        await loadPatientGroups();
+        if (!cancelled) await loadClinicGroups();
+      })();
+    }, delay);
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [loadPatientGroups]);
+  }, [loadPatientGroups, loadClinicGroups, loadDelayMs]);
 
   const memberIds = useMemo(
     () => new Set(groups.map((g) => g.id)),

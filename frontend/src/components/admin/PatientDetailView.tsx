@@ -33,9 +33,23 @@ import { PatientGroupsSection } from "@/components/admin/PatientGroupsSection";
 import { OutcomeMeasuresSection } from "@/components/admin/OutcomeMeasuresSection";
 import { DmeSection } from "@/components/dme/DmeSection";
 
-const API_BASE = "https://altheon-platform.onrender.com";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
 
 const NY = "America/New_York";
+const SECONDARY_STAGGER_MS = 200;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function InlineSectionError({ message }: { message: string }) {
+  return (
+    <p className="rounded-xl border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
+      {message}
+    </p>
+  );
+}
 
 type PatientRecord = {
   id: string;
@@ -490,10 +504,21 @@ export function PatientDetailView({
   const [intakesFetchError, setIntakesFetchError] = useState<string | null>(null);
   const [expandedIntakeIds, setExpandedIntakeIds] = useState<Set<string>>(() => new Set());
 
+  const [appointmentsLoading, setAppointmentsLoading] = useState(false);
+  const [appointmentsError, setAppointmentsError] = useState<string | null>(null);
+  const [billingLoading, setBillingLoading] = useState(false);
+  const [billingError, setBillingError] = useState<string | null>(null);
+  const [piLoading, setPiLoading] = useState(false);
+  const [piError, setPiError] = useState<string | null>(null);
+  const [membershipLoading, setMembershipLoading] = useState(false);
+  const [membershipError, setMembershipError] = useState<string | null>(null);
+  const [surveysLoading, setSurveysLoading] = useState(false);
+  const [surveysError, setSurveysError] = useState<string | null>(null);
+
   const [loadingPatient, setLoadingPatient] = useState(true);
-  const [loadingBatchA, setLoadingBatchA] = useState(false);
-  const [loadingBatchB, setLoadingBatchB] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [patientReady, setPatientReady] = useState(false);
+  const [patientLoadError, setPatientLoadError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [tab, setTab] = useState<
@@ -509,178 +534,280 @@ export function PatientDetailView({
   });
   const [legalSaveBusy, setLegalSaveBusy] = useState(false);
 
-  const load = useCallback(async (silent = false) => {
-    if (!patientId) return;
-    if (!silent) {
-      setLoadingPatient(true);
-      setLoadingBatchA(false);
-      setLoadingBatchB(false);
-      setError(null);
+  const loadSecondaryResources = useCallback(
+    async (isCancelled: () => boolean) => {
+      if (!patientId || !clinicId) return;
+
       setAppointments([]);
       setBillingRows([]);
-      setMembershipRows([]);
       setPiRows([]);
+      setMembershipRows([]);
       setSurveyRows([]);
-    }
-    try {
+      setIntakeForms([]);
+      setExpandedIntakeIds(new Set());
+      setAppointmentsError(null);
+      setBillingError(null);
+      setPiError(null);
+      setMembershipError(null);
+      setSurveysError(null);
+      setIntakesFetchError(null);
+
       const h = await authHeaders();
-      const ptRes = await fetch(
-        `${API_BASE}/patients/${encodeURIComponent(patientId)}?clinic_id=${encodeURIComponent(clinicId)}`,
-        { headers: h },
-      );
 
-      if (!ptRes.ok) {
-        if (!silent) {
-          setPatient(null);
-          setDraft(null);
-          setError(
-            ptRes.status === 404 ? "Patient not found." : `Error ${ptRes.status}`,
-          );
-        }
-        return;
-      }
-      const ptJson = (await ptRes.json()) as PatientRecord;
-      setPatient(ptJson);
-      setDraft({ ...ptJson });
-      setLegalDraft({
-        lawyer_name: ptJson.lawyer_name ?? "",
-        law_firm: ptJson.law_firm ?? "",
-        lawyer_phone: ptJson.lawyer_phone ?? "",
-        lawyer_email: ptJson.lawyer_email ?? "",
-      });
-      setLegalEdit(false);
-      if (!silent) {
-        setLoadingPatient(false);
-        setLoadingBatchA(true);
-      }
-
-      const [apRes, brRes] = await Promise.all([
-        fetch(
+      setAppointmentsLoading(true);
+      try {
+        const apRes = await fetch(
           `${API_BASE}/appointments?clinic_id=${encodeURIComponent(clinicId)}`,
           { headers: h },
-        ),
-        fetch(
+        );
+        if (isCancelled()) return;
+        if (!apRes.ok) {
+          setAppointmentsError(
+            (await apRes.text().catch(() => "")).trim() ||
+              `Could not load appointments (${apRes.status})`,
+          );
+          setAppointments([]);
+        } else {
+          const apJson = await apRes.json();
+          const allAp = Array.isArray(apJson) ? apJson : [];
+          setAppointments(
+            allAp.filter(
+              (a: AppointmentListRow) => a.patient_id === patientId,
+            ) as AppointmentListRow[],
+          );
+        }
+      } catch {
+        if (!isCancelled()) {
+          setAppointmentsError("Could not load appointments.");
+          setAppointments([]);
+        }
+      } finally {
+        if (!isCancelled()) setAppointmentsLoading(false);
+      }
+
+      await sleep(SECONDARY_STAGGER_MS);
+      if (isCancelled()) return;
+
+      setBillingLoading(true);
+      try {
+        const brRes = await fetch(
           `${API_BASE}/billing-records?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
           { headers: h },
-        ),
-      ]);
-
-      const apJson = apRes.ok ? await apRes.json() : [];
-      const allAp = Array.isArray(apJson) ? apJson : [];
-      setAppointments(
-        allAp.filter(
-          (a: AppointmentListRow) => a.patient_id === patientId,
-        ) as AppointmentListRow[],
-      );
-
-      const brJson = brRes.ok ? await brRes.json() : [];
-      setBillingRows(Array.isArray(brJson) ? brJson : []);
-      if (!silent) {
-        setLoadingBatchA(false);
-        setLoadingBatchB(true);
+        );
+        if (isCancelled()) return;
+        if (!brRes.ok) {
+          setBillingError(
+            (await brRes.text().catch(() => "")).trim() ||
+              `Could not load billing (${brRes.status})`,
+          );
+          setBillingRows([]);
+        } else {
+          const brJson = await brRes.json();
+          setBillingRows(Array.isArray(brJson) ? brJson : []);
+        }
+      } catch {
+        if (!isCancelled()) {
+          setBillingError("Could not load billing records.");
+          setBillingRows([]);
+        }
+      } finally {
+        if (!isCancelled()) setBillingLoading(false);
       }
 
-      const [piRes, memRes, surveyRes] = await Promise.all([
-        fetch(
+      await sleep(SECONDARY_STAGGER_MS);
+      if (isCancelled()) return;
+
+      setPiLoading(true);
+      try {
+        const piRes = await fetch(
           `${API_BASE}/pi-cases?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
           { headers: h },
-        ),
-        fetch(
+        );
+        if (isCancelled()) return;
+        if (!piRes.ok) {
+          setPiError(
+            (await piRes.text().catch(() => "")).trim() ||
+              `Could not load PI cases (${piRes.status})`,
+          );
+          setPiRows([]);
+        } else {
+          const piJson = await piRes.json();
+          setPiRows(Array.isArray(piJson) ? piJson : []);
+        }
+      } catch {
+        if (!isCancelled()) {
+          setPiError("Could not load PI cases.");
+          setPiRows([]);
+        }
+      } finally {
+        if (!isCancelled()) setPiLoading(false);
+      }
+
+      await sleep(SECONDARY_STAGGER_MS);
+      if (isCancelled()) return;
+
+      setMembershipLoading(true);
+      try {
+        const memRes = await fetch(
           `${API_BASE}/patient-memberships?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
           { headers: h },
-        ),
-        fetch(
+        );
+        if (isCancelled()) return;
+        if (!memRes.ok) {
+          setMembershipError(
+            (await memRes.text().catch(() => "")).trim() ||
+              `Could not load memberships (${memRes.status})`,
+          );
+          setMembershipRows([]);
+        } else {
+          const memJson = await memRes.json();
+          setMembershipRows(Array.isArray(memJson) ? memJson : []);
+        }
+      } catch {
+        if (!isCancelled()) {
+          setMembershipError("Could not load memberships.");
+          setMembershipRows([]);
+        }
+      } finally {
+        if (!isCancelled()) setMembershipLoading(false);
+      }
+
+      await sleep(SECONDARY_STAGGER_MS);
+      if (isCancelled()) return;
+
+      setSurveysLoading(true);
+      try {
+        const surveyRes = await fetch(
           `${API_BASE}/patients/${encodeURIComponent(patientId)}/surveys?clinic_id=${encodeURIComponent(clinicId)}`,
           { headers: h },
-        ),
-      ]);
-
-      const memJson = memRes.ok ? await memRes.json() : [];
-      setMembershipRows(Array.isArray(memJson) ? memJson : []);
-
-      const piJson = piRes.ok ? await piRes.json() : [];
-      setPiRows(Array.isArray(piJson) ? piJson : []);
-
-      const surveyJson = surveyRes.ok ? await surveyRes.json() : [];
-      setSurveyRows(Array.isArray(surveyJson) ? surveyJson : []);
-      if (!silent) setLoadingBatchB(false);
-    } catch {
-      if (!silent) {
-        setError("Could not load patient.");
-        setPatient(null);
-        setDraft(null);
+        );
+        if (isCancelled()) return;
+        if (!surveyRes.ok) {
+          setSurveysError(
+            (await surveyRes.text().catch(() => "")).trim() ||
+              `Could not load surveys (${surveyRes.status})`,
+          );
+          setSurveyRows([]);
+        } else {
+          const surveyJson = await surveyRes.json();
+          setSurveyRows(Array.isArray(surveyJson) ? surveyJson : []);
+        }
+      } catch {
+        if (!isCancelled()) {
+          setSurveysError("Could not load surveys.");
+          setSurveyRows([]);
+        }
+      } finally {
+        if (!isCancelled()) setSurveysLoading(false);
       }
-    } finally {
-      if (!silent) {
-        setLoadingPatient(false);
-        setLoadingBatchA(false);
-        setLoadingBatchB(false);
+
+      await sleep(SECONDARY_STAGGER_MS);
+      if (isCancelled()) return;
+
+      setIntakesLoading(true);
+      try {
+        const res = await fetch(
+          `${API_BASE}/intake/patient/${encodeURIComponent(patientId)}`,
+          { headers: h },
+        );
+        if (isCancelled()) return;
+        if (!res.ok) {
+          const t = await res.text().catch(() => "");
+          setIntakesFetchError(
+            res.status === 401 || res.status === 403
+              ? "Sign in required to load intake history."
+              : t.trim() || `Could not load intakes (${res.status})`,
+          );
+          setIntakeForms([]);
+          return;
+        }
+        const json = (await res.json()) as { intakes?: unknown };
+        const list = Array.isArray(json.intakes)
+          ? (json.intakes as IntakeFormRow[])
+          : [];
+        setIntakeForms(list);
+        if (list.length > 0) {
+          const firstPid = String(list[0].id ?? "").trim();
+          const firstKey = firstPid || "row-0";
+          setExpandedIntakeIds(new Set([firstKey]));
+        }
+      } catch {
+        if (!isCancelled()) {
+          setIntakesFetchError("Could not load intake history.");
+          setIntakeForms([]);
+        }
+      } finally {
+        if (!isCancelled()) setIntakesLoading(false);
       }
-    }
+    },
+    [patientId, clinicId],
+  );
+
+  useEffect(() => {
+    if (!patientId || !clinicId) return;
+    let cancelled = false;
+    setPatientReady(false);
+    setLoadingPatient(true);
+    setPatientLoadError(null);
+    setPatient(null);
+    setDraft(null);
+    setAppointments([]);
+    setBillingRows([]);
+    setMembershipRows([]);
+    setPiRows([]);
+    setSurveyRows([]);
+
+    void (async () => {
+      try {
+        const h = await authHeaders();
+        const ptRes = await fetch(
+          `${API_BASE}/patients/${encodeURIComponent(patientId)}?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers: h },
+        );
+        if (cancelled) return;
+        if (!ptRes.ok) {
+          setPatient(null);
+          setDraft(null);
+          setPatientLoadError(
+            ptRes.status === 404 ? "Patient not found." : `Error ${ptRes.status}`,
+          );
+          return;
+        }
+        const ptJson = (await ptRes.json()) as PatientRecord;
+        setPatient(ptJson);
+        setDraft({ ...ptJson });
+        setLegalDraft({
+          lawyer_name: ptJson.lawyer_name ?? "",
+          law_firm: ptJson.law_firm ?? "",
+          lawyer_phone: ptJson.lawyer_phone ?? "",
+          lawyer_email: ptJson.lawyer_email ?? "",
+        });
+        setLegalEdit(false);
+        setPatientReady(true);
+      } catch {
+        if (!cancelled) {
+          setPatientLoadError("Could not load patient.");
+          setPatient(null);
+          setDraft(null);
+        }
+      } finally {
+        if (!cancelled) setLoadingPatient(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [patientId, clinicId]);
 
   useEffect(() => {
+    if (!patientReady || !patientId || !clinicId) return;
     let cancelled = false;
-    queueMicrotask(() => {
-      if (!cancelled) void load();
-    });
+    void loadSecondaryResources(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, [load]);
-
-  useEffect(() => {
-    let cancelled = false;
-    queueMicrotask(() => {
-      if (cancelled) return;
-      setIntakeForms([]);
-      setExpandedIntakeIds(new Set());
-      setIntakesFetchError(null);
-      setIntakesLoading(true);
-      void (async () => {
-        try {
-          const h = await authHeaders();
-          const res = await fetch(
-            `${API_BASE}/intake/patient/${encodeURIComponent(patientId)}`,
-            { headers: h },
-          );
-          if (cancelled) return;
-          if (!res.ok) {
-            const t = await res.text().catch(() => "");
-            setIntakesFetchError(
-              res.status === 401 || res.status === 403
-                ? "Sign in required to load intake history."
-                : t.trim() || `Could not load intakes (${res.status})`,
-            );
-            setIntakeForms([]);
-            return;
-          }
-          const json = (await res.json()) as { intakes?: unknown };
-          const list = Array.isArray(json.intakes)
-            ? (json.intakes as IntakeFormRow[])
-            : [];
-          setIntakeForms(list);
-          if (list.length > 0) {
-            const firstPid = String(list[0].id ?? "").trim();
-            const firstKey = firstPid || "row-0";
-            setExpandedIntakeIds(new Set([firstKey]));
-          } else {
-            setExpandedIntakeIds(new Set());
-          }
-        } catch {
-          if (!cancelled) {
-            setIntakesFetchError("Could not load intake history.");
-            setIntakeForms([]);
-          }
-        } finally {
-          if (!cancelled) setIntakesLoading(false);
-        }
-      })();
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [patientId]);
+  }, [patientReady, patientId, clinicId, loadSecondaryResources]);
 
   function toggleIntakeExpanded(id: string) {
     setExpandedIntakeIds((prev) => {
@@ -713,8 +840,8 @@ export function PatientDetailView({
     [surveyRows],
   );
 
-  /** PI / memberships / surveys load in batch B after batch A; hide empty states while A is still running. */
-  const loadingMembershipTabData = loadingBatchA || loadingBatchB;
+  const loadingMembershipTabData =
+    membershipLoading || piLoading || surveysLoading;
 
   function setDraftField<K extends keyof PatientRecord>(
     key: K,
@@ -736,7 +863,7 @@ export function PatientDetailView({
   async function saveEdit() {
     if (!patientId || !draft) return;
     setSaveBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       const body: Record<string, unknown> = {};
       const keys = [
@@ -773,7 +900,7 @@ export function PatientDetailView({
         },
       );
       if (!res.ok) {
-        setError(await res.text().catch(() => "Save failed"));
+        setActionError(await res.text().catch(() => "Save failed"));
         return;
       }
       const data = (await res.json()) as Record<string, unknown>;
@@ -784,10 +911,10 @@ export function PatientDetailView({
       delete patientFields.pi_cases;
       setPatient(patientFields as PatientRecord);
       setDraft({ ...(patientFields as PatientRecord) });
-      await load(true);
+      void loadSecondaryResources(() => false);
       setEditMode(false);
     } catch {
-      setError("Save failed.");
+      setActionError("Save failed.");
     } finally {
       setSaveBusy(false);
     }
@@ -796,7 +923,7 @@ export function PatientDetailView({
   async function saveLegal() {
     if (!patientId) return;
     setLegalSaveBusy(true);
-    setError(null);
+    setActionError(null);
     try {
       const body = {
         lawyer_name: legalDraft.lawyer_name.trim() || null,
@@ -813,7 +940,7 @@ export function PatientDetailView({
         },
       );
       if (!res.ok) {
-        setError(await res.text().catch(() => "Save failed"));
+        setActionError(await res.text().catch(() => "Save failed"));
         return;
       }
       const data = (await res.json()) as Record<string, unknown>;
@@ -830,10 +957,10 @@ export function PatientDetailView({
         lawyer_phone: String(patientFields.lawyer_phone ?? ""),
         lawyer_email: String(patientFields.lawyer_email ?? ""),
       });
-      await load(true);
+      void loadSecondaryResources(() => false);
       setLegalEdit(false);
     } catch {
-      setError("Save failed.");
+      setActionError("Save failed.");
     } finally {
       setLegalSaveBusy(false);
     }
@@ -895,11 +1022,11 @@ export function PatientDetailView({
     );
   }
 
-  if (error && !patient) {
+  if (patientLoadError && !patient) {
     return (
       <div className="space-y-4">
         <p className="rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
-          {error}
+          {patientLoadError}
         </p>
         <Link
           href="/admin/patients"
@@ -1124,9 +1251,9 @@ export function PatientDetailView({
         )}
       </div>
 
-      {error ? (
+      {actionError ? (
         <p className="mb-4 rounded-2xl border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
-          {error}
+          {actionError}
         </p>
       ) : null}
 
@@ -1527,6 +1654,11 @@ export function PatientDetailView({
 
       {tab === "appointments" ? (
         <div className={`${DS_TABLE_WRAP} mt-8`}>
+          {appointmentsError ? (
+            <div className="border-b border-gray-100 px-6 py-4">
+              <InlineSectionError message={appointmentsError} />
+            </div>
+          ) : null}
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead className={DS_TABLE_HEAD}>
@@ -1538,7 +1670,7 @@ export function PatientDetailView({
                 </tr>
               </thead>
               <tbody>
-                {loadingBatchA ? (
+                {appointmentsLoading ? (
                   <TableSkeleton cols={4} rows={5} />
                 ) : appointmentTableRows.length === 0 ? (
                   <tr>
@@ -1583,6 +1715,11 @@ export function PatientDetailView({
 
       {tab === "billing" ? (
         <div className={`${DS_TABLE_WRAP} mt-8`}>
+          {billingError ? (
+            <div className="border-b border-gray-100 px-6 py-4">
+              <InlineSectionError message={billingError} />
+            </div>
+          ) : null}
           <div className="overflow-x-auto">
             <table className="min-w-full text-left text-sm">
               <thead className={DS_TABLE_HEAD}>
@@ -1593,7 +1730,7 @@ export function PatientDetailView({
                 </tr>
               </thead>
               <tbody>
-                {loadingBatchA ? (
+                {billingLoading ? (
                   <TableSkeleton cols={3} rows={4} />
                 ) : billingRows.length === 0 ? (
                   <tr>
@@ -1635,6 +1772,9 @@ export function PatientDetailView({
 
       {tab === "membership" ? (
         <div className="mt-8 space-y-8">
+          {membershipError ? (
+            <InlineSectionError message={membershipError} />
+          ) : null}
           <div className={DS_CARD}>
             <h2 className={DS_SECTION_HEADER}>Active membership</h2>
             {loadingMembershipTabData ? (
@@ -1677,6 +1817,11 @@ export function PatientDetailView({
                 PI cases
               </h2>
             </div>
+            {piError ? (
+              <div className="px-6 py-4">
+                <InlineSectionError message={piError} />
+              </div>
+            ) : null}
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
                 <thead className={DS_TABLE_HEAD}>
@@ -1688,7 +1833,7 @@ export function PatientDetailView({
                   </tr>
                 </thead>
                 <tbody>
-                  {loadingMembershipTabData ? (
+                  {piLoading ? (
                     <TableSkeleton cols={4} rows={4} />
                   ) : piRows.length === 0 ? (
                     <tr>
@@ -1735,7 +1880,12 @@ export function PatientDetailView({
 
           <div className="mt-8">
             <h2 className={DS_SECTION_HEADER}>Surveys</h2>
-            {loadingMembershipTabData ? (
+            {surveysError ? (
+              <div className="mt-2">
+                <InlineSectionError message={surveysError} />
+              </div>
+            ) : null}
+            {surveysLoading ? (
               <div className="mt-4 grid gap-6 sm:grid-cols-2">
                 <div className={`${DS_CARD} min-h-[180px]`}>
                   <CardSkeleton lines={6} />
@@ -1804,9 +1954,21 @@ export function PatientDetailView({
         </div>
       ) : null}
 
-      <DmeSection clinicId={clinicId} patientId={patientId} />
-      <OutcomeMeasuresSection clinicId={clinicId} patientId={patientId} />
-      <PatientGroupsSection clinicId={clinicId} patientId={patientId} />
+      <DmeSection
+        clinicId={clinicId}
+        patientId={patientId}
+        loadDelayMs={SECONDARY_STAGGER_MS * 6}
+      />
+      <OutcomeMeasuresSection
+        clinicId={clinicId}
+        patientId={patientId}
+        loadDelayMs={SECONDARY_STAGGER_MS * 7}
+      />
+      <PatientGroupsSection
+        clinicId={clinicId}
+        patientId={patientId}
+        loadDelayMs={SECONDARY_STAGGER_MS * 8}
+      />
     </div>
   );
 }
