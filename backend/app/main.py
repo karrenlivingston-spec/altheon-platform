@@ -29,6 +29,7 @@ from app.routers import (
     intake as intake_router,
     pi_cases as pi_cases_api_router,
     clinical_notes as clinical_notes_api_router,
+    cpt_detection as cpt_detection_router,
     soap_dictation as soap_dictation_router,
     dme as dme_router,
     measurements as measurements_router,
@@ -81,6 +82,9 @@ app.include_router(intake_router.router, prefix="", tags=["intake"])
 app.include_router(pi_cases_api_router.router, prefix="/api", tags=["PI Cases"])
 app.include_router(
     clinical_notes_api_router.router, prefix="/api", tags=["Clinical Notes"]
+)
+app.include_router(
+    cpt_detection_router.router, prefix="/api", tags=["CPT Detection"]
 )
 app.include_router(fee_schedule_router, prefix="/api", tags=["Fee Schedule"])
 app.include_router(soap_dictation_router.router, prefix="")

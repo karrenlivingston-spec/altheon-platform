@@ -25,6 +25,9 @@ import {
   type SoapFromScribe,
 } from "@/components/clinical-notes/AmbientScribe";
 import { MeasurementModule } from "@/components/clinical-notes/MeasurementModule";
+import CptDetectionPanel, {
+  type CptCode,
+} from "@/components/CptDetectionPanel";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
@@ -128,6 +131,7 @@ type ClinicalNote = {
   correction_notes?: string | null;
   signed_at?: string | null;
   signed_by?: string | null;
+  cpt_codes_detected?: CptCode[] | null;
   created_at?: string | null;
   updated_at?: string | null;
   patient_name?: string | null;
@@ -244,6 +248,7 @@ export default function AdminClinicalNotesPage() {
   const [draftAppointmentId, setDraftAppointmentId] = useState("");
   const [draftAssessment, setDraftAssessment] = useState("");
   const [draftPlan, setDraftPlan] = useState("");
+  const [draftCptCodes, setDraftCptCodes] = useState<CptCode[] | null>(null);
   const [editorBusy, setEditorBusy] = useState(false);
 
   const [viewNote, setViewNote] = useState<ClinicalNote | null>(null);
@@ -450,6 +455,7 @@ export default function AdminClinicalNotesPage() {
     setDraftAppointmentId("");
     setDraftAssessment("");
     setDraftPlan("");
+    setDraftCptCodes(null);
     setPatientInputValue("");
     setPatientPickerOpen(false);
     setScribeBannerVisible(false);
@@ -486,6 +492,9 @@ export default function AdminClinicalNotesPage() {
       setDraftAppointmentId((row.appointment_id ?? "").trim());
       setDraftAssessment(row.assessment ?? "");
       setDraftPlan(row.plan ?? "");
+      setDraftCptCodes(
+        Array.isArray(row.cpt_codes_detected) ? row.cpt_codes_detected : null,
+      );
       const picked = patients.find((x) => x.id === row.patient_id);
       setPatientInputValue(
         picked
@@ -1187,6 +1196,14 @@ export default function AdminClinicalNotesPage() {
                   className={`mt-1 min-h-[120px] ${DS_INPUT}`}
                 />
               </label>
+              {editingId && clinicId ? (
+                <CptDetectionPanel
+                  noteId={editingId}
+                  clinicId={clinicId}
+                  initialCodes={draftCptCodes}
+                  onCodesDetected={setDraftCptCodes}
+                />
+              ) : null}
             </div>
             <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-5">
               <button
