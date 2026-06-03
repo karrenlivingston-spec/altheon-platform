@@ -12,6 +12,8 @@ import {
 } from "@/app/admin/designSystem";
 
 import { useClinic } from "@/app/admin/ClinicContext";
+import { FeeScheduleManager } from "@/components/admin/FeeScheduleManager";
+import { supabase } from "@/lib/supabase";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -228,8 +230,14 @@ function pickChangedClinicFields(
   return out;
 }
 
+type SettingsTab = "general" | "fee-schedule";
+
+const TAB_ACCENT = "var(--color-primary, #0D9488)";
+
 export default function AdminSettingsPage() {
   const { clinicId } = useClinic();
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>("general");
+  const [accessToken, setAccessToken] = useState("");
   const [loading, setLoading] = useState(true);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [clinicInfo, setClinicInfo] = useState<ClinicInfoForm>(() =>
@@ -318,6 +326,12 @@ export default function AdminSettingsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- initial clinic settings fetch
     void load();
   }, [load]);
+
+  useEffect(() => {
+    void supabase.auth.getSession().then(({ data }) => {
+      setAccessToken(data.session?.access_token ?? "");
+    });
+  }, []);
 
   const clinicInfoDirty = useMemo(() => {
     if (!clinicInfoBaseline) return false;
@@ -520,18 +534,6 @@ export default function AdminSettingsPage() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3">
-        <div
-          className="h-9 w-9 animate-spin rounded-full border-2 border-gray-200 border-t-[#16A34A]"
-          aria-hidden
-        />
-        <p className="text-sm text-gray-500">Loading settings…</p>
-      </div>
-    );
-  }
-
   return (
     <div className={DS_PAGE_ROOT}>
       <h1 className={DS_PAGE_TITLE}>Settings</h1>
@@ -539,18 +541,69 @@ export default function AdminSettingsPage() {
         Clinic configuration and preferences
       </p>
 
-      {fetchError ? (
+      {fetchError && settingsTab === "general" ? (
         <p className="mb-6 rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
           {fetchError}
         </p>
       ) : null}
 
-      {sectionError ? (
+      {sectionError && settingsTab === "general" ? (
         <p className="mb-6 rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
           {sectionError}
         </p>
       ) : null}
 
+      <div className="sticky top-0 z-10 -mx-2 mb-8 border-b border-gray-200 bg-[#f0f4f8]/95 px-2 pb-0 backdrop-blur-sm">
+        <div className="flex gap-1" role="tablist" aria-label="Settings sections">
+          {(
+            [
+              { id: "general" as const, label: "General" },
+              { id: "fee-schedule" as const, label: "Fee Schedule" },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={settingsTab === t.id}
+              onClick={() => setSettingsTab(t.id)}
+              className={[
+                "rounded-t-lg px-4 py-2.5 text-sm font-medium transition-colors",
+                settingsTab === t.id
+                  ? "border-b-2"
+                  : "border-b-2 border-transparent text-gray-500 hover:text-gray-800",
+              ].join(" ")}
+              style={
+                settingsTab === t.id
+                  ? { borderBottomColor: TAB_ACCENT, color: TAB_ACCENT }
+                  : undefined
+              }
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {settingsTab === "fee-schedule" ? (
+        <FeeScheduleManager
+          clinicId={clinicId}
+          token={accessToken}
+        />
+      ) : null}
+
+      {settingsTab === "general" && loading ? (
+        <div className="flex min-h-[40vh] flex-col items-center justify-center gap-3">
+          <div
+            className="h-9 w-9 animate-spin rounded-full border-2 border-gray-200 border-t-[#0D9488]"
+            aria-hidden
+          />
+          <p className="text-sm text-gray-500">Loading settings…</p>
+        </div>
+      ) : null}
+
+      {settingsTab === "general" && !loading ? (
+        <>
       {/* Section 1 — Clinic Information */}
       <section className={`${DS_CARD} mb-8`}>
         <h2 className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900">
@@ -1036,6 +1089,8 @@ export default function AdminSettingsPage() {
           ) : null}
         </div>
       </section>
+        </>
+      ) : null}
     </div>
   );
 }

@@ -9,6 +9,8 @@ import {
   DS_PRIMARY_BTN,
   DS_SECONDARY_BTN,
 } from "@/app/admin/designSystem";
+import { FeeScheduleManager } from "@/components/admin/FeeScheduleManager";
+import { supabase } from "@/lib/supabase";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -140,7 +142,10 @@ function BrandMark() {
 }
 
 export default function SuperadminOnboardPage() {
-  const [phase, setPhase] = useState<"gate" | "wizard" | "success">("gate");
+  const [phase, setPhase] = useState<"gate" | "wizard" | "success" | "fee_schedule">(
+    "gate",
+  );
+  const [feeToken, setFeeToken] = useState("");
   const [passphrase, setPassphrase] = useState("");
   const [passphraseInput, setPassphraseInput] = useState("");
   const [passphraseError, setPassphraseError] = useState<string | null>(null);
@@ -214,6 +219,7 @@ export default function SuperadminOnboardPage() {
     setAdminPassword("");
     setConfirmPassword("");
     setSuccessData(null);
+    setFeeToken("");
     setCopyOk(false);
   }
 
@@ -446,7 +452,17 @@ export default function SuperadminOnboardPage() {
 
       const data = (await res.json()) as SuccessPayload;
       setSuccessData(data);
-      setPhase("success");
+      const { data: signInData, error: signInErr } =
+        await supabase.auth.signInWithPassword({
+          email: adminEmail.trim().toLowerCase(),
+          password: adminPassword,
+        });
+      setFeeToken(
+        !signInErr && signInData.session?.access_token
+          ? signInData.session.access_token
+          : "",
+      );
+      setPhase("fee_schedule");
     } catch {
       setApiError("Network error. Please try again.");
     } finally {
@@ -508,49 +524,58 @@ export default function SuperadminOnboardPage() {
     );
   }
 
-  if (phase === "success" && successData) {
+  if (phase === "fee_schedule" && successData) {
     return (
       <div className="min-h-screen bg-[#f0f4f8] px-4 py-10">
-        <div className="mx-auto w-full max-w-md">
-          <div className={`${DS_CARD} p-8 text-center`}>
+        <div className="mx-auto w-full max-w-3xl">
+          <div className={`${DS_CARD} p-8`}>
             <BrandMark />
             <h1 className={`${DS_PAGE_TITLE} mt-6 text-xl text-green-800`}>
               Clinic created successfully
             </h1>
-            <p className="mt-3 text-lg font-semibold text-gray-900">
-              {clinicName}
-            </p>
-            <p className="text-sm text-gray-600">
-              Slug:{" "}
+            <p className="mt-2 text-sm text-gray-600">
+              {clinicName} ·{" "}
               <span className="font-mono text-gray-800">{successData.slug}</span>
             </p>
-            <div className="mt-4 flex items-center justify-center gap-2">
-              <span className="text-xs text-gray-500">clinic_id</span>
-              <code className="rounded bg-gray-100 px-2 py-1 text-xs text-gray-800">
-                {successData.clinic_id}
-              </code>
+            <h2 className="mt-8 text-lg font-semibold text-gray-900">
+              Fee Schedule (Optional)
+            </h2>
+            <p className="mt-1 text-sm text-gray-500">
+              You can upload this clinic&apos;s fee schedule now or skip — it can
+              be configured later in Settings.
+            </p>
+            {!feeToken ? (
+              <p className="mt-4 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+                Sign in as the clinic admin ({adminEmail}) in Settings to
+                manage the fee schedule, or skip for now.
+              </p>
+            ) : (
+              <div className="mt-6">
+                <FeeScheduleManager
+                  clinicId={successData.clinic_id}
+                  token={feeToken}
+                />
+              </div>
+            )}
+            <div className="mt-8 flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  void supabase.auth.signOut();
+                  resetAll();
+                }}
+                className={`${DS_PRIMARY_BTN} flex-1`}
+              >
+                Skip for now
+              </button>
               <button
                 type="button"
                 onClick={() => void copyClinicId()}
-                className={`${DS_SECONDARY_BTN} px-2 py-1 text-xs`}
+                className={`${DS_SECONDARY_BTN} px-4`}
               >
-                {copyOk ? "Copied" : "Copy"}
+                {copyOk ? "Copied ID" : "Copy clinic ID"}
               </button>
             </div>
-            <p className="mt-4 text-sm text-gray-600">
-              Admin:{" "}
-              <span className="font-medium text-gray-900">{adminEmail}</span>
-            </p>
-            <p className="mt-6 text-sm text-gray-500">
-              Share the admin login and URL with the clinic.
-            </p>
-            <button
-              type="button"
-              onClick={resetAll}
-              className={`${DS_PRIMARY_BTN} mt-8 w-full`}
-            >
-              Onboard Another Clinic
-            </button>
           </div>
         </div>
       </div>

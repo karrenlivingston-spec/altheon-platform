@@ -17,6 +17,7 @@ import {
   DS_TR,
 } from "@/app/admin/designSystem";
 import { useClinic } from "@/app/admin/ClinicContext";
+import { FeeScheduleManager } from "@/components/admin/FeeScheduleManager";
 import { supabase } from "@/lib/supabase";
 
 const API_BASE = "https://altheon-platform.onrender.com";
@@ -131,6 +132,9 @@ export default function AdminClinicsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const [newOpen, setNewOpen] = useState(false);
+  const [newPhase, setNewPhase] = useState<"form" | "fee-schedule">("form");
+  const [feeClinicId, setFeeClinicId] = useState("");
+  const [feeToken, setFeeToken] = useState("");
   const [editOpen, setEditOpen] = useState(false);
   const [editing, setEditing] = useState<ClinicListRow | null>(null);
 
@@ -227,6 +231,33 @@ export default function AdminClinicsPage() {
     setNewAdminEmail("");
     setNewAdminPassword("");
     setNewSubmitError(null);
+    setNewPhase("form");
+    setFeeClinicId("");
+    setFeeToken("");
+  }
+
+  function closeNewClinicModal() {
+    setNewOpen(false);
+    resetNewForm();
+  }
+
+  async function beginFeeScheduleStep(createdId: string) {
+    setFeeClinicId(createdId);
+    setNewPhase("fee-schedule");
+    const email = newAdminEmail.trim().toLowerCase();
+    const password = newAdminPassword;
+    if (email && password.length >= 8) {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+      if (!error && data.session?.access_token) {
+        setFeeToken(data.session.access_token);
+        return;
+      }
+    }
+    const { data } = await supabase.auth.getSession();
+    setFeeToken(data.session?.access_token ?? "");
   }
 
   async function submitNew(e: FormEvent) {
@@ -292,14 +323,20 @@ export default function AdminClinicsPage() {
               ? pj.detail
               : "Clinic created but logo could not be saved.",
           );
-          setNewOpen(false);
-          resetNewForm();
+          if (createdId) {
+            await beginFeeScheduleStep(createdId);
+          } else {
+            closeNewClinicModal();
+          }
           await fetchClinics();
           return;
         }
       }
-      setNewOpen(false);
-      resetNewForm();
+      if (createdId) {
+        await beginFeeScheduleStep(createdId);
+      } else {
+        closeNewClinicModal();
+      }
       await fetchClinics();
     } catch {
       setNewSubmitError("Request failed.");
@@ -503,16 +540,49 @@ export default function AdminClinicsPage() {
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
           role="presentation"
           onMouseDown={(e) => {
-            if (e.target === e.currentTarget && !newBusy) setNewOpen(false);
+            if (e.target === e.currentTarget && !newBusy) closeNewClinicModal();
           }}
         >
           <div
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-lg"
+            className={[
+              "max-h-[90vh] w-full overflow-y-auto rounded-2xl border border-gray-100 bg-white p-6 shadow-lg",
+              newPhase === "fee-schedule" ? "max-w-4xl" : "max-w-lg",
+            ].join(" ")}
             role="dialog"
             aria-modal="true"
             aria-labelledby="new-clinic-title"
             onMouseDown={(e) => e.stopPropagation()}
           >
+            {newPhase === "fee-schedule" ? (
+              <>
+                <h2
+                  id="new-clinic-title"
+                  className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900"
+                >
+                  Fee Schedule (Optional)
+                </h2>
+                <p className="mt-3 text-sm text-gray-600">
+                  You can upload this clinic&apos;s fee schedule now or skip — it
+                  can be configured later in Settings.
+                </p>
+                <div className="mt-6">
+                  <FeeScheduleManager
+                    clinicId={feeClinicId}
+                    token={feeToken}
+                  />
+                </div>
+                <div className="mt-6 flex justify-end border-t border-gray-100 pt-4">
+                  <button
+                    type="button"
+                    className={DS_PRIMARY_BTN}
+                    onClick={() => closeNewClinicModal()}
+                  >
+                    Skip for now
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
             <h2
               id="new-clinic-title"
               className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900"
@@ -666,7 +736,7 @@ export default function AdminClinicsPage() {
                   type="button"
                   className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                   disabled={newBusy}
-                  onClick={() => setNewOpen(false)}
+                  onClick={() => closeNewClinicModal()}
                 >
                   Cancel
                 </button>
@@ -679,6 +749,8 @@ export default function AdminClinicsPage() {
                 </button>
               </div>
             </form>
+              </>
+            )}
           </div>
         </div>
       ) : null}
