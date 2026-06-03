@@ -38,6 +38,10 @@ const API_BASE =
 
 const NY = "America/New_York";
 const SECONDARY_STAGGER_MS = 200;
+const TAB_ACCENT = "var(--color-primary, #0D9488)";
+
+type PageTab = "overview" | "dme" | "pi-cases";
+type SectionTab = "overview" | "appointments" | "billing" | "membership";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -521,9 +525,9 @@ export function PatientDetailView({
   const [actionError, setActionError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
-  const [tab, setTab] = useState<
-    "overview" | "appointments" | "billing" | "membership"
-  >("overview");
+  const [pageTab, setPageTab] = useState<PageTab>("overview");
+  const [sectionTab, setSectionTab] = useState<SectionTab>("overview");
+  const [piCasesEverOpened, setPiCasesEverOpened] = useState(false);
 
   const [legalEdit, setLegalEdit] = useState(false);
   const [legalDraft, setLegalDraft] = useState({
@@ -540,14 +544,12 @@ export function PatientDetailView({
 
       setAppointments([]);
       setBillingRows([]);
-      setPiRows([]);
       setMembershipRows([]);
       setSurveyRows([]);
       setIntakeForms([]);
       setExpandedIntakeIds(new Set());
       setAppointmentsError(null);
       setBillingError(null);
-      setPiError(null);
       setMembershipError(null);
       setSurveysError(null);
       setIntakesFetchError(null);
@@ -612,35 +614,6 @@ export function PatientDetailView({
         }
       } finally {
         if (!isCancelled()) setBillingLoading(false);
-      }
-
-      await sleep(SECONDARY_STAGGER_MS);
-      if (isCancelled()) return;
-
-      setPiLoading(true);
-      try {
-        const piRes = await fetch(
-          `${API_BASE}/pi-cases?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
-          { headers: h },
-        );
-        if (isCancelled()) return;
-        if (!piRes.ok) {
-          setPiError(
-            (await piRes.text().catch(() => "")).trim() ||
-              `Could not load PI cases (${piRes.status})`,
-          );
-          setPiRows([]);
-        } else {
-          const piJson = await piRes.json();
-          setPiRows(Array.isArray(piJson) ? piJson : []);
-        }
-      } catch {
-        if (!isCancelled()) {
-          setPiError("Could not load PI cases.");
-          setPiRows([]);
-        }
-      } finally {
-        if (!isCancelled()) setPiLoading(false);
       }
 
       await sleep(SECONDARY_STAGGER_MS);
@@ -743,6 +716,34 @@ export function PatientDetailView({
     [patientId, clinicId],
   );
 
+  const loadPiCases = useCallback(async () => {
+    if (!patientId || !clinicId) return;
+    setPiLoading(true);
+    setPiError(null);
+    try {
+      const h = await authHeaders();
+      const piRes = await fetch(
+        `${API_BASE}/pi-cases?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
+        { headers: h },
+      );
+      if (!piRes.ok) {
+        setPiError(
+          (await piRes.text().catch(() => "")).trim() ||
+            `Could not load PI cases (${piRes.status})`,
+        );
+        setPiRows([]);
+        return;
+      }
+      const piJson = await piRes.json();
+      setPiRows(Array.isArray(piJson) ? piJson : []);
+    } catch {
+      setPiError("Could not load PI cases.");
+      setPiRows([]);
+    } finally {
+      setPiLoading(false);
+    }
+  }, [patientId, clinicId]);
+
   useEffect(() => {
     if (!patientId || !clinicId) return;
     let cancelled = false;
@@ -751,10 +752,14 @@ export function PatientDetailView({
     setPatientLoadError(null);
     setPatient(null);
     setDraft(null);
+    setPageTab("overview");
+    setSectionTab("overview");
+    setPiCasesEverOpened(false);
+    setPiRows([]);
+    setPiError(null);
     setAppointments([]);
     setBillingRows([]);
     setMembershipRows([]);
-    setPiRows([]);
     setSurveyRows([]);
 
     void (async () => {
@@ -809,6 +814,12 @@ export function PatientDetailView({
     };
   }, [patientReady, patientId, clinicId, loadSecondaryResources]);
 
+  useEffect(() => {
+    if (pageTab !== "pi-cases" || !patientReady || piCasesEverOpened) return;
+    setPiCasesEverOpened(true);
+    void loadPiCases();
+  }, [pageTab, patientReady, piCasesEverOpened, loadPiCases]);
+
   function toggleIntakeExpanded(id: string) {
     setExpandedIntakeIds((prev) => {
       const next = new Set(prev);
@@ -840,8 +851,13 @@ export function PatientDetailView({
     [surveyRows],
   );
 
-  const loadingMembershipTabData =
-    membershipLoading || piLoading || surveysLoading;
+  const loadingMembershipTabData = membershipLoading || surveysLoading;
+
+  const pageTabs: { id: PageTab; label: string }[] = [
+    { id: "overview", label: "Overview" },
+    { id: "dme", label: "DME" },
+    { id: "pi-cases", label: "PI Cases" },
+  ];
 
   function setDraftField<K extends keyof PatientRecord>(
     key: K,
@@ -1044,11 +1060,11 @@ export function PatientDetailView({
 
   const display = editMode ? draft : patient;
 
-  const tabs: { id: typeof tab; label: string }[] = [
+  const sectionTabs: { id: SectionTab; label: string }[] = [
     { id: "overview", label: "Overview" },
     { id: "appointments", label: "Appointments" },
     { id: "billing", label: "Billing" },
-    { id: "membership", label: "Memberships & PI Cases" },
+    { id: "membership", label: "Memberships" },
   ];
 
   return (
@@ -1119,6 +1135,35 @@ export function PatientDetailView({
         </div>
       </div>
 
+      <div className="sticky top-0 z-20 -mx-1 mb-6 border-b border-gray-200 bg-[#f8fafc]/95 px-1 pb-0 backdrop-blur-sm">
+        <div className="flex gap-1" role="tablist" aria-label="Patient sections">
+          {pageTabs.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              role="tab"
+              aria-selected={pageTab === t.id}
+              onClick={() => setPageTab(t.id)}
+              className={[
+                "rounded-t-lg px-4 py-2.5 text-sm font-medium transition-colors",
+                pageTab === t.id
+                  ? "border-b-2 text-[var(--color-primary,#0D9488)]"
+                  : "border-b-2 border-transparent text-gray-500 hover:text-gray-800",
+              ].join(" ")}
+              style={
+                pageTab === t.id
+                  ? { borderBottomColor: TAB_ACCENT, color: TAB_ACCENT }
+                  : undefined
+              }
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {pageTab === "overview" ? (
+        <>
       <div className="relative mb-6 rounded-lg border border-gray-100 bg-white p-6 shadow-sm">
         <div className="mb-4 flex items-start justify-between gap-2">
           <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">
@@ -1258,14 +1303,14 @@ export function PatientDetailView({
       ) : null}
 
       <div className="mb-6 flex flex-wrap gap-2 border-b border-gray-100 pb-1">
-        {tabs.map((t) => (
+        {sectionTabs.map((t) => (
           <button
             key={t.id}
             type="button"
-            onClick={() => setTab(t.id)}
+            onClick={() => setSectionTab(t.id)}
             className={[
               "rounded-t-lg px-4 py-2 text-sm font-medium transition-colors",
-              tab === t.id
+              sectionTab === t.id
                 ? "border-b-2 border-[#16A34A] text-[#16A34A]"
                 : "text-gray-500 hover:text-gray-800",
             ].join(" ")}
@@ -1275,7 +1320,7 @@ export function PatientDetailView({
         ))}
       </div>
 
-      {tab === "overview" ? (
+      {sectionTab === "overview" ? (
         <div className="grid gap-6 md:grid-cols-2">
           <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
             <h2 className="mb-4 text-sm font-semibold text-gray-900">Address</h2>
@@ -1652,7 +1697,7 @@ export function PatientDetailView({
         </div>
       ) : null}
 
-      {tab === "appointments" ? (
+      {sectionTab === "appointments" ? (
         <div className={`${DS_TABLE_WRAP} mt-8`}>
           {appointmentsError ? (
             <div className="border-b border-gray-100 px-6 py-4">
@@ -1713,7 +1758,7 @@ export function PatientDetailView({
         </div>
       ) : null}
 
-      {tab === "billing" ? (
+      {sectionTab === "billing" ? (
         <div className={`${DS_TABLE_WRAP} mt-8`}>
           {billingError ? (
             <div className="border-b border-gray-100 px-6 py-4">
@@ -1770,7 +1815,7 @@ export function PatientDetailView({
         </div>
       ) : null}
 
-      {tab === "membership" ? (
+      {sectionTab === "membership" ? (
         <div className="mt-8 space-y-8">
           {membershipError ? (
             <InlineSectionError message={membershipError} />
@@ -1809,73 +1854,6 @@ export function PatientDetailView({
                 </div>
               </div>
             )}
-          </div>
-
-          <div className={DS_TABLE_WRAP}>
-            <div className="border-b border-gray-100 bg-gray-50 px-6 py-3">
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-900">
-                PI cases
-              </h2>
-            </div>
-            {piError ? (
-              <div className="px-6 py-4">
-                <InlineSectionError message={piError} />
-              </div>
-            ) : null}
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className={DS_TABLE_HEAD}>
-                  <tr>
-                    <th className={DS_TH}>Case #</th>
-                    <th className={DS_TH}>Date of accident</th>
-                    <th className={DS_TH}>Attorney</th>
-                    <th className={DS_TH}>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {piLoading ? (
-                    <TableSkeleton cols={4} rows={4} />
-                  ) : piRows.length === 0 ? (
-                    <tr>
-                      <td
-                        colSpan={4}
-                        className="px-6 py-10 text-center text-gray-500"
-                      >
-                        No PI cases for this patient.
-                      </td>
-                    </tr>
-                  ) : (
-                    piRows.map((row) => {
-                      const st = (row.status ?? "").toLowerCase();
-                      const caseNum = (row.claim_number ?? "").trim() || "—";
-                      return (
-                        <tr
-                          key={row.id ?? `${caseNum}-${row.date_of_accident}`}
-                          className={DS_TR}
-                        >
-                          <td className={`${DS_TD_PRIMARY} font-medium`}>
-                            {caseNum}
-                          </td>
-                          <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
-                            {row.date_of_accident
-                              ? formatDob(String(row.date_of_accident))
-                              : "—"}
-                          </td>
-                          <td className={DS_TD_PRIMARY}>
-                            {(row.attorney_name ?? "").trim() || "—"}
-                          </td>
-                          <td className={DS_TD_PRIMARY}>
-                            <span className={piCaseStatusBadgeClass(st)}>
-                              {row.status ?? "—"}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
           </div>
 
           <div className="mt-8">
@@ -1954,21 +1932,91 @@ export function PatientDetailView({
         </div>
       ) : null}
 
-      <DmeSection
-        clinicId={clinicId}
-        patientId={patientId}
-        loadDelayMs={SECONDARY_STAGGER_MS * 6}
-      />
       <OutcomeMeasuresSection
         clinicId={clinicId}
         patientId={patientId}
-        loadDelayMs={SECONDARY_STAGGER_MS * 7}
+        loadDelayMs={SECONDARY_STAGGER_MS}
       />
       <PatientGroupsSection
         clinicId={clinicId}
         patientId={patientId}
-        loadDelayMs={SECONDARY_STAGGER_MS * 8}
+        loadDelayMs={SECONDARY_STAGGER_MS * 2}
       />
+        </>
+      ) : null}
+
+      {pageTab === "dme" ? (
+        <DmeSection clinicId={clinicId} patientId={patientId} />
+      ) : null}
+
+      {pageTab === "pi-cases" ? (
+        <div className={DS_TABLE_WRAP}>
+          <div className="border-b border-gray-100 bg-gray-50 px-6 py-3">
+            <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-900">
+              PI cases
+            </h2>
+          </div>
+          {piError ? (
+            <div className="px-6 py-4">
+              <InlineSectionError message={piError} />
+            </div>
+          ) : null}
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className={DS_TABLE_HEAD}>
+                <tr>
+                  <th className={DS_TH}>Case #</th>
+                  <th className={DS_TH}>Date of accident</th>
+                  <th className={DS_TH}>Attorney</th>
+                  <th className={DS_TH}>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {piLoading ? (
+                  <TableSkeleton cols={4} rows={4} />
+                ) : piRows.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={4}
+                      className="px-6 py-10 text-center text-gray-500"
+                    >
+                      No PI cases for this patient.
+                    </td>
+                  </tr>
+                ) : (
+                  piRows.map((row) => {
+                    const st = (row.status ?? "").toLowerCase();
+                    const caseNum = (row.claim_number ?? "").trim() || "—";
+                    return (
+                      <tr
+                        key={row.id ?? `${caseNum}-${row.date_of_accident}`}
+                        className={DS_TR}
+                      >
+                        <td className={`${DS_TD_PRIMARY} font-medium`}>
+                          {caseNum}
+                        </td>
+                        <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
+                          {row.date_of_accident
+                            ? formatDob(String(row.date_of_accident))
+                            : "—"}
+                        </td>
+                        <td className={DS_TD_PRIMARY}>
+                          {(row.attorney_name ?? "").trim() || "—"}
+                        </td>
+                        <td className={DS_TD_PRIMARY}>
+                          <span className={piCaseStatusBadgeClass(st)}>
+                            {row.status ?? "—"}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
