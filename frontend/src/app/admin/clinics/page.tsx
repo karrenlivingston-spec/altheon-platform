@@ -126,6 +126,8 @@ function buildOnboardBody(values: {
 export default function AdminClinicsPage() {
   const router = useRouter();
   const { role, loading: clinicCtxLoading } = useClinic();
+  const roleReady = !clinicCtxLoading;
+  const isSuperAdmin = roleReady && role === "super_admin";
 
   const [rows, setRows] = useState<ClinicListRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -184,15 +186,15 @@ export default function AdminClinicsPage() {
   }, []);
 
   useEffect(() => {
-    if (clinicCtxLoading || role !== "super_admin") return;
+    if (!isSuperAdmin) return;
     void fetchClinics();
-  }, [role, clinicCtxLoading, fetchClinics]);
+  }, [isSuperAdmin, fetchClinics]);
 
   useEffect(() => {
-    if (!clinicCtxLoading && role !== "super_admin") {
+    if (roleReady && !isSuperAdmin) {
       router.replace("/admin");
     }
-  }, [clinicCtxLoading, role, router]);
+  }, [roleReady, isSuperAdmin, router]);
 
   useEffect(() => {
     if (!newOpen || slugTouched) return;
@@ -426,7 +428,15 @@ export default function AdminClinicsPage() {
     );
   }
 
-  if (role !== "super_admin") {
+  if (!roleReady) {
+    return (
+      <div className={`${DS_PAGE_ROOT} flex min-h-[30vh] items-center justify-center`}>
+        <p className="text-sm text-gray-500">Loading…</p>
+      </div>
+    );
+  }
+
+  if (!isSuperAdmin) {
     return (
       <div className={`${DS_PAGE_ROOT} flex min-h-[30vh] items-center justify-center`}>
         <p className="text-sm text-gray-500">Redirecting…</p>

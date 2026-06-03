@@ -116,6 +116,9 @@ function AdminAuthenticatedShellInner({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [clinicMenuOpen, setClinicMenuOpen] = useState(false);
 
+  const roleReady = !clinicLoading;
+  const isSuperAdmin = roleReady && role === "super_admin";
+
   function isNavLinkActive(href: string): boolean {
     if (href === "/dashboard/clinics") {
       return (
@@ -233,12 +236,18 @@ function AdminAuthenticatedShellInner({
               {brandName}
             </span>
           </div>
-          {role === "super_admin" && allClinics.length > 0 ? (
+          {!roleReady ? (
+            <div className="px-3 pb-3" aria-hidden>
+              <div className="h-10 animate-pulse rounded-lg bg-white/10" />
+            </div>
+          ) : isSuperAdmin && allClinics.length > 0 ? (
             <div className="relative px-3 pb-3">
               <button
                 type="button"
                 onClick={() => setClinicMenuOpen((v) => !v)}
                 className="flex w-full items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2.5 text-left text-sm font-medium text-white shadow-sm transition-colors hover:border-white/15 hover:bg-white/[0.1]"
+                aria-haspopup="listbox"
+                aria-expanded={clinicMenuOpen}
               >
                 <span className="truncate">
                   {allClinics.find((c) => c.id === clinicId)?.brand_name || brandName}
@@ -249,11 +258,16 @@ function AdminAuthenticatedShellInner({
                 />
               </button>
               {clinicMenuOpen ? (
-                <ul className="absolute left-3 right-3 top-full z-50 mt-1 max-h-60 overflow-auto rounded-lg border border-white/10 bg-[#0E2238] py-1 shadow-lg ring-1 ring-black/20">
+                <ul
+                  className="absolute left-3 right-3 top-full z-50 mt-1 max-h-60 overflow-auto rounded-lg border border-white/10 bg-[#0E2238] py-1 shadow-lg ring-1 ring-black/20"
+                  role="listbox"
+                >
                   {allClinics.map((c) => (
                     <li key={c.id}>
                       <button
                         type="button"
+                        role="option"
+                        aria-selected={c.id === clinicId}
                         onClick={() => {
                           setClinicId(c.id);
                           setClinicMenuOpen(false);
@@ -272,7 +286,16 @@ function AdminAuthenticatedShellInner({
                 </ul>
               ) : null}
             </div>
-          ) : null}
+          ) : (
+            <div className="px-3 pb-3">
+              <div
+                className="flex w-full items-center rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2.5 text-sm font-medium text-white shadow-sm"
+                aria-label="Current clinic"
+              >
+                <span className="truncate">{brandName}</span>
+              </div>
+            </div>
+          )}
           <nav className="flex flex-1 flex-col gap-1 px-3 py-8">
             <Link
               href="/admin"
@@ -393,7 +416,7 @@ function AdminAuthenticatedShellInner({
                 Voice Agent
               </span>
             </Link>
-            {role === "super_admin" ? (
+            {isSuperAdmin ? (
               <Link
                 href="/dashboard/clinics"
                 className={navLinkClass("/dashboard/clinics")}
