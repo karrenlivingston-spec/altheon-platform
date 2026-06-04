@@ -418,6 +418,12 @@ async def retell_webhook(request: Request):
         if not isinstance(payload, dict):
             payload = {"raw": payload}
 
+        event_type = payload.get("event", "")
+        print(f"[retell_webhook] event type: {event_type}")
+        if event_type != "call_ended":
+            print(f"[retell_webhook] ignoring non-call_ended event: {event_type}")
+            return {"status": "ok", "skipped": True}
+
         print("[retell_webhook] incoming payload:")
         print(json.dumps(payload, indent=2, default=str))
 
