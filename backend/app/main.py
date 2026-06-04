@@ -37,6 +37,7 @@ from app.routers import (
 )
 from app.routes.legal import router as legal_router
 from routers import groups as groups_router
+from routers import retell_webhook as retell_webhook_router
 from routers import superadmin as superadmin_router
 from routers.fee_schedule import router as fee_schedule_router
 
@@ -87,6 +88,7 @@ app.include_router(
     cpt_detection_router.router, prefix="/api", tags=["CPT Detection"]
 )
 app.include_router(fee_schedule_router, prefix="/api", tags=["Fee Schedule"])
+app.include_router(retell_webhook_router.router, prefix="/api", tags=["retell"])
 app.include_router(soap_dictation_router.router, prefix="")
 app.include_router(dme_router.router, prefix="", tags=["dme"])
 app.include_router(groups_router.router, prefix="/groups", tags=["groups"])
