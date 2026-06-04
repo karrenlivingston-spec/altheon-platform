@@ -342,8 +342,8 @@ async def retell_webhook(request: Request):
 
         event_type = payload.get("event", "")
         print(f"[retell_webhook] event type: {event_type}")
-        if event_type != "call_ended":
-            print(f"[retell_webhook] ignoring non-call_ended event: {event_type}")
+        if event_type != "call_analyzed":
+            print(f"[retell_webhook] ignoring non-call_analyzed event: {event_type}")
             return {"status": "ok", "skipped": True}
 
         print("[retell_webhook] incoming payload:")
