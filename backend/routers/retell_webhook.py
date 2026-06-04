@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import traceback
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
@@ -24,147 +23,70 @@ DEFAULT_TREATMENT_TYPE_ID = "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380e02"
 
 NOTES_TEXT = "Booked via Jessica - Vitality voice agent"
 
-_FIELD_ALIASES: dict[str, tuple[str, ...]] = {
-    "patient_first_name": (
-        "patient_first_name",
-        "first_name",
-        "patientfirstname",
-        "patient_firstname",
-    ),
-    "patient_last_name": (
-        "patient_last_name",
-        "last_name",
-        "patientlastname",
-        "patient_lastname",
-    ),
-    "patient_dob": ("patient_dob", "dob", "date_of_birth", "patientdateofbirth"),
-    "patient_phone": (
-        "patient_phone",
-        "phone",
-        "phone_number",
-        "patientphone",
-        "caller_phone",
-    ),
-    "appointment_date": (
-        "appointment_date",
-        "date",
-        "appt_date",
-        "scheduled_date",
-    ),
-    "appointment_time": (
-        "appointment_time",
-        "time",
-        "appt_time",
-        "scheduled_time",
-    ),
-    "clinician_id": (
-        "clinician_id",
-        "provider_id",
-        "clinicianid",
-        "providerid",
-    ),
-    "treatment_type_id": (
-        "treatment_type_id",
-        "treatment_type",
-        "treatmenttypeid",
-    ),
-}
-
 _VITALITY_SMS_TEMPLATE = (
     "Hi {first_name}! Your appointment at Vitality Sports & Wellness has been scheduled. "
     "We look forward to seeing you! Questions? Call us at (561) 486-5542."
 )
 
 
-def _normalize_key(key: str) -> str:
-    return re.sub(r"[^a-z0-9]", "", str(key or "").lower())
+def _as_dict(value: Any) -> dict[str, Any]:
+    return value if isinstance(value, dict) else {}
 
 
-def _coerce_str(value: Any) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, (dict, list)):
-        return ""
-    return str(value).strip()
+def _extract_retell_booking_fields(payload: dict[str, Any]) -> dict[str, str]:
+    """Pull post-call booking fields from Retell call_analysis.custom_analysis_data."""
+    call_obj = _as_dict(payload.get("call"))
 
+    analysis = _as_dict(call_obj.get("call_analysis"))
+    custom_data = _as_dict(analysis.get("custom_analysis_data"))
+    print(f"[retell_webhook] custom_analysis_data: {custom_data}")
 
-def _deep_dicts(obj: Any, out: Optional[list[dict[str, Any]]] = None) -> list[dict[str, Any]]:
-    if out is None:
-        out = []
-    if isinstance(obj, dict):
-        out.append(obj)
-        for v in obj.values():
-            _deep_dicts(v, out)
-    elif isinstance(obj, list):
-        for item in obj:
-            _deep_dicts(item, out)
-    return out
+    metadata = _as_dict(call_obj.get("metadata"))
+    dynamic_vars = _as_dict(call_obj.get("retell_llm_dynamic_variables"))
 
+    def get_field(*keys: str) -> Optional[str]:
+        for key in keys:
+            val = custom_data.get(key) or metadata.get(key) or dynamic_vars.get(key)
+            if val is not None and str(val).strip():
+                return str(val).strip()
+        return None
 
-def _extract_from_transcript(text: str) -> dict[str, str]:
-    """Best-effort key: value extraction from transcript or summary text."""
-    found: dict[str, str] = {}
-    if not text or not isinstance(text, str):
-        return found
-    patterns = [
-        (r"(?i)patient[_\s-]*first[_\s-]*name\s*[:=]\s*([^\n,;]+)", "patient_first_name"),
-        (r"(?i)patient[_\s-]*last[_\s-]*name\s*[:=]\s*([^\n,;]+)", "patient_last_name"),
-        (r"(?i)(?:patient[_\s-]*)?phone\s*[:=]\s*([+\d()\s.-]+)", "patient_phone"),
-        (r"(?i)appointment[_\s-]*date\s*[:=]\s*([^\n,;]+)", "appointment_date"),
-        (r"(?i)appointment[_\s-]*time\s*[:=]\s*([^\n,;]+)", "appointment_time"),
-        (r"(?i)clinician[_\s-]*id\s*[:=]\s*([a-f0-9-]{36})", "clinician_id"),
-        (r"(?i)(?:provider|treatment)[_\s-]*(?:type[_\s-]*)?id\s*[:=]\s*([a-f0-9-]{36})", "treatment_type_id"),
-    ]
-    for pattern, field in patterns:
-        m = re.search(pattern, text)
-        if m and field not in found:
-            found[field] = m.group(1).strip()
-    return found
+    patient_first_name = get_field("patient_first_name")
+    patient_last_name = get_field("patient_last_name")
+    patient_phone = get_field("patient_phone")
+    if not patient_phone:
+        from_number = call_obj.get("from_number")
+        if from_number is not None and str(from_number).strip():
+            patient_phone = str(from_number).strip()
+    patient_dob = get_field("patient_dob")
+    appointment_date = get_field("appointment_date")
+    appointment_time = get_field("appointment_time")
+    clinician_id = DEFAULT_CLINICIAN_ID
+    treatment_type_id = DEFAULT_TREATMENT_TYPE_ID
 
+    print(
+        f"[retell_webhook] extracted fields: first={patient_first_name} "
+        f"last={patient_last_name} phone={patient_phone} "
+        f"date={appointment_date} time={appointment_time}"
+    )
 
-def _extract_booking_fields(payload: dict[str, Any]) -> dict[str, str]:
-    found: dict[str, str] = {}
-    alias_to_field: dict[str, str] = {}
-    for field, aliases in _FIELD_ALIASES.items():
-        for alias in aliases:
-            alias_to_field[_normalize_key(alias)] = field
-
-    call = payload.get("call")
-    if isinstance(call, dict):
-        for bucket_key in (
-            "retell_llm_dynamic_variables",
-            "metadata",
-            "dynamic_variables",
-            "collected_dynamic_variables",
-        ):
-            bucket = call.get(bucket_key)
-            if isinstance(bucket, dict):
-                _deep_dicts(bucket)
-
-        for text_key in ("transcript", "transcript_summary", "summary"):
-            chunk = call.get(text_key)
-            if isinstance(chunk, str):
-                found.update(_extract_from_transcript(chunk))
-
-        analysis = call.get("call_analysis")
-        if isinstance(analysis, dict):
-            custom = analysis.get("custom_analysis_data")
-            if isinstance(custom, dict):
-                _deep_dicts(custom)
-            summary = analysis.get("call_summary")
-            if isinstance(summary, str):
-                found.update(_extract_from_transcript(summary))
-
-    for d in _deep_dicts(payload):
-        for raw_key, raw_val in d.items():
-            field = alias_to_field.get(_normalize_key(raw_key))
-            if not field:
-                continue
-            val = _coerce_str(raw_val)
-            if val and field not in found:
-                found[field] = val
-
-    return found
+    fields: dict[str, str] = {
+        "clinician_id": clinician_id,
+        "treatment_type_id": treatment_type_id,
+    }
+    if patient_first_name:
+        fields["patient_first_name"] = patient_first_name
+    if patient_last_name:
+        fields["patient_last_name"] = patient_last_name
+    if patient_phone:
+        fields["patient_phone"] = patient_phone
+    if patient_dob:
+        fields["patient_dob"] = patient_dob
+    if appointment_date:
+        fields["appointment_date"] = appointment_date
+    if appointment_time:
+        fields["appointment_time"] = appointment_time
+    return fields
 
 
 def _handle_supabase_error(response: Any) -> None:
@@ -427,8 +349,7 @@ async def retell_webhook(request: Request):
         print("[retell_webhook] incoming payload:")
         print(json.dumps(payload, indent=2, default=str))
 
-        fields = _extract_booking_fields(payload)
-        print(f"[retell_webhook] extracted fields: {json.dumps(fields, default=str)}")
+        fields = _extract_retell_booking_fields(payload)
 
         if fields.get("patient_first_name") and fields.get("patient_last_name"):
             appointment_id = _book_appointment(fields)
