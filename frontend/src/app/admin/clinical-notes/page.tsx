@@ -262,8 +262,12 @@ export default function AdminClinicalNotesPage() {
   const [pendingReviewCount, setPendingReviewCount] = useState(0);
 
   const [scribeBannerVisible, setScribeBannerVisible] = useState(false);
+  const [diagnosticPrefillBannerVisible, setDiagnosticPrefillBannerVisible] =
+    useState(false);
   const [sessionTranscript, setSessionTranscript] = useState("");
   const [transcriptPanelOpen, setTranscriptPanelOpen] = useState(false);
+
+  const SOAP_STORAGE_KEY = "altheon:soap-prefill";
 
   const applySoapPrefill = useCallback(
     (soap: {
@@ -276,6 +280,8 @@ export default function AdminClinicalNotesPage() {
       if (soap.objective) setDraftObjective(soap.objective);
       if (soap.assessment) setDraftAssessment(soap.assessment);
       if (soap.plan) setDraftPlan(soap.plan);
+      sessionStorage.removeItem(SOAP_STORAGE_KEY);
+      setDiagnosticPrefillBannerVisible(true);
     },
     [],
   );
@@ -292,7 +298,7 @@ export default function AdminClinicalNotesPage() {
     };
     window.addEventListener("altheon:soap-prefill", onPrefill);
     try {
-      const raw = sessionStorage.getItem("altheon_soap_prefill");
+      const raw = sessionStorage.getItem(SOAP_STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as {
           subjective?: string;
@@ -300,13 +306,13 @@ export default function AdminClinicalNotesPage() {
           assessment?: string;
           plan?: string;
         };
-        if (editorOpen) applySoapPrefill(parsed);
+        applySoapPrefill(parsed);
       }
     } catch {
       /* ignore */
     }
     return () => window.removeEventListener("altheon:soap-prefill", onPrefill);
-  }, [applySoapPrefill, editorOpen]);
+  }, [applySoapPrefill]);
 
   const handleSoapFromScribe = useCallback((soap: SoapFromScribe) => {
     setEditingId(null);
@@ -782,6 +788,26 @@ export default function AdminClinicalNotesPage() {
         ) : null}
       </div>
 
+      {diagnosticPrefillBannerVisible && !editorOpen ? (
+        <div
+          className="relative mt-6 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 pr-12 text-sm text-teal-950"
+          role="status"
+        >
+          <p>
+            SOAP fields pre-filled from diagnostic analysis — open a note to
+            review before saving.
+          </p>
+          <button
+            type="button"
+            className="absolute right-1 top-1 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-teal-800 hover:bg-teal-100"
+            aria-label="Dismiss"
+            onClick={() => setDiagnosticPrefillBannerVisible(false)}
+          >
+            ✕
+          </button>
+        </div>
+      ) : null}
+
       {toast ? (
         <p className="mt-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
           {toast}
@@ -1104,6 +1130,25 @@ export default function AdminClinicalNotesPage() {
                   className="absolute right-1 top-1 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-sky-800 hover:bg-sky-100"
                   aria-label="Dismiss"
                   onClick={() => setScribeBannerVisible(false)}
+                >
+                  ✕
+                </button>
+              </div>
+            ) : null}
+            {diagnosticPrefillBannerVisible ? (
+              <div
+                className="relative mt-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 pr-12 text-sm text-teal-950"
+                role="status"
+              >
+                <p>
+                  SOAP fields pre-filled from diagnostic analysis — review before
+                  saving.
+                </p>
+                <button
+                  type="button"
+                  className="absolute right-1 top-1 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-teal-800 hover:bg-teal-100"
+                  aria-label="Dismiss"
+                  onClick={() => setDiagnosticPrefillBannerVisible(false)}
                 >
                   ✕
                 </button>

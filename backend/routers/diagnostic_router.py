@@ -627,9 +627,30 @@ def public_upload_info(token: str):
     first = ""
     if pt.data:
         first = str((pt.data[0] or {}).get("first_name") or "").strip()
+
+    clinic_name = "Your clinic"
+    try:
+        clinic_resp = (
+            supabase.table("clinics")
+            .select("brand_name, name")
+            .eq("id", ctx["clinic_id"])
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(clinic_resp)
+        if clinic_resp.data:
+            crow = clinic_resp.data[0]
+            clinic_name = (
+                str(crow.get("brand_name") or crow.get("name") or "").strip()
+                or clinic_name
+            )
+    except Exception:
+        traceback.print_exc()
+
     return {
         "valid": True,
         "patient_first_name": first or "Patient",
+        "clinic_name": clinic_name,
         "expires_hours": _TOKEN_TTL_HOURS,
     }
 

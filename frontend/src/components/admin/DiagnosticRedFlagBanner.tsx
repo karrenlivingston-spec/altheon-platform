@@ -8,6 +8,8 @@ import { supabase } from "@/lib/supabase";
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
 
+const POLL_MS = 30_000;
+
 export type DiagnosticAnalysis = {
   id: string;
   status?: string;
@@ -57,6 +59,8 @@ export function DiagnosticRedFlagBanner({
 
   useEffect(() => {
     void load();
+    const id = window.setInterval(() => void load(), POLL_MS);
+    return () => window.clearInterval(id);
   }, [load]);
 
   async function markReviewed(analysisId: string) {
@@ -86,7 +90,7 @@ export function DiagnosticRedFlagBanner({
       role="alert"
     >
       <p className="text-sm font-medium">
-        ⚠ Red Flag Detected — review imaging summary before proceeding
+        ⚠ Red Flag Detected — Review imaging summary before proceeding
         {pending.length > 1 ? ` (${pending.length} pending)` : ""}
       </p>
       <button

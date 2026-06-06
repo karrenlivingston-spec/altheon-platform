@@ -1,7 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Loader2, Upload } from "lucide-react";
+import {
+  AlertTriangle,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Upload,
+} from "lucide-react";
 
 import {
   DS_CARD,
@@ -12,6 +18,9 @@ import { supabase } from "@/lib/supabase";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
+
+const SOAP_STORAGE_KEY = "altheon:soap-prefill";
+const MAX_BYTES = 20 * 1024 * 1024;
 
 const DOC_TYPES = [
   { value: "mri_report", label: "MRI Report" },
@@ -75,19 +84,55 @@ function statusBadgeClass(status: string): string {
   return "bg-slate-100 text-slate-700";
 }
 
-function statusLabel(status: string): string {
+function statusLabel(status: string, hasSummary: boolean): string {
   const s = status.toLowerCase();
   if (s === "reviewed") return "Reviewed";
+  if (s === "pending" && !hasSummary) return "Analyzing…";
   if (s === "pending") return "Pending Review";
   return "Analyzed";
 }
 
 function copySoapToNote(soap: SoapSuggestions) {
   if (typeof window === "undefined") return;
-  sessionStorage.setItem("altheon_soap_prefill", JSON.stringify(soap));
+  sessionStorage.setItem(SOAP_STORAGE_KEY, JSON.stringify(soap));
   window.dispatchEvent(
     new CustomEvent("altheon:soap-prefill", { detail: soap }),
   );
+}
+
+function isStillAnalyzing(row: DiagnosticRow): boolean {
+  const st = (row.status ?? "").toLowerCase();
+  const hasSummary = Boolean((row.clinician_summary ?? "").trim());
+  return st === "pending" && !hasSummary;
+}
+
+function uploadWithProgress(
+  url: string,
+  form: FormData,
+  headers: Record<string, string>,
+  onProgress: (pct: number) => void,
+): Promise<Response> {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", url);
+    Object.entries(headers).forEach(([k, v]) => xhr.setRequestHeader(k, v));
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        onProgress(Math.round((e.loaded / e.total) * 100));
+      }
+    };
+    xhr.onload = () => {
+      const body = xhr.responseText;
+      resolve(
+        new Response(body, {
+          status: xhr.status,
+          statusText: xhr.statusText,
+        }),
+      );
+    };
+    xhr.onerror = () => reject(new Error("Upload failed"));
+    xhr.send(form);
+  });
 }
 
 type Props = {
@@ -98,17 +143,25 @@ type Props = {
 export function DiagnosticsTab({ patientId, clinicId }: Props) {
   const [documentType, setDocumentType] = useState<string>("mri_report");
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [analyses, setAnalyses] = useState<DiagnosticRow[]>([]);
   const [timeline, setTimeline] = useState<TimelineRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [analyzingIds, setAnalyzingIds] = useState<Set<string>>(new Set());
+  const [analyzingDocIds, setAnalyzingDocIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const [rerunningDocIds, setRerunningDocIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [expandedClinician, setExpandedClinician] = useState<Set<string>>(
     () => new Set(),
   );
   const [expandedPatient, setExpandedPatient] = useState<Set<string>>(
     () => new Set(),
   );
+  const [toast, setToast] = useState<string | null>(null);
+  const [sendLinkBusy, setSendLinkBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -145,48 +198,90 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
     };
   }, [loadData]);
 
-  function startPolling(documentId: string) {
-    setAnalyzingIds((prev) => new Set(prev).add(documentId));
-    if (pollRef.current) clearInterval(pollRef.current);
-    let attempts = 0;
-    pollRef.current = setInterval(() => {
-      attempts += 1;
-      void loadData();
-      if (attempts >= 48) {
-        setAnalyzingIds((prev) => {
-          const next = new Set(prev);
-          next.delete(documentId);
-          return next;
-        });
-        if (pollRef.current) {
-          clearInterval(pollRef.current);
-          pollRef.current = null;
-        }
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 5000);
+    return () => window.clearTimeout(t);
+  }, [toast]);
+
+  const startAnalysisPolling = useCallback(
+    (documentId: string, mode: "upload" | "rerun") => {
+      if (mode === "upload") {
+        setAnalyzingDocIds((prev) => new Set(prev).add(documentId));
+      } else {
+        setRerunningDocIds((prev) => new Set(prev).add(documentId));
       }
-    }, 2500);
-  }
+
+      if (pollRef.current) clearInterval(pollRef.current);
+      let attempts = 0;
+      pollRef.current = setInterval(() => {
+        attempts += 1;
+        void loadData();
+        if (attempts >= 60) {
+          setAnalyzingDocIds((prev) => {
+            const n = new Set(prev);
+            n.delete(documentId);
+            return n;
+          });
+          setRerunningDocIds((prev) => {
+            const n = new Set(prev);
+            n.delete(documentId);
+            return n;
+          });
+          if (pollRef.current) {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+          }
+        }
+      }, 2500);
+    },
+    [loadData],
+  );
 
   useEffect(() => {
-    if (analyzingIds.size === 0) return;
-    const done = [...analyzingIds].filter((docId) =>
-      analyses.some((a) => a.document_id === docId),
-    );
-    if (done.length === 0) return;
-    setAnalyzingIds((prev) => {
+    const checkComplete = (docId: string, rows: DiagnosticRow[]) => {
+      const row = rows.find((a) => a.document_id === docId);
+      return row && (row.clinician_summary ?? "").trim().length > 0;
+    };
+
+    setAnalyzingDocIds((prev) => {
       const next = new Set(prev);
-      done.forEach((id) => next.delete(id));
-      return next;
-    });
-    if ([...analyzingIds].every((id) => analyses.some((a) => a.document_id === id))) {
-      if (pollRef.current) {
-        clearInterval(pollRef.current);
-        pollRef.current = null;
+      let changed = false;
+      for (const id of prev) {
+        if (checkComplete(id, analyses)) {
+          next.delete(id);
+          changed = true;
+        }
       }
+      return changed ? next : prev;
+    });
+
+    setRerunningDocIds((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const id of prev) {
+        if (checkComplete(id, analyses)) {
+          next.delete(id);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+
+    if (analyzingDocIds.size === 0 && rerunningDocIds.size === 0 && pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
     }
-  }, [analyses, analyzingIds]);
+  }, [analyses, analyzingDocIds.size, rerunningDocIds.size]);
 
   async function uploadFile(file: File) {
+    if (file.size > MAX_BYTES) {
+      setUploadError("File exceeds 20MB limit.");
+      return;
+    }
+
     setUploading(true);
+    setUploadProgress(0);
     setUploadError(null);
     try {
       const h = await authHeaders();
@@ -195,20 +290,23 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
       form.append("document_type", documentType);
       form.append("upload_source", "receptionist");
 
-      const res = await fetch(
-        `${API_BASE}/patients/${encodeURIComponent(patientId)}/documents/upload?clinic_id=${encodeURIComponent(clinicId)}`,
-        { method: "POST", headers: h, body: form },
-      );
+      const url = `${API_BASE}/patients/${encodeURIComponent(patientId)}/documents/upload?clinic_id=${encodeURIComponent(clinicId)}`;
+      const res = await uploadWithProgress(url, form, h, setUploadProgress);
+
       if (!res.ok) {
         throw new Error((await res.text().catch(() => "")).trim() || "Upload failed");
       }
       const data = (await res.json()) as { document_id?: string };
-      if (data.document_id) startPolling(data.document_id);
+      if (data.document_id) {
+        startAnalysisPolling(data.document_id, "upload");
+      }
       await loadData();
+      setToast("Document uploaded — analysis in progress");
     } catch (e) {
       setUploadError(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setUploading(false);
+      setUploadProgress(0);
     }
   }
 
@@ -216,6 +314,38 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
     e.preventDefault();
     const file = e.dataTransfer.files?.[0];
     if (file) void uploadFile(file);
+  }
+
+  async function rerunAnalysis(documentId: string) {
+    const h = await authHeaders();
+    const res = await fetch(
+      `${API_BASE}/patients/${encodeURIComponent(patientId)}/documents/${encodeURIComponent(documentId)}/analyze?clinic_id=${encodeURIComponent(clinicId)}`,
+      { method: "POST", headers: h },
+    );
+    if (!res.ok) {
+      setToast("Re-analysis failed");
+      return;
+    }
+    startAnalysisPolling(documentId, "rerun");
+    setToast("Re-running analysis…");
+  }
+
+  async function sendUploadLink() {
+    setSendLinkBusy(true);
+    try {
+      const h = await authHeaders(true);
+      const res = await fetch(
+        `${API_BASE}/patients/${encodeURIComponent(patientId)}/documents/send-upload-link?clinic_id=${encodeURIComponent(clinicId)}`,
+        { method: "POST", headers: h, body: "{}" },
+      );
+      if (!res.ok) {
+        setToast("Could not send upload link");
+        return;
+      }
+      setToast("Upload link sent via SMS");
+    } finally {
+      setSendLinkBusy(false);
+    }
   }
 
   async function markReviewed(analysisId: string) {
@@ -227,14 +357,36 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
     await loadData();
   }
 
-  const pendingDocIds = new Set(analyses.map((a) => a.document_id).filter(Boolean));
+  const orphanAnalyzing = [...analyzingDocIds].filter(
+    (id) => !analyses.some((a) => a.document_id === id),
+  );
 
   return (
     <div className="space-y-8">
+      {toast ? (
+        <div
+          className="fixed bottom-6 right-6 z-50 rounded-lg bg-gray-900 px-4 py-3 text-sm text-white shadow-lg"
+          role="status"
+        >
+          {toast}
+        </div>
+      ) : null}
+
       <div className={`${DS_CARD} p-6`}>
-        <h2 className="mb-4 text-sm font-semibold uppercase tracking-wider text-gray-900">
-          Upload document
-        </h2>
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-900">
+            Upload document
+          </h2>
+          <button
+            type="button"
+            disabled={sendLinkBusy}
+            onClick={() => void sendUploadLink()}
+            className={`${DS_SECONDARY_BTN} text-sm disabled:opacity-60`}
+          >
+            {sendLinkBusy ? "Sending…" : "Send Upload Link to Patient"}
+          </button>
+        </div>
+
         <label className="mb-3 block text-sm font-medium text-gray-700">
           Document type
           <select
@@ -254,7 +406,7 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
           onDragOver={(e) => e.preventDefault()}
           onDrop={onDrop}
           className="flex min-h-[140px] cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-teal-200 bg-teal-50/40 px-6 py-8 text-center transition-colors hover:border-teal-400"
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => !uploading && fileInputRef.current?.click()}
           role="button"
           tabIndex={0}
           onKeyDown={(e) => {
@@ -266,6 +418,7 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
             type="file"
             accept={ACCEPT}
             className="hidden"
+            disabled={uploading}
             onChange={(e) => {
               const f = e.target.files?.[0];
               if (f) void uploadFile(f);
@@ -273,9 +426,17 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
             }}
           />
           {uploading ? (
-            <div className="flex items-center gap-2 text-sm text-teal-800">
-              <Loader2 className="h-5 w-5 animate-spin" />
-              Uploading &amp; analyzing…
+            <div className="w-full max-w-xs">
+              <div className="mb-2 flex items-center justify-center gap-2 text-sm text-teal-800">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Uploading… {uploadProgress}%
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-teal-100">
+                <div
+                  className="h-full bg-teal-600 transition-all duration-200"
+                  style={{ width: `${uploadProgress}%` }}
+                />
+              </div>
             </div>
           ) : (
             <>
@@ -300,27 +461,45 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
         </h2>
         {loading ? (
           <p className="text-sm text-gray-500">Loading…</p>
-        ) : analyses.length === 0 && analyzingIds.size === 0 ? (
-          <p className="text-sm text-gray-500">No analyses yet. Upload a document to begin.</p>
+        ) : analyses.length === 0 && orphanAnalyzing.length === 0 ? (
+          <p className="text-sm text-gray-500">
+            No analyses yet. Upload a document to begin.
+          </p>
         ) : (
           <div className="space-y-4">
-            {[...analyzingIds]
-              .filter((id) => !pendingDocIds.has(id))
-              .map((docId) => (
-                <div
-                  key={`analyzing-${docId}`}
-                  className={`${DS_CARD} flex items-center gap-3 p-5 text-sm text-gray-600`}
-                >
-                  <Loader2 className="h-5 w-5 animate-spin text-teal-600" />
-                  Analyzing document…
-                </div>
-              ))}
+            {orphanAnalyzing.map((docId) => (
+              <div
+                key={`analyzing-${docId}`}
+                className={`${DS_CARD} flex items-center gap-3 p-5 text-sm text-gray-600`}
+              >
+                <Loader2 className="h-5 w-5 animate-spin text-teal-600" />
+                Analyzing…
+              </div>
+            ))}
             {analyses.map((row) => {
               const flags = Array.isArray(row.red_flags) ? row.red_flags : [];
               const soap = (row.soap_suggestions ?? {}) as SoapSuggestions;
               const st = row.status ?? "analyzed";
+              const hasSummary = Boolean((row.clinician_summary ?? "").trim());
+              const docId = row.document_id ?? "";
+              const analyzing =
+                isStillAnalyzing(row) ||
+                (docId && analyzingDocIds.has(docId)) ||
+                (docId && rerunningDocIds.has(docId));
               const showClin = expandedClinician.has(row.id);
               const showPat = expandedPatient.has(row.id);
+
+              if (analyzing && !hasSummary) {
+                return (
+                  <div
+                    key={row.id}
+                    className={`${DS_CARD} flex items-center gap-3 p-5 text-sm text-gray-600`}
+                  >
+                    <Loader2 className="h-5 w-5 animate-spin text-teal-600" />
+                    Analyzing…
+                  </div>
+                );
+              }
 
               return (
                 <div key={row.id} className={`${DS_CARD} p-5`}>
@@ -336,26 +515,34 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
                       </span>
                     ) : null}
                     {row.imaging_date ? (
-                      <span className="text-sm text-gray-500">{row.imaging_date}</span>
+                      <span className="text-sm text-gray-500">
+                        {row.imaging_date}
+                      </span>
                     ) : null}
                     <span
                       className={`ml-auto rounded-full px-2.5 py-0.5 text-xs font-medium ${statusBadgeClass(st)}`}
                     >
-                      {statusLabel(st)}
+                      {statusLabel(st, hasSummary)}
                     </span>
                   </div>
 
                   {flags.length > 0 ? (
-                    <ul className="mb-3 space-y-1 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+                    <ul className="mb-3 space-y-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
                       {flags.map((f) => (
-                        <li key={f}>• {f}</li>
+                        <li key={f} className="flex items-start gap-2">
+                          <AlertTriangle
+                            className="mt-0.5 h-4 w-4 shrink-0 text-red-600"
+                            aria-hidden
+                          />
+                          <span>{f}</span>
+                        </li>
                       ))}
                     </ul>
                   ) : null}
 
                   <button
                     type="button"
-                    className="mb-2 flex w-full items-center gap-1 text-left text-sm font-semibold text-gray-800"
+                    className="mb-2 flex w-full items-center gap-1 text-left text-sm font-semibold text-gray-900"
                     onClick={() =>
                       setExpandedClinician((s) => {
                         const n = new Set(s);
@@ -370,10 +557,10 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
                     ) : (
                       <ChevronRight className="h-4 w-4" />
                     )}
-                    Clinician summary
+                    Clinician Summary
                   </button>
                   {showClin ? (
-                    <p className="mb-3 whitespace-pre-wrap text-sm text-gray-700">
+                    <p className="mb-3 whitespace-pre-wrap rounded-md border border-gray-200 bg-white px-3 py-2 text-sm leading-relaxed text-gray-800">
                       {row.clinician_summary || "—"}
                     </p>
                   ) : null}
@@ -395,42 +582,63 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
                     ) : (
                       <ChevronRight className="h-4 w-4" />
                     )}
-                    Patient explanation
+                    Patient Explanation
                   </button>
                   {showPat ? (
-                    <p className="mb-3 whitespace-pre-wrap rounded-lg bg-slate-50 px-3 py-2 text-sm leading-relaxed text-slate-700">
+                    <p className="mb-3 whitespace-pre-wrap rounded-lg border border-slate-100 bg-slate-50/90 px-3 py-2 text-sm leading-relaxed text-slate-600">
                       {row.patient_explanation || "—"}
                     </p>
                   ) : null}
 
                   <div className="mt-4 rounded-lg border border-gray-100 bg-gray-50/80 p-4">
                     <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
-                      SOAP suggestions
+                      SOAP Suggestions
                     </h3>
-                    <div className="grid gap-2 text-sm text-gray-700">
-                      {(["subjective", "objective", "assessment", "plan"] as const).map(
-                        (k) => (
-                          <div key={k}>
-                            <span className="font-medium capitalize">{k}: </span>
-                            <span className="text-gray-600">
-                              {(soap[k] ?? "").trim() || "—"}
-                            </span>
-                          </div>
-                        ),
-                      )}
+                    <div className="grid gap-3 text-sm">
+                      {(
+                        [
+                          ["S", "subjective"],
+                          ["O", "objective"],
+                          ["A", "assessment"],
+                          ["P", "plan"],
+                        ] as const
+                      ).map(([label, key]) => (
+                        <div key={key}>
+                          <span className="font-semibold text-gray-800">
+                            {label}:{" "}
+                          </span>
+                          <span className="text-gray-600">
+                            {(soap[key] ?? "").trim() || "—"}
+                          </span>
+                        </div>
+                      ))}
                     </div>
-                    <button
-                      type="button"
-                      className={`${DS_SECONDARY_BTN} mt-3 text-xs`}
-                      onClick={() => {
-                        copySoapToNote(soap);
-                        alert(
-                          "SOAP suggestions saved. Open Clinical Notes to paste into the active note.",
-                        );
-                      }}
-                    >
-                      Copy to Current Note
-                    </button>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className={`${DS_SECONDARY_BTN} text-xs`}
+                        onClick={() => {
+                          copySoapToNote(soap);
+                          setToast(
+                            "SOAP suggestions copied — open Clinical Notes to apply",
+                          );
+                        }}
+                      >
+                        Copy to Current Note
+                      </button>
+                      {docId ? (
+                        <button
+                          type="button"
+                          className={`${DS_SECONDARY_BTN} text-xs`}
+                          disabled={rerunningDocIds.has(docId)}
+                          onClick={() => void rerunAnalysis(docId)}
+                        >
+                          {rerunningDocIds.has(docId)
+                            ? "Re-running…"
+                            : "Re-run Analysis"}
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
 
                   {st === "pending" && flags.length > 0 ? (
@@ -459,16 +667,17 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
           <div className="relative border-l-2 border-teal-200 pl-6">
             {timeline.map((ev) => {
               const da = ev.diagnostic_analyses;
+              const parts = [
+                ev.event_date ?? "—",
+                da?.modality,
+                da?.body_part,
+                (ev.summary ?? "").trim(),
+              ].filter(Boolean);
               return (
                 <div key={ev.id} className="relative mb-6 last:mb-0">
                   <span className="absolute -left-[1.65rem] top-1.5 h-3 w-3 rounded-full bg-teal-500" />
-                  <p className="text-xs font-medium text-gray-500">
-                    {ev.event_date ?? "—"}
-                    {da?.modality ? ` · ${da.modality}` : ""}
-                    {da?.body_part ? ` · ${da.body_part}` : ""}
-                  </p>
-                  <p className="mt-1 text-sm text-gray-800">
-                    {(ev.summary ?? "").trim() || "—"}
+                  <p className="text-sm text-gray-800">
+                    {parts.join(" | ")}
                   </p>
                 </div>
               );
