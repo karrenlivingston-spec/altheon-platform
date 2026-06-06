@@ -32,6 +32,8 @@ import { supabase } from "@/lib/supabase";
 import { PatientGroupsSection } from "@/components/admin/PatientGroupsSection";
 import { OutcomeMeasuresSection } from "@/components/admin/OutcomeMeasuresSection";
 import { DmeSection } from "@/components/dme/DmeSection";
+import { DiagnosticRedFlagBanner } from "@/components/admin/DiagnosticRedFlagBanner";
+import { DiagnosticsTab } from "@/components/admin/DiagnosticsTab";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
@@ -40,7 +42,7 @@ const NY = "America/New_York";
 const SECONDARY_STAGGER_MS = 200;
 const TAB_ACCENT = "var(--color-primary, #0D9488)";
 
-type PageTab = "overview" | "dme" | "pi-cases";
+type PageTab = "overview" | "dme" | "pi-cases" | "imaging-diagnostics";
 type SectionTab = "overview" | "appointments" | "billing" | "membership";
 
 function sleep(ms: number): Promise<void> {
@@ -857,6 +859,7 @@ export function PatientDetailView({
     { id: "overview", label: "Overview" },
     { id: "dme", label: "DME" },
     { id: "pi-cases", label: "PI Cases" },
+    { id: "imaging-diagnostics", label: "Imaging & Diagnostics" },
   ];
 
   function setDraftField<K extends keyof PatientRecord>(
@@ -1134,6 +1137,10 @@ export function PatientDetailView({
           </div>
         </div>
       </div>
+
+      {patientReady ? (
+        <DiagnosticRedFlagBanner patientId={patientId} clinicId={clinicId} />
+      ) : null}
 
       <div className="sticky top-0 z-20 -mx-1 mb-6 border-b border-gray-200 bg-[#f8fafc]/95 px-1 pb-0 backdrop-blur-sm">
         <div className="flex gap-1" role="tablist" aria-label="Patient sections">
@@ -1947,6 +1954,10 @@ export function PatientDetailView({
 
       {pageTab === "dme" ? (
         <DmeSection clinicId={clinicId} patientId={patientId} />
+      ) : null}
+
+      {pageTab === "imaging-diagnostics" ? (
+        <DiagnosticsTab patientId={patientId} clinicId={clinicId} />
       ) : null}
 
       {pageTab === "pi-cases" ? (

@@ -12,3 +12,7 @@ twilio>=9.0.0
 google-auth
 google-auth-httplib2
 google-api-python-client
+pymupdf
+Pillow
+pytesseract
+pillow-heif

@@ -40,6 +40,7 @@ from routers import groups as groups_router
 from routers import retell_webhook as retell_webhook_router
 from routers import superadmin as superadmin_router
 from routers.fee_schedule import router as fee_schedule_router
+from routers.diagnostic_router import router as diagnostic_router
 
 load_dotenv()
 
@@ -89,6 +90,7 @@ app.include_router(
 )
 app.include_router(fee_schedule_router, prefix="/api", tags=["Fee Schedule"])
 app.include_router(retell_webhook_router.router, prefix="/api", tags=["retell"])
+app.include_router(diagnostic_router, tags=["Diagnostics"])
 app.include_router(soap_dictation_router.router, prefix="")
 app.include_router(dme_router.router, prefix="", tags=["dme"])
 app.include_router(groups_router.router, prefix="/groups", tags=["groups"])

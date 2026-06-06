@@ -265,6 +265,49 @@ export default function AdminClinicalNotesPage() {
   const [sessionTranscript, setSessionTranscript] = useState("");
   const [transcriptPanelOpen, setTranscriptPanelOpen] = useState(false);
 
+  const applySoapPrefill = useCallback(
+    (soap: {
+      subjective?: string;
+      objective?: string;
+      assessment?: string;
+      plan?: string;
+    }) => {
+      if (soap.subjective) setDraftSubjective(soap.subjective);
+      if (soap.objective) setDraftObjective(soap.objective);
+      if (soap.assessment) setDraftAssessment(soap.assessment);
+      if (soap.plan) setDraftPlan(soap.plan);
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const onPrefill = (e: Event) => {
+      const detail = (e as CustomEvent).detail as {
+        subjective?: string;
+        objective?: string;
+        assessment?: string;
+        plan?: string;
+      };
+      if (detail) applySoapPrefill(detail);
+    };
+    window.addEventListener("altheon:soap-prefill", onPrefill);
+    try {
+      const raw = sessionStorage.getItem("altheon_soap_prefill");
+      if (raw) {
+        const parsed = JSON.parse(raw) as {
+          subjective?: string;
+          objective?: string;
+          assessment?: string;
+          plan?: string;
+        };
+        if (editorOpen) applySoapPrefill(parsed);
+      }
+    } catch {
+      /* ignore */
+    }
+    return () => window.removeEventListener("altheon:soap-prefill", onPrefill);
+  }, [applySoapPrefill, editorOpen]);
+
   const handleSoapFromScribe = useCallback((soap: SoapFromScribe) => {
     setEditingId(null);
     setDraftPatientId("");
