@@ -284,21 +284,19 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
     if (!isClinician || !clinicIdParam) return;
     setEnding(true);
     try {
-      let { data } = await supabase.auth.getSession();
-      let token = data.session?.access_token ?? "";
-      if (!token) {
-        await supabase.auth.refreshSession();
-        ({ data } = await supabase.auth.getSession());
-        token = data.session?.access_token ?? "";
-      }
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (token) headers.Authorization = `Bearer ${token}`;
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
 
       const res = await fetch(
         `${API_BASE}/visits/${encodeURIComponent(roomId)}/end?clinic_id=${encodeURIComponent(clinicIdParam)}`,
-        { method: "POST", headers },
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${session?.access_token}`,
+            "Content-Type": "application/json",
+          },
+        },
       );
       if (res.ok) {
         const json = (await res.json()) as { duration_seconds?: number };
