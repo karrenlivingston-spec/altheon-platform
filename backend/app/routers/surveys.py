@@ -87,6 +87,28 @@ def _find_patient_by_twilio_from(from_number: str) -> Optional[dict[str, Any]]:
     return None
 
 
+def _clinic_id_for_survey(survey: dict[str, Any]) -> str:
+    cid = str(survey.get("clinic_id") or "").strip()
+    if cid:
+        return cid
+    appt_id = str(survey.get("appointment_id") or "").strip()
+    if not appt_id:
+        return ""
+    try:
+        resp = (
+            supabase.table("appointments")
+            .select("clinic_id")
+            .eq("id", appt_id)
+            .limit(1)
+            .execute()
+        )
+        if resp.data:
+            return str(resp.data[0].get("clinic_id") or "").strip()
+    except Exception:
+        logger.exception("clinic_id lookup failed for survey appt=%s", appt_id)
+    return ""
+
+
 def _latest_open_survey(patient_id: str) -> Optional[dict[str, Any]]:
     try:
         resp = (
@@ -192,6 +214,7 @@ async def sms_webhook(request: Request) -> Response:
     survey_id = str(survey["id"])
     appointment_id = survey.get("appointment_id")
     appointment_id_s = str(appointment_id) if appointment_id else None
+    clinic_id = _clinic_id_for_survey(survey)
 
     qkey = _current_question(survey)
     if not qkey:
@@ -202,13 +225,15 @@ async def sms_webhook(request: Request) -> Response:
 
     score = _parse_score(body_raw)
     if score is None:
-        send_sms(
-            _to_e164_us(from_raw),
-            INVALID_TEXT,
-            patient_id=patient_id,
-            appointment_id=appointment_id_s,
-            message_type="survey_invalid",
-        )
+        if clinic_id:
+            send_sms(
+                clinic_id,
+                _to_e164_us(from_raw),
+                INVALID_TEXT,
+                patient_id=patient_id,
+                appointment_id=appointment_id_s,
+                message_type="survey_invalid",
+            )
         return Response(
             content=str(MessagingResponse()),
             media_type="application/xml",
@@ -242,31 +267,39 @@ async def sms_webhook(request: Request) -> Response:
 
     next_q = _current_question(refreshed)
     to = _to_e164_us(from_raw)
+    if not clinic_id:
+        clinic_id = _clinic_id_for_survey(refreshed)
 
     if next_q == "q2":
-        send_sms(
-            to,
-            Q2_TEXT,
-            patient_id=patient_id,
-            appointment_id=appointment_id_s,
-            message_type="survey_q2",
-        )
+        if clinic_id:
+            send_sms(
+                clinic_id,
+                to,
+                Q2_TEXT,
+                patient_id=patient_id,
+                appointment_id=appointment_id_s,
+                message_type="survey_q2",
+            )
     elif next_q == "q3":
-        send_sms(
-            to,
-            Q3_TEXT,
-            patient_id=patient_id,
-            appointment_id=appointment_id_s,
-            message_type="survey_q3",
-        )
+        if clinic_id:
+            send_sms(
+                clinic_id,
+                to,
+                Q3_TEXT,
+                patient_id=patient_id,
+                appointment_id=appointment_id_s,
+                message_type="survey_q3",
+            )
     elif next_q == "q4":
-        send_sms(
-            to,
-            Q4_TEXT,
-            patient_id=patient_id,
-            appointment_id=appointment_id_s,
-            message_type="survey_q4",
-        )
+        if clinic_id:
+            send_sms(
+                clinic_id,
+                to,
+                Q4_TEXT,
+                patient_id=patient_id,
+                appointment_id=appointment_id_s,
+                message_type="survey_q4",
+            )
     else:
         q1 = int(refreshed.get("q1_overall") or 0)
         q2 = int(refreshed.get("q2_pain_relief") or 0)
@@ -287,13 +320,15 @@ async def sms_webhook(request: Request) -> Response:
             ).eq("id", survey_id).execute()
         except Exception:
             logger.exception("survey complete update failed id=%s", survey_id)
-        send_sms(
-            to,
-            closing,
-            patient_id=patient_id,
-            appointment_id=appointment_id_s,
-            message_type="survey_complete",
-        )
+        if clinic_id:
+            send_sms(
+                clinic_id,
+                to,
+                closing,
+                patient_id=patient_id,
+                appointment_id=appointment_id_s,
+                message_type="survey_complete",
+            )
 
     return Response(
         content=str(MessagingResponse()),
@@ -386,6 +421,7 @@ def send_survey_sms_batch() -> dict[str, Any]:
             f"overall experience? Reply 1-5 (5 = excellent). Reply STOP to opt out."
         )
         sid = send_sms(
+            clinic_id,
             _to_e164_us(str(phone)),
             msg,
             patient_id=patient_id,

@@ -488,6 +488,7 @@ def send_booking_intake_sms(
         base,
     )
     return send_sms(
+        clinic_id,
         _to_e164_us(str(patient_phone)),
         body,
         patient_id=patient_id,
@@ -667,7 +668,8 @@ def send_intake_reminders():
 
         appt_id = str(ap.get("id") or "").strip()
         patient_id = str(ap.get("patient_id") or "").strip()
-        if not appt_id or not patient_id:
+        clinic_id = str(ap.get("clinic_id") or "").strip()
+        if not appt_id or not patient_id or not clinic_id:
             errors += 1
             continue
 
@@ -706,6 +708,7 @@ def send_intake_reminders():
             pref = _normalize_pref_lang(prow.get("preferred_language"))
             sms_body = _followup_sms_body(pref, token, base)
             sid = send_sms(
+                clinic_id,
                 _to_e164_us(str(prow["phone"])),
                 sms_body,
                 patient_id=patient_id,

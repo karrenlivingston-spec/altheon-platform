@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import traceback
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
@@ -226,24 +225,9 @@ def _send_vitality_sms(
     body = _VITALITY_SMS_TEMPLATE.format(
         first_name=(first_name or "there").strip() or "there"
     )
-    to_e164 = _to_e164_us(to_phone)
-
-    from_number = (os.getenv("TWILIO_PHONE_NUMBER") or "").strip()
-    account_sid = (os.getenv("TWILIO_ACCOUNT_SID") or "").strip()
-    auth_token = (os.getenv("TWILIO_AUTH_TOKEN") or "").strip()
-
-    if from_number and account_sid and auth_token:
-        try:
-            from twilio.rest import Client
-
-            client = Client(account_sid, auth_token)
-            client.messages.create(from_=from_number, body=body, to=to_e164)
-            return
-        except Exception:
-            traceback.print_exc()
-
     send_sms(
-        to_e164,
+        VITALITY_CLINIC_ID,
+        _to_e164_us(to_phone),
         body,
         patient_id=patient_id,
         appointment_id=appointment_id,

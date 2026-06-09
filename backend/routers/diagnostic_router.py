@@ -605,6 +605,7 @@ def send_document_upload_link(
     )
 
     send_sms(
+        cid,
         _to_e164_us(phone),
         body,
         patient_id=pid,
@@ -750,5 +751,11 @@ def aria_send_upload_link(
         f"Upload securely here: {link}"
     )
 
-    send_sms(_to_e164_us(phone), body, patient_id=pid, message_type="aria_document_upload")
+    send_sms(
+        cid,
+        _to_e164_us(phone),
+        body,
+        patient_id=pid,
+        message_type="aria_document_upload",
+    )
     return {"success": True, "sms_sent": True}

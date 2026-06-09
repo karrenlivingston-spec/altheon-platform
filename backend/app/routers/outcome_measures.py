@@ -324,6 +324,7 @@ def send_outcome_measure(
         )
 
         sid = send_sms(
+            clinic_id,
             _to_e164_us(phone),
             sms_body,
             patient_id=patient_id,

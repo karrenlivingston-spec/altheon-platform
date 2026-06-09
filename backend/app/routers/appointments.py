@@ -1255,6 +1255,7 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
                 start_iso, fname, pref_lang, clinic_address=clinic_addr
             )
             send_sms(
+                clinic_id,
                 _to_e164_us(str(phone_out)),
                 body,
                 patient_id=str(patient_id),
@@ -1510,6 +1511,7 @@ def create_appointment(payload: CreateAppointmentRequest):
                 start_iso, fname, pref_lang, clinic_address=clinic_addr
             )
             send_sms(
+                payload.clinic_id,
                 _to_e164_us(str(phone_out)),
                 body,
                 patient_id=str(patient_id),

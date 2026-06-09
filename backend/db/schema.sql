@@ -32,6 +32,8 @@ CREATE TABLE public.clinics (
   phone text,
   email text,
   address text,
+  sms_display_name text,
+  messaging_service_sid text,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT clinics_slug_key UNIQUE (slug)
