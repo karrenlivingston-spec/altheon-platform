@@ -302,6 +302,7 @@ def _format_calendar_appt_row(
         "status": str(r.get("status") or "scheduled"),
         "source": r.get("source") or "manual",
         "location_id": str(r.get("location_id") or ""),
+        "is_virtual": bool(r.get("is_virtual")),
         "is_new_patient": is_new_patient,
         "patient": {
             "id": pid or str(r.get("patient_id") or ""),
@@ -351,7 +352,7 @@ def get_appointments_calendar(
         q = (
             supabase.table("appointments")
             .select(
-                "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,"
+                "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,is_virtual,"
                 "patients(id,first_name,last_name,phone),"
                 "clinicians(id,first_name,last_name,color,title),"
                 "treatment_types(name,duration_minutes)"
@@ -493,7 +494,7 @@ def update_appointment_time(
         refetch = (
             supabase.table("appointments")
             .select(
-                "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,"
+                "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,is_virtual,"
                 "patients(id,first_name,last_name,phone),"
                 "clinicians(id,first_name,last_name,color,title),"
                 "treatment_types(name,duration_minutes)"
@@ -617,7 +618,7 @@ def swap_appointment_times(
             refetch = (
                 supabase.table("appointments")
                 .select(
-                    "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,"
+                    "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,is_virtual,"
                     "patients(id,first_name,last_name,phone),"
                     "clinicians(id,first_name,last_name,color,title),"
                     "treatment_types(name,duration_minutes)"
@@ -769,6 +770,11 @@ class CreateAppointmentRequest(BaseModel):
     notes: Optional[str] = None
     source: Optional[str] = None
     preferred_language: Optional[str] = "en"
+    is_virtual: Optional[bool] = False
+
+
+class PatchAppointmentVirtualRequest(BaseModel):
+    is_virtual: bool
 
 
 class RescheduleAppointmentRequest(BaseModel):
@@ -1276,6 +1282,52 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
     }
 
 
+@router.patch("/{appointment_id}/virtual")
+def patch_appointment_virtual(
+    appointment_id: str,
+    body: PatchAppointmentVirtualRequest,
+    clinic_id: str = Query(...),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    user_id = _resolve_bearer_user_id(authorization)
+    cid = clinic_id.strip()
+    _assert_user_has_clinic_access(user_id, cid)
+
+    try:
+        appt = (
+            supabase.table("appointments")
+            .select("id,clinic_id")
+            .eq("id", appointment_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(appt)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    rows = appt.data or []
+    if not rows or str(rows[0].get("clinic_id") or "") != cid:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    try:
+        upd = (
+            supabase.table("appointments")
+            .update({"is_virtual": bool(body.is_virtual)})
+            .eq("id", appointment_id)
+            .eq("clinic_id", cid)
+            .execute()
+        )
+        _handle_supabase_error(upd)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    return {"id": appointment_id, "is_virtual": bool(body.is_virtual)}
+
+
 @router.post("")
 def create_appointment(payload: CreateAppointmentRequest):
     source = (payload.source or "ai").strip().lower() or "ai"
@@ -1427,6 +1479,7 @@ def create_appointment(payload: CreateAppointmentRequest):
                     "notes": payload.notes,
                     "source": source,
                     "status": "scheduled",
+                    "is_virtual": bool(payload.is_virtual),
                 }
             )
             .execute()

@@ -24,6 +24,7 @@ import {
 import { Printer } from "lucide-react";
 
 import { MeasurementModule } from "@/components/clinical-notes/MeasurementModule";
+import VirtualVisitButton from "@/components/virtual-visit/VirtualVisitButton";
 
 import {
   addDaysToYmd,
@@ -52,6 +53,7 @@ export type CalendarAppointment = {
   status: string;
   source: string;
   location_id?: string;
+  is_virtual?: boolean;
   is_new_patient?: boolean;
   patient: {
     id: string;
@@ -1093,6 +1095,65 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
                 clinicId={clinicId}
               />
             </section>
+            <section className="mt-4 space-y-3 border-t border-slate-100 pt-4">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                <input
+                  type="checkbox"
+                  className="size-4 rounded border-slate-300 text-[#0d9488] focus:ring-[#0d9488]"
+                  checked={detailAppt.is_virtual === true}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    void (async () => {
+                      try {
+                        const h = await authHeaders();
+                        const res = await fetch(
+                          `${API_BASE}/appointments/${encodeURIComponent(detailAppt.id)}/virtual?clinic_id=${encodeURIComponent(clinicId)}`,
+                          {
+                            method: "PATCH",
+                            headers: h,
+                            body: JSON.stringify({ is_virtual: next }),
+                          },
+                        );
+                        if (!res.ok) {
+                          setToast({
+                            kind: "error",
+                            message: "Could not update virtual visit setting",
+                          });
+                          return;
+                        }
+                        setDetailAppt((prev) =>
+                          prev ? { ...prev, is_virtual: next } : prev,
+                        );
+                        void loadData();
+                      } catch {
+                        setToast({
+                          kind: "error",
+                          message: "Could not update virtual visit setting",
+                        });
+                      }
+                    })();
+                  }}
+                />
+                Virtual Visit
+              </label>
+              <VirtualVisitButton
+                appointment={{
+                  id: detailAppt.id,
+                  patient_id: detailAppt.patient.id,
+                  clinician_id: detailAppt.clinician.id,
+                  clinic_id: clinicId,
+                  patient_name: patientFull(detailAppt),
+                  patient_phone: detailAppt.patient.phone ?? "",
+                  clinician_name:
+                    `${detailAppt.clinician.first_name ?? ""} ${detailAppt.clinician.last_name ?? ""}`.trim(),
+                  is_virtual: detailAppt.is_virtual,
+                }}
+                onSuccess={(message) =>
+                  setToast({ kind: "success", message })
+                }
+                onError={(message) => setToast({ kind: "error", message })}
+              />
+            </section>
             <button
               type="button"
               className="intake-print-close-btn mt-4 w-full rounded-lg border border-black/10 py-2 text-sm"
@@ -1438,6 +1499,7 @@ const BookPatientModal = memo(function BookPatientModal({
   const [selectedDate, setSelectedDate] = useState(() => getEasternYMD(new Date()));
   const [selectedTime, setSelectedTime] = useState("09:00");
   const [selectedClinicianId, setSelectedClinicianId] = useState(() => clinicians[0]?.id ?? "");
+  const [isVirtual, setIsVirtual] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
   useEffect(() => {
@@ -1626,6 +1688,7 @@ const BookPatientModal = memo(function BookPatientModal({
           treatment_type_id: treatmentTypeId,
           start_time,
           source: "manual",
+          is_virtual: isVirtual,
         }),
       });
       if (!res.ok) {
@@ -1829,6 +1892,15 @@ const BookPatientModal = memo(function BookPatientModal({
                 </select>
               </div>
             </div>
+            <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+              <input
+                type="checkbox"
+                className="size-4 rounded border-slate-300 text-[#0d9488] focus:ring-[#0d9488]"
+                checked={isVirtual}
+                onChange={(e) => setIsVirtual(e.target.checked)}
+              />
+              Virtual Visit
+            </label>
             <div className="flex flex-wrap justify-between gap-2">
               <button
                 type="button"
