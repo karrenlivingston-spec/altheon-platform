@@ -764,15 +764,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
             Retry
           </button>
         </div>
-      ) : appointments.length === 0 ? (
-        <div className="flex min-h-[280px] flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50/80 p-10 text-center">
-          <p className="text-sm font-medium text-slate-800">No appointments this period</p>
-          <p className="max-w-md text-xs text-slate-600">
-            There are no appointments scheduled for {periodLabel}. Try another week or month, or book a new
-            appointment.
-          </p>
-        </div>
-      ) : filteredAppointments.length === 0 ? (
+      ) : filteredAppointments.length === 0 && appointments.length > 0 ? (
         <div className="flex min-h-[280px] flex-col items-center justify-center gap-2 rounded-xl border border-slate-200 bg-slate-50/80 p-10 text-center">
           <p className="text-sm font-medium text-slate-800">No appointments match your filters</p>
           <p className="max-w-xs text-xs text-slate-600">
