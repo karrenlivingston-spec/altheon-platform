@@ -1,6 +1,5 @@
-from datetime import date, datetime, time as dt_time
+from datetime import date, datetime
 from typing import Any, Optional
-from zoneinfo import ZoneInfo
 import uuid
 import traceback
 
@@ -109,14 +108,6 @@ class BlockedTimeIn(BaseModel):
 
 def _parse_block_date(value: str) -> date:
     return datetime.strptime(value.strip(), "%Y-%m-%d").date()
-
-
-def _block_range_timestamps(start_date: date, end_date: date) -> tuple[str, str]:
-    """Store full calendar days in clinic (Eastern) time without UTC day shift."""
-    clinic_tz = ZoneInfo("America/New_York")
-    start_dt = datetime.combine(start_date, dt_time(0, 0, 0)).replace(tzinfo=clinic_tz)
-    end_dt = datetime.combine(end_date, dt_time(23, 59, 59)).replace(tzinfo=clinic_tz)
-    return start_dt.isoformat(), end_dt.isoformat()
 
 
 @router.get("/clinicians")
@@ -331,12 +322,11 @@ def create_blocked_time(
     if end_date < start_date:
         raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
 
-    start_time, end_time = _block_range_timestamps(start_date, end_date)
     row = {
         "clinician_id": clinician_id,
         "clinic_id": clinic_id,
-        "start_time": start_time,
-        "end_time": end_time,
+        "start_time": start_date.isoformat(),
+        "end_time": end_date.isoformat(),
         "reason": (body.reason or "").strip() or None,
     }
     try:
