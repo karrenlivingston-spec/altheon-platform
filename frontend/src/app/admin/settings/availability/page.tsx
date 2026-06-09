@@ -1,5 +1,6 @@
 "use client";
 
+import { format, parseISO } from "date-fns";
 import { useEffect, useMemo, useState } from "react";
 
 import {
@@ -77,10 +78,15 @@ function toYmd(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
+function parseLocalBlockDate(dateStr: string): Date {
+  const ymd = String(dateStr || "").slice(0, 10);
+  return new Date(`${ymd}T00:00:00`);
+}
+
 function fmtRange(startIso: string, endIso: string): string {
-  const s = new Date(startIso);
-  const e = new Date(endIso);
-  const same = s.toDateString() === e.toDateString();
+  const s = parseLocalBlockDate(startIso);
+  const e = parseLocalBlockDate(endIso);
+  const same = format(s, "yyyy-MM-dd") === format(e, "yyyy-MM-dd");
   const fmt = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
   if (same) return fmt.format(s);
   return `${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(s)}–${fmt.format(e)}`;
@@ -233,8 +239,8 @@ export default function AvailabilitySettingsPage() {
   async function addBlock() {
     if (!selectedClinicianId) return;
     const body = {
-      start_time: `${startDate}T00:00:00`,
-      end_time: `${endDate}T23:59:59`,
+      start_date: format(parseISO(startDate), "yyyy-MM-dd"),
+      end_date: format(parseISO(endDate), "yyyy-MM-dd"),
       reason,
     };
     const res = await fetch(`${API_BASE}/clinicians/${encodeURIComponent(selectedClinicianId)}/blocked-time`, {

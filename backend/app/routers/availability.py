@@ -1,5 +1,6 @@
-from datetime import datetime
+from datetime import date, datetime, time as dt_time
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 import uuid
 import traceback
 
@@ -101,9 +102,21 @@ class AvailabilityRuleIn(BaseModel):
 
 
 class BlockedTimeIn(BaseModel):
-    start_time: str
-    end_time: str
+    start_date: str
+    end_date: str
     reason: Optional[str] = None
+
+
+def _parse_block_date(value: str) -> date:
+    return datetime.strptime(value.strip(), "%Y-%m-%d").date()
+
+
+def _block_range_timestamps(start_date: date, end_date: date) -> tuple[str, str]:
+    """Store full calendar days in clinic (Eastern) time without UTC day shift."""
+    clinic_tz = ZoneInfo("America/New_York")
+    start_dt = datetime.combine(start_date, dt_time(0, 0, 0)).replace(tzinfo=clinic_tz)
+    end_dt = datetime.combine(end_date, dt_time(23, 59, 59)).replace(tzinfo=clinic_tz)
+    return start_dt.isoformat(), end_dt.isoformat()
 
 
 @router.get("/clinicians")
@@ -307,11 +320,23 @@ def create_blocked_time(
     clinic_id = str(clinician.get("clinic_id") or "").strip()
     _require_auth_and_clinic(authorization, clinic_id)
 
+    try:
+        start_date = _parse_block_date(body.start_date)
+        end_date = _parse_block_date(body.end_date)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail="start_date and end_date must be YYYY-MM-DD",
+        ) from exc
+    if end_date < start_date:
+        raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
+
+    start_time, end_time = _block_range_timestamps(start_date, end_date)
     row = {
         "clinician_id": clinician_id,
         "clinic_id": clinic_id,
-        "start_time": body.start_time,
-        "end_time": body.end_time,
+        "start_time": start_time,
+        "end_time": end_time,
         "reason": (body.reason or "").strip() or None,
     }
     try:

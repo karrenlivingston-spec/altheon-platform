@@ -143,6 +143,17 @@ function easternYmdOfIso(iso: string): string {
   return formatInTimeZone(new Date(iso), NY, "yyyy-MM-dd");
 }
 
+function blockDateYmd(iso: string): string {
+  const match = /^(\d{4}-\d{2}-\d{2})/.exec(String(iso || "").trim());
+  return match ? match[1] : easternYmdOfIso(iso);
+}
+
+function blockCoversDay(block: BlockedRow, dayYmd: string): boolean {
+  const startYmd = blockDateYmd(block.start_time);
+  const endYmd = blockDateYmd(block.end_time);
+  return dayYmd >= startYmd && dayYmd <= endYmd;
+}
+
 function minutesFromGridStart(iso: string): number {
   const h = Number(formatInTimeZone(new Date(iso), NY, "H"));
   const m = Number(formatInTimeZone(new Date(iso), NY, "m"));
@@ -1205,8 +1216,7 @@ function DayGrid({
   const blockedByClinician = useMemo(() => {
     const m = new Map<string, BlockedRow[]>();
     for (const b of blocked) {
-      if (easternYmdOfIso(b.start_time) !== dayYmd && easternYmdOfIso(b.end_time) !== dayYmd)
-        continue;
+      if (!blockCoversDay(b, dayYmd)) continue;
       const list = m.get(b.clinician_id) || [];
       list.push(b);
       m.set(b.clinician_id, list);
@@ -1416,14 +1426,12 @@ function BlockedOverlay({
   dayYmd: string;
   onRemoved: () => void;
 }) {
+  if (!blockCoversDay(block, dayYmd)) return null;
   const dayStart = toDate(`${dayYmd}T${pad2(GRID_START_HOUR)}:00:00`, { timeZone: NY });
   const dayEnd = toDate(`${dayYmd}T${pad2(GRID_END_HOUR)}:00:00`, { timeZone: NY });
-  const bs = new Date(block.start_time);
-  const be = new Date(block.end_time);
-  const clipStart = bs < dayStart ? dayStart : bs;
-  const clipEnd = be > dayEnd ? dayEnd : be;
-  if (clipEnd <= clipStart) return null;
-  const top = ((clipStart.getTime() - dayStart.getTime()) / 60000 / SLOT_MINUTES) * ROW_H;
+  const clipStart = dayStart;
+  const clipEnd = dayEnd;
+  const top = 0;
   const h = ((clipEnd.getTime() - clipStart.getTime()) / 60000 / SLOT_MINUTES) * ROW_H;
 
   async function remove() {
