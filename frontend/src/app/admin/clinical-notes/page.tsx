@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Loader2, Mic } from "lucide-react";
 
 import {
   DS_CARD,
@@ -268,6 +268,7 @@ export default function AdminClinicalNotesPage() {
   const [pendingReviewCount, setPendingReviewCount] = useState(0);
 
   const [scribeBannerVisible, setScribeBannerVisible] = useState(false);
+  const [scribePanelOpen, setScribePanelOpen] = useState(true);
   const [diagnosticPrefillBannerVisible, setDiagnosticPrefillBannerVisible] =
     useState(false);
   const [sessionTranscript, setSessionTranscript] = useState("");
@@ -320,14 +321,9 @@ export default function AdminClinicalNotesPage() {
     return () => window.removeEventListener("altheon:soap-prefill", onPrefill);
   }, [applySoapPrefill]);
 
+  /** Scribe now runs inside the editor modal: populate SOAP fields in place
+   *  without resetting patient/note-type selections. */
   const handleSoapFromScribe = useCallback((soap: SoapFromScribe) => {
-    setEditingId(null);
-    setDraftPatientId("");
-    setDraftAppointmentId("");
-    setPatientInputValue("");
-    setPatientPickerOpen(false);
-    setDraftNoteType("daily_note");
-    setDraftSupervisingPtId("");
     setDraftSubjective(soap.subjective);
     setDraftObjective(soap.objective);
     setDraftAssessment(soap.assessment);
@@ -335,7 +331,6 @@ export default function AdminClinicalNotesPage() {
     setSessionTranscript(soap.transcript);
     setScribeBannerVisible(true);
     setTranscriptPanelOpen(false);
-    setEditorOpen(true);
 
     pendingScribeTestsRef.current = soap.special_test_results ?? [];
     const names = soap.auto_populated_special_tests ?? [];
@@ -529,12 +524,14 @@ export default function AdminClinicalNotesPage() {
 
   function openNewNote() {
     resetEditor();
+    setScribePanelOpen(true);
     setEditorOpen(true);
   }
 
   async function openEditorForNote(note: ClinicalNote) {
     setEditorBusy(true);
     setError(null);
+    setScribePanelOpen(false);
     setScribeBannerVisible(false);
     setSessionTranscript("");
     setTranscriptPanelOpen(false);
@@ -947,26 +944,6 @@ export default function AdminClinicalNotesPage() {
 
       {activeTab === "my" ? (
         <div className="mt-8 space-y-8">
-          <section className="max-w-3xl">
-            <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-900">
-              AI Scribe
-            </h3>
-            <p className="mt-1 text-xs text-gray-500 sm:text-sm">
-              Record a visit to draft SOAP sections; then review and save in a
-              new note.
-            </p>
-            <div className="mt-4 max-w-xl">
-              <AmbientScribe
-                clinicId={clinicId}
-                onSoapGenerated={handleSoapFromScribe}
-              />
-            </div>
-            <div
-              className="mt-8 border-b border-gray-200"
-              aria-hidden
-            />
-          </section>
-
           <div className={DS_TABLE_WRAP}>
             <div className="overflow-x-auto">
               <table className="min-w-full text-left text-sm">
@@ -1216,6 +1193,36 @@ export default function AdminClinicalNotesPage() {
             >
               {editingId ? "Edit clinical note" : "New clinical note"}
             </h2>
+
+            <div className="mt-4 rounded-xl border border-gray-200">
+              <button
+                type="button"
+                onClick={() => setScribePanelOpen((v) => !v)}
+                className="flex w-full items-center gap-2 rounded-xl px-4 py-3 text-left hover:bg-gray-50"
+                aria-expanded={scribePanelOpen}
+              >
+                {scribePanelOpen ? (
+                  <ChevronDown className="h-4 w-4 text-gray-400" />
+                ) : (
+                  <ChevronRight className="h-4 w-4 text-gray-400" />
+                )}
+                <Mic className="h-4 w-4 text-gray-500" />
+                <span className="text-sm font-medium text-gray-700">
+                  AI Scribe
+                </span>
+              </button>
+              {scribePanelOpen ? (
+                <div className="border-t border-gray-100 p-4">
+                  <AmbientScribe
+                    clinicId={clinicId}
+                    patientId={draftPatientId || undefined}
+                    noteId={editingId ?? undefined}
+                    onSoapGenerated={handleSoapFromScribe}
+                  />
+                </div>
+              ) : null}
+            </div>
+
             {scribeBannerVisible ? (
               <div
                 className="relative mt-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 pr-12 text-sm text-sky-950"
