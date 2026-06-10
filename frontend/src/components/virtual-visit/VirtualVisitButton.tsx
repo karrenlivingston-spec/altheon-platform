@@ -82,6 +82,15 @@ export default function VirtualVisitButton({
       if (clinicianUrl) {
         const url = new URL(clinicianUrl);
         url.searchParams.set("clinic_id", appointment.clinic_id);
+        // Clinician-only URL: pass the session token so the public /visit
+        // route can authenticate /ready and /end calls. The patient SMS link
+        // is built server-side and never includes this token.
+        const {
+          data: { session },
+        } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          url.searchParams.set("token", session.access_token);
+        }
         window.open(url.toString(), "_blank", "noopener,noreferrer");
       }
       onSuccess?.("Opening visit room…");

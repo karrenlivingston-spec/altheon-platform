@@ -143,6 +143,20 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
   const searchParams = useSearchParams();
   const isClinician = searchParams.get("role") === "clinician";
   const clinicIdParam = searchParams.get("clinic_id") ?? "";
+  const tokenParam = searchParams.get("token") ?? "";
+
+  const getClinicianToken = useCallback(async (): Promise<string> => {
+    if (tokenParam) return tokenParam;
+    let {
+      data: { session },
+    } = await supabase.auth.getSession();
+    let token = session?.access_token ?? "";
+    if (!token) {
+      const { data: refreshed } = await supabase.auth.refreshSession();
+      token = refreshed.session?.access_token ?? "";
+    }
+    return token;
+  }, [tokenParam]);
 
   const [phase, setPhase] = useState<Phase>("loading");
   const [info, setInfo] = useState<VisitInfo | null>(null);
@@ -475,14 +489,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
       if (role === "clinician" && clinicIdParam) {
         // Signaling channel is live — tell the backend to send the patient SMS now.
         try {
-          let {
-            data: { session },
-          } = await supabase.auth.getSession();
-          let token = session?.access_token ?? "";
-          if (!token) {
-            const { data: refreshed } = await supabase.auth.refreshSession();
-            token = refreshed.session?.access_token ?? "";
-          }
+          const token = await getClinicianToken();
           if (!token) {
             visitLogError(roomId, "ready: missing auth token, patient SMS not sent");
           } else {
@@ -527,7 +534,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
         role === "clinician" ? "Waiting for patient…" : "Waiting for clinician…",
       );
     },
-    [info?.started_at, roomId, clinicIdParam],
+    [info?.started_at, roomId, clinicIdParam, getClinicianToken],
   );
 
   useEffect(() => {
@@ -549,20 +556,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
     if (!isClinician || !clinicIdParam) return;
     setEnding(true);
     try {
-      let {
-        data: { session },
-      } = await supabase.auth.getSession();
-      let token = session?.access_token ?? "";
-
-      if (!token) {
-        visitLog(roomId, "end visit: no token, attempting refreshSession");
-        const { data: refreshed, error: refreshErr } =
-          await supabase.auth.refreshSession();
-        if (refreshErr) {
-          visitLogError(roomId, "end visit: refreshSession failed", refreshErr);
-        }
-        token = refreshed.session?.access_token ?? "";
-      }
+      const token = await getClinicianToken();
 
       if (!token) {
         visitLogError(roomId, "end visit: missing auth token — clinician must be signed in");
