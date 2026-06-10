@@ -252,6 +252,7 @@ export default function AdminClinicalNotesPage() {
   const [editorBusy, setEditorBusy] = useState(false);
 
   const [viewNote, setViewNote] = useState<ClinicalNote | null>(null);
+  const [exportingNoteId, setExportingNoteId] = useState<string | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
 
   const [reviewNote, setReviewNote] = useState<ClinicalNote | null>(null);
@@ -653,6 +654,39 @@ export default function AdminClinicalNotesPage() {
       setError(e instanceof Error ? e.message : "Submit failed");
     } finally {
       setEditorBusy(false);
+    }
+  }
+
+  async function exportNotePdf(note: ClinicalNote) {
+    setExportingNoteId(note.id);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/clinical-notes/${encodeURIComponent(note.id)}/pdf?clinic_id=${encodeURIComponent(clinicId)}`,
+        { headers: await authHeaders() },
+      );
+      if (!res.ok) {
+        setError(await res.text().catch(() => res.statusText));
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const patient = (note.patient_name ?? "patient")
+        .trim()
+        .replace(/[^\w\- ]+/g, "")
+        .replace(/\s+/g, "_");
+      const date = (note.signed_at ?? note.created_at ?? "").slice(0, 10);
+      a.download = `${patient || "patient"}_${note.note_type ?? "note"}_${date}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "PDF export failed");
+    } finally {
+      setExportingNoteId(null);
     }
   }
 
@@ -1082,13 +1116,25 @@ export default function AdminClinicalNotesPage() {
                             {formatNoteDate(n.signed_at ?? n.updated_at)}
                           </td>
                           <td className={`${DS_TD_PRIMARY} text-right`}>
-                            <button
-                              type="button"
-                              onClick={() => void openViewNote(n)}
-                              className={DS_SECONDARY_BTN}
-                            >
-                              View
-                            </button>
+                            <div className="inline-flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => void openViewNote(n)}
+                                className={DS_SECONDARY_BTN}
+                              >
+                                View
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void exportNotePdf(n)}
+                                disabled={exportingNoteId === n.id}
+                                className={`${DS_SECONDARY_BTN} disabled:opacity-50`}
+                              >
+                                {exportingNoteId === n.id
+                                  ? "Exporting…"
+                                  : "Export PDF"}
+                              </button>
+                            </div>
                           </td>
                         </tr>
                       ))
@@ -1464,10 +1510,24 @@ export default function AdminClinicalNotesPage() {
                 </p>
               </div>
             </div>
-            <p className="mt-6 border-t border-gray-100 pt-4 text-xs text-gray-500">
-              Created {formatNoteDate(viewNote.created_at)}
-              {viewNote.author_name ? ` · ${viewNote.author_name}` : ""}
-            </p>
+            <div className="mt-6 flex items-center justify-between gap-4 border-t border-gray-100 pt-4">
+              <p className="text-xs text-gray-500">
+                Created {formatNoteDate(viewNote.created_at)}
+                {viewNote.author_name ? ` · ${viewNote.author_name}` : ""}
+              </p>
+              {(viewNote.status ?? "").toLowerCase() === "signed" ? (
+                <button
+                  type="button"
+                  onClick={() => void exportNotePdf(viewNote)}
+                  disabled={exportingNoteId === viewNote.id}
+                  className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                >
+                  {exportingNoteId === viewNote.id
+                    ? "Exporting…"
+                    : "Download PDF"}
+                </button>
+              ) : null}
+            </div>
           </div>
         </div>
       ) : null}
