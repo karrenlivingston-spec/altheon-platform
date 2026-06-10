@@ -103,11 +103,40 @@ class AvailabilityRuleIn(BaseModel):
 class BlockedTimeIn(BaseModel):
     start_date: str
     end_date: str
+    start_time_of_day: Optional[str] = None
+    end_time_of_day: Optional[str] = None
     reason: Optional[str] = None
 
 
 def _parse_block_date(value: str) -> date:
     return datetime.strptime(value.strip(), "%Y-%m-%d").date()
+
+
+def _parse_optional_time_of_day(value: Optional[str]) -> Optional[str]:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    for fmt in ("%H:%M:%S", "%H:%M"):
+        try:
+            return datetime.strptime(raw, fmt).strftime("%H:%M:%S")
+        except ValueError:
+            continue
+    raise ValueError(f"Invalid time of day: {value}")
+
+
+def _shape_blocked_row(row: dict[str, Any]) -> dict[str, Any]:
+    start_tod = row.get("start_time_of_day")
+    end_tod = row.get("end_time_of_day")
+    return {
+        "id": str(row.get("id") or ""),
+        "clinician_id": str(row.get("clinician_id") or ""),
+        "clinic_id": str(row.get("clinic_id") or ""),
+        "start_time": str(row.get("start_time") or ""),
+        "end_time": str(row.get("end_time") or ""),
+        "start_time_of_day": str(start_tod)[:8] if start_tod else None,
+        "end_time_of_day": str(end_tod)[:8] if end_tod else None,
+        "reason": row.get("reason"),
+    }
 
 
 @router.get("/clinicians")
@@ -294,7 +323,7 @@ def get_blocked_time(
             query = query.lte("start_time", f"{to_date}T23:59:59")
         response = query.order("start_time").execute()
         _handle_supabase_error(response)
-        return response.data or []
+        return [_shape_blocked_row(row) for row in (response.data or [])]
     except HTTPException:
         raise
     except Exception as exc:
@@ -322,11 +351,30 @@ def create_blocked_time(
     if end_date < start_date:
         raise HTTPException(status_code=400, detail="end_date must be on or after start_date")
 
+    try:
+        start_time_of_day = _parse_optional_time_of_day(body.start_time_of_day)
+        end_time_of_day = _parse_optional_time_of_day(body.end_time_of_day)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    if bool(start_time_of_day) ^ bool(end_time_of_day):
+        raise HTTPException(
+            status_code=400,
+            detail="start_time_of_day and end_time_of_day must both be set or both be omitted",
+        )
+    if start_time_of_day and end_time_of_day and end_time_of_day <= start_time_of_day:
+        raise HTTPException(
+            status_code=400,
+            detail="end_time_of_day must be after start_time_of_day",
+        )
+
     row = {
         "clinician_id": clinician_id,
         "clinic_id": clinic_id,
         "start_time": start_date.isoformat(),
         "end_time": end_date.isoformat(),
+        "start_time_of_day": start_time_of_day,
+        "end_time_of_day": end_time_of_day,
         "reason": (body.reason or "").strip() or None,
     }
     try:
@@ -339,7 +387,7 @@ def create_blocked_time(
     rows = ins.data or []
     if not rows:
         raise HTTPException(status_code=500, detail="Failed to create blocked time")
-    return rows[0]
+    return _shape_blocked_row(rows[0])
 
 
 @router.delete("/blocked-time/{blocked_time_id}")

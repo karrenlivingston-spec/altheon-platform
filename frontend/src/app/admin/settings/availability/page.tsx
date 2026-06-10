@@ -38,6 +38,8 @@ type Blocked = {
   id: string;
   start_time: string;
   end_time: string;
+  start_time_of_day?: string | null;
+  end_time_of_day?: string | null;
   reason?: string | null;
 };
 
@@ -92,6 +94,16 @@ function fmtRange(startIso: string, endIso: string): string {
   return `${new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(s)}–${fmt.format(e)}`;
 }
 
+function fmtBlockedLabel(block: Blocked): string {
+  const datePart = fmtRange(block.start_time, block.end_time);
+  const startTod = block.start_time_of_day?.trim();
+  const endTod = block.end_time_of_day?.trim();
+  if (startTod && endTod) {
+    return `${datePart}, ${to12h(toHm(startTod))}–${to12h(toHm(endTod))}`;
+  }
+  return datePart;
+}
+
 export default function AvailabilitySettingsPage() {
   const { clinicId } = useClinic();
   const [clinicians, setClinicians] = useState<Clinician[]>([]);
@@ -104,6 +116,8 @@ export default function AvailabilitySettingsPage() {
   const [showAddBlock, setShowAddBlock] = useState(false);
   const [startDate, setStartDate] = useState(toYmd(new Date()));
   const [endDate, setEndDate] = useState(toYmd(new Date()));
+  const [blockStartTime, setBlockStartTime] = useState("");
+  const [blockEndTime, setBlockEndTime] = useState("");
   const [reason, setReason] = useState("");
   const [busyDelete, setBusyDelete] = useState<Record<string, boolean>>({});
   const [msg, setMsg] = useState("");
@@ -238,11 +252,13 @@ export default function AvailabilitySettingsPage() {
 
   async function addBlock() {
     if (!selectedClinicianId) return;
-    const body = {
+    const body: Record<string, string> = {
       start_date: format(parseISO(startDate), "yyyy-MM-dd"),
       end_date: format(parseISO(endDate), "yyyy-MM-dd"),
       reason,
     };
+    if (blockStartTime.trim()) body.start_time_of_day = blockStartTime.trim();
+    if (blockEndTime.trim()) body.end_time_of_day = blockEndTime.trim();
     const res = await fetch(`${API_BASE}/clinicians/${encodeURIComponent(selectedClinicianId)}/blocked-time`, {
       method: "POST",
       headers: await headers(),
@@ -254,7 +270,10 @@ export default function AvailabilitySettingsPage() {
     }
     setShowAddBlock(false);
     setReason("");
-    await fetchAvailability(selectedClinicianId);
+    setBlockStartTime("");
+    setBlockEndTime("");
+    const nextBlocked = await loadBlockedForProvider(selectedClinicianId);
+    setBlocked(nextBlocked);
   }
 
   async function removeBlock(id: string) {
@@ -434,21 +453,60 @@ export default function AvailabilitySettingsPage() {
             Add Block
           </button>
         ) : (
-          <div className="mt-4 grid grid-cols-1 gap-3 rounded-xl border border-black/10 bg-slate-50 p-4 md:grid-cols-4">
-            <input type="date" className={`h-9 ${DS_INPUT}`} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-            <input type="date" className={`h-9 ${DS_INPUT}`} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
-            <input
-              type="text"
-              className={`h-9 ${DS_INPUT}`}
-              placeholder="e.g. Holiday, Conference, Sick Day"
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-            />
-            <div className="flex items-center gap-2">
+          <div className="mt-4 grid grid-cols-1 gap-3 rounded-xl border border-black/10 bg-slate-50 p-4 md:grid-cols-2">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Start date</label>
+              <input type="date" className={`h-9 w-full ${DS_INPUT}`} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">End date</label>
+              <input type="date" className={`h-9 w-full ${DS_INPUT}`} value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">
+                Block start time (optional)
+              </label>
+              <input
+                type="time"
+                className={`h-9 w-full ${DS_INPUT}`}
+                value={blockStartTime}
+                onChange={(e) => setBlockStartTime(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">
+                Block end time (optional)
+              </label>
+              <input
+                type="time"
+                className={`h-9 w-full ${DS_INPUT}`}
+                value={blockEndTime}
+                onChange={(e) => setBlockEndTime(e.target.value)}
+              />
+            </div>
+            <div className="md:col-span-2">
+              <label className="mb-1 block text-xs font-medium text-slate-600">Reason</label>
+              <input
+                type="text"
+                className={`h-9 w-full ${DS_INPUT}`}
+                placeholder="e.g. Holiday, Conference, Sick Day"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+              />
+            </div>
+            <div className="flex items-center gap-2 md:col-span-2">
               <button type="button" onClick={() => void addBlock()} className={DS_PRIMARY_BTN}>
                 Add Block
               </button>
-              <button type="button" onClick={() => setShowAddBlock(false)} className={DS_SECONDARY_BTN}>
+              <button
+                type="button"
+                onClick={() => {
+                  setShowAddBlock(false);
+                  setBlockStartTime("");
+                  setBlockEndTime("");
+                }}
+                className={DS_SECONDARY_BTN}
+              >
                 Cancel
               </button>
             </div>
@@ -465,7 +523,7 @@ export default function AvailabilitySettingsPage() {
                 className="flex items-center justify-between rounded-xl border border-black/10 bg-white px-4 py-3"
               >
                 <div>
-                  <p className="text-sm font-medium text-slate-900">{fmtRange(b.start_time, b.end_time)}</p>
+                  <p className="text-sm font-medium text-slate-900">{fmtBlockedLabel(b)}</p>
                   <p className="text-xs text-slate-500">{b.reason || "Unavailable"}</p>
                 </div>
                 <button
