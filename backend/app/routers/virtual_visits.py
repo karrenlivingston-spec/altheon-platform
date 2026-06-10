@@ -116,9 +116,14 @@ def create_virtual_visit(body: CreateVisitBody, clinic: ClinicUserDep):
     if body.clinic_id.strip() != clinic.clinic_id:
         raise HTTPException(status_code=403, detail="clinic_id does not match authenticated clinic")
 
+    # SMS is deferred until the clinician's room has subscribed to the
+    # signaling channel (POST /{room_id}/ready) to avoid a race where the
+    # patient joins before the clinician is listening.
     metadata = {
         "clinician_name": body.clinician_name.strip(),
         "patient_name": body.patient_name.strip(),
+        "patient_phone": _to_e164_us(body.patient_phone),
+        "sms_sent": False,
         "joins": [],
     }
 
@@ -131,7 +136,7 @@ def create_virtual_visit(body: CreateVisitBody, clinic: ClinicUserDep):
                     "clinic_id": body.clinic_id.strip(),
                     "clinician_id": body.clinician_id.strip(),
                     "patient_id": body.patient_id.strip(),
-                    "status": "pending",
+                    "status": "waiting",
                     "session_metadata": metadata,
                 }
             )
@@ -155,27 +160,82 @@ def create_virtual_visit(body: CreateVisitBody, clinic: ClinicUserDep):
     patient_url = f"{FRONTEND_URL}/visit/{room_id}"
     clinician_url = f"{FRONTEND_URL}/visit/{room_id}?role=clinician"
 
-    sms_body = (
-        f"Dr. {body.clinician_name.strip()} is ready for your virtual visit.\n"
-        f"Join here: {patient_url}"
-    )
-    try:
-        send_sms(
-            body.clinic_id.strip(),
-            _to_e164_us(body.patient_phone),
-            sms_body,
-            patient_id=body.patient_id.strip(),
-            appointment_id=body.appointment_id.strip(),
-            message_type="virtual_visit_link",
-        )
-    except Exception:
-        pass
-
     return {
         "room_id": room_id,
         "clinician_join_url": clinician_url,
         "patient_join_url": patient_url,
     }
+
+
+@router.post("/{room_id}/ready")
+def clinician_ready(room_id: str, clinic: ClinicUserDep):
+    """Called by the clinician's room once the signaling channel is subscribed.
+
+    Sends the patient SMS link (idempotent) and moves the visit out of 'waiting'.
+    """
+    row = _fetch_visit_by_room(room_id)
+    visit_clinic = str(row.get("clinic_id") or "").strip()
+    if visit_clinic != clinic.clinic_id:
+        raise HTTPException(status_code=403, detail="Visit does not belong to this clinic")
+
+    status = str(row.get("status") or "waiting")
+    if status == "completed":
+        raise HTTPException(status_code=409, detail="Visit already completed")
+
+    meta = row.get("session_metadata") or {}
+    if not isinstance(meta, dict):
+        meta = {}
+
+    if meta.get("sms_sent"):
+        return {"room_id": room_id.strip(), "sms_sent": True, "already_sent": True}
+
+    patient_phone = str(meta.get("patient_phone") or "").strip()
+    clinician_name = str(meta.get("clinician_name") or "your clinician").strip()
+    patient_url = f"{FRONTEND_URL}/visit/{room_id.strip()}"
+
+    sms_ok = False
+    if patient_phone:
+        sms_body = (
+            f"Dr. {clinician_name} is ready for your virtual visit.\n"
+            f"Join here: {patient_url}"
+        )
+        try:
+            send_sms(
+                visit_clinic,
+                patient_phone,
+                sms_body,
+                patient_id=str(row.get("patient_id") or "") or None,
+                appointment_id=str(row.get("appointment_id") or "") or None,
+                message_type="virtual_visit_link",
+            )
+            sms_ok = True
+        except Exception:
+            sms_ok = False
+
+    meta["sms_sent"] = sms_ok
+    meta["clinician_ready_at"] = _now_iso()
+
+    update_payload: dict[str, Any] = {"session_metadata": meta}
+    if status == "waiting":
+        update_payload["status"] = "pending"
+
+    try:
+        upd = (
+            supabase.table("virtual_visits")
+            .update(update_payload)
+            .eq("room_id", room_id.strip())
+            .execute()
+        )
+        _handle_supabase_error(upd)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    if not sms_ok:
+        raise HTTPException(status_code=502, detail="Could not send patient SMS")
+
+    return {"room_id": room_id.strip(), "sms_sent": True, "already_sent": False}
 
 
 @router.get("/clinician/active")
@@ -185,7 +245,7 @@ def list_active_clinician_visits(clinic: ClinicUserDep):
             supabase.table("virtual_visits")
             .select("*")
             .eq("clinic_id", clinic.clinic_id)
-            .in_("status", ["pending", "active"])
+            .in_("status", ["waiting", "pending", "active"])
             .order("started_at", desc=True)
             .execute()
         )
@@ -262,7 +322,7 @@ def join_visit(room_id: str, body: JoinVisitBody):
     meta["joins"] = joins
 
     update_payload: dict[str, Any] = {"session_metadata": meta}
-    if status == "pending":
+    if status in ("waiting", "pending"):
         update_payload["status"] = "active"
         update_payload["started_at"] = joined_at
 

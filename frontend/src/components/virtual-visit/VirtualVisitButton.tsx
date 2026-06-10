@@ -84,7 +84,7 @@ export default function VirtualVisitButton({
         url.searchParams.set("clinic_id", appointment.clinic_id);
         window.open(url.toString(), "_blank", "noopener,noreferrer");
       }
-      onSuccess?.("Link sent to patient");
+      onSuccess?.("Opening visit room…");
     } catch {
       onError?.("Could not start virtual visit");
     } finally {

@@ -472,6 +472,50 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
         payload: { role },
       });
 
+      if (role === "clinician" && clinicIdParam) {
+        // Signaling channel is live — tell the backend to send the patient SMS now.
+        try {
+          let {
+            data: { session },
+          } = await supabase.auth.getSession();
+          let token = session?.access_token ?? "";
+          if (!token) {
+            const { data: refreshed } = await supabase.auth.refreshSession();
+            token = refreshed.session?.access_token ?? "";
+          }
+          if (!token) {
+            visitLogError(roomId, "ready: missing auth token, patient SMS not sent");
+          } else {
+            const readyRes = await fetch(
+              `${API_BASE}/visits/${encodeURIComponent(roomId)}/ready?clinic_id=${encodeURIComponent(clinicIdParam)}`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  "Content-Type": "application/json",
+                },
+              },
+            );
+            const readyJson = (await readyRes.json().catch(() => ({}))) as {
+              sms_sent?: boolean;
+              already_sent?: boolean;
+              detail?: string;
+            };
+            if (readyRes.ok) {
+              visitLog(roomId, "ready: patient SMS triggered", readyJson);
+            } else {
+              visitLogError(roomId, "ready endpoint failed", {
+                status: readyRes.status,
+                detail: readyJson.detail,
+              });
+              setConnectionStatus("Could not send patient link. Retry from the calendar.");
+            }
+          }
+        } catch (err) {
+          visitLogError(roomId, "ready: unexpected error", err);
+        }
+      }
+
       if (role === "patient") {
         visitLog(roomId, "patient waiting for offer");
       } else {
@@ -483,7 +527,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
         role === "clinician" ? "Waiting for patient…" : "Waiting for clinician…",
       );
     },
-    [info?.started_at, roomId],
+    [info?.started_at, roomId, clinicIdParam],
   );
 
   useEffect(() => {
