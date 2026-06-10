@@ -108,6 +108,10 @@ class BlockedTimeIn(BaseModel):
     reason: Optional[str] = None
 
 
+class BlockedTimeCreateIn(BlockedTimeIn):
+    clinician_id: str
+
+
 def _parse_block_date(value: str) -> date:
     return datetime.strptime(value.strip(), "%Y-%m-%d").date()
 
@@ -330,12 +334,12 @@ def get_blocked_time(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/clinicians/{clinician_id}/blocked-time")
-def create_blocked_time(
+def _insert_blocked_time(
     clinician_id: str,
     body: BlockedTimeIn,
-    authorization: Optional[str] = Header(default=None, alias="Authorization"),
-):
+    *,
+    authorization: Optional[str],
+) -> dict[str, Any]:
     clinician = _clinician_row(clinician_id)
     clinic_id = str(clinician.get("clinic_id") or "").strip()
     _require_auth_and_clinic(authorization, clinic_id)
@@ -388,6 +392,26 @@ def create_blocked_time(
     if not rows:
         raise HTTPException(status_code=500, detail="Failed to create blocked time")
     return _shape_blocked_row(rows[0])
+
+
+@router.post("/availability/blocked-time")
+def create_blocked_time_availability(
+    body: BlockedTimeCreateIn,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    cid = body.clinician_id.strip()
+    if not cid:
+        raise HTTPException(status_code=400, detail="clinician_id is required")
+    return _insert_blocked_time(cid, body, authorization=authorization)
+
+
+@router.post("/clinicians/{clinician_id}/blocked-time")
+def create_blocked_time(
+    clinician_id: str,
+    body: BlockedTimeIn,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    return _insert_blocked_time(clinician_id, body, authorization=authorization)
 
 
 @router.delete("/blocked-time/{blocked_time_id}")

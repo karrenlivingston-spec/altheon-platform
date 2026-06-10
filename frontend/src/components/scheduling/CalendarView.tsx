@@ -89,7 +89,21 @@ type BlockedRow = {
   clinician_id: string;
   start_time: string;
   end_time: string;
+  start_time_of_day?: string | null;
+  end_time_of_day?: string | null;
   reason?: string | null;
+};
+
+type SlotClickContext = {
+  ymd: string;
+  clinicianId: string;
+  slotIndex: number;
+};
+
+type BookingPrefill = {
+  date: string;
+  time: string;
+  clinicianId: string;
 };
 
 type ViewMode = "day" | "week" | "month";
@@ -152,6 +166,52 @@ function blockCoversDay(block: BlockedRow, dayYmd: string): boolean {
   const startYmd = blockDateYmd(block.start_time);
   const endYmd = blockDateYmd(block.end_time);
   return dayYmd >= startYmd && dayYmd <= endYmd;
+}
+
+function isFullDayBlock(block: BlockedRow): boolean {
+  return !block.start_time_of_day?.trim() && !block.end_time_of_day?.trim();
+}
+
+function slotIndexToHm(slotIndex: number): string {
+  const totalMin = GRID_START_HOUR * 60 + slotIndex * SLOT_MINUTES;
+  return `${pad2(Math.floor(totalMin / 60))}:${pad2(totalMin % 60)}`;
+}
+
+function addMinutesToHm(hm: string, minutes: number): string {
+  const [h, m] = hm.split(":").map(Number);
+  const total = Math.min(h * 60 + m + minutes, 23 * 60 + 59);
+  return `${pad2(Math.floor(total / 60))}:${pad2(total % 60)}`;
+}
+
+function hmTo12h(hm: string): string {
+  const [hRaw, mRaw] = hm.split(":");
+  const h = Number(hRaw);
+  const m = Number(mRaw);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return hm;
+  const ampm = h >= 12 ? "PM" : "AM";
+  const h12 = h % 12 || 12;
+  return `${h12}:${pad2(m)} ${ampm}`;
+}
+
+function blockTimeRangeOnDay(
+  block: BlockedRow,
+  dayYmd: string,
+): { start: Date; end: Date } | null {
+  if (!blockCoversDay(block, dayYmd)) return null;
+  if (isFullDayBlock(block)) {
+    return {
+      start: toDate(`${dayYmd}T${pad2(GRID_START_HOUR)}:00:00`, { timeZone: NY }),
+      end: toDate(`${dayYmd}T${pad2(GRID_END_HOUR)}:00:00`, { timeZone: NY }),
+    };
+  }
+  const startHm = (block.start_time_of_day || "07:00:00").slice(0, 5);
+  const endHm = (block.end_time_of_day || "19:00:00").slice(0, 5);
+  const [sh, sm] = startHm.split(":").map(Number);
+  const [eh, em] = endHm.split(":").map(Number);
+  return {
+    start: toDate(`${dayYmd}T${pad2(sh)}:${pad2(sm)}:00`, { timeZone: NY }),
+    end: toDate(`${dayYmd}T${pad2(eh)}:${pad2(em)}:00`, { timeZone: NY }),
+  };
 }
 
 function minutesFromGridStart(iso: string): number {
@@ -310,6 +370,9 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
     newYmd: string;
   } | null>(null);
   const [bookModalOpen, setBookModalOpen] = useState(false);
+  const [bookingPrefill, setBookingPrefill] = useState<BookingPrefill | null>(null);
+  const [slotAction, setSlotAction] = useState<SlotClickContext | null>(null);
+  const [blockTimeContext, setBlockTimeContext] = useState<SlotClickContext | null>(null);
   const [toast, setToast] = useState<{
     kind: "success" | "error";
     message: string;
@@ -794,6 +857,8 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
           onDragEnd={handleDragEnd}
           sensors={sensors}
           activeDrag={activeDrag}
+          onSlotClick={setSlotAction}
+          onApptClick={setDetailAppt}
         />
       ) : view === "week" ? (
         <WeekGrid
@@ -822,16 +887,54 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
         />
       )}
 
+      {slotAction ? (
+        <SlotActionMenu
+          context={slotAction}
+          onClose={() => setSlotAction(null)}
+          onNewAppointment={(ctx) => {
+            setBookingPrefill({
+              date: ctx.ymd,
+              time: slotIndexToHm(ctx.slotIndex),
+              clinicianId: ctx.clinicianId,
+            });
+            setSlotAction(null);
+            setBookModalOpen(true);
+          }}
+          onBlockTime={(ctx) => {
+            setSlotAction(null);
+            setBlockTimeContext(ctx);
+          }}
+        />
+      ) : null}
+
+      {blockTimeContext ? (
+        <BlockTimeModal
+          context={blockTimeContext}
+          onClose={() => setBlockTimeContext(null)}
+          onSaved={async () => {
+            setBlockTimeContext(null);
+            setToast({ kind: "success", message: "Time blocked" });
+            await loadData();
+          }}
+          onError={(message) => setToast({ kind: "error", message })}
+        />
+      ) : null}
+
       {bookModalOpen ? (
         <BookPatientModal
           clinicId={clinicId}
           clinicians={clinicians}
           locationId={activeLocationId}
+          initialDate={bookingPrefill?.date}
+          initialTime={bookingPrefill?.time}
+          initialClinicianId={bookingPrefill?.clinicianId}
           onClose={() => {
             setBookModalOpen(false);
+            setBookingPrefill(null);
           }}
           onBooked={async () => {
             setBookModalOpen(false);
+            setBookingPrefill(null);
             setToast({ kind: "success", message: "Appointment booked" });
             await loadData();
           }}
@@ -1192,6 +1295,8 @@ function DayGrid({
   onDragEnd,
   sensors,
   activeDrag,
+  onSlotClick,
+  onApptClick,
 }: {
   dayYmd: string;
   todayYmd: string;
@@ -1203,6 +1308,8 @@ function DayGrid({
   onDragEnd: (e: DragEndEvent) => void;
   sensors: ReturnType<typeof useSensors>;
   activeDrag: CalendarAppointment | null;
+  onSlotClick: (ctx: SlotClickContext) => void;
+  onApptClick: (appt: CalendarAppointment) => void;
 }) {
   const gridHeight = NUM_SLOTS * ROW_H;
   const nowLinePx = useMemo(() => {
@@ -1273,7 +1380,9 @@ function DayGrid({
                       id={`slot|${dayYmd}|${clin.id}|${slotIndex}`}
                       slotIndex={slotIndex}
                       isHighlighted={false}
-                      onEmptyClick={undefined}
+                      onEmptyClick={() =>
+                        onSlotClick({ ymd: dayYmd, clinicianId: clin.id, slotIndex })
+                      }
                     />
                   ))}
                   {nowLinePx !== null ? (
@@ -1288,7 +1397,12 @@ function DayGrid({
                   {appointments
                     .filter((a) => a.clinician.id === clin.id && easternYmdOfIso(a.start_time) === dayYmd)
                     .map((a) => (
-                      <DraggableApptCard key={a.id} appt={a} dayYmd={dayYmd} />
+                      <DraggableApptCard
+                        key={a.id}
+                        appt={a}
+                        dayYmd={dayYmd}
+                        onApptClick={onApptClick}
+                      />
                     ))}
                 </div>
               </div>
@@ -1339,9 +1453,11 @@ function DroppableSlotCell({
 function DraggableApptCard({
   appt,
   dayYmd,
+  onApptClick,
 }: {
   appt: CalendarAppointment;
   dayYmd: string;
+  onApptClick?: (appt: CalendarAppointment) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `appt-${appt.id}`,
@@ -1365,6 +1481,12 @@ function DraggableApptCard({
       ref={setNodeRef}
       {...listeners}
       {...attributes}
+      role="button"
+      tabIndex={0}
+      onClick={() => onApptClick?.(appt)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") onApptClick?.(appt);
+      }}
       className={`absolute right-1 left-1 cursor-grab overflow-hidden rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] active:cursor-grabbing ${
         isDragging ? "scale-[1.03] opacity-90 shadow-lg" : ""
       }`}
@@ -1426,13 +1548,21 @@ function BlockedOverlay({
   dayYmd: string;
   onRemoved: () => void;
 }) {
-  if (!blockCoversDay(block, dayYmd)) return null;
+  const range = blockTimeRangeOnDay(block, dayYmd);
+  if (!range) return null;
+
   const dayStart = toDate(`${dayYmd}T${pad2(GRID_START_HOUR)}:00:00`, { timeZone: NY });
   const dayEnd = toDate(`${dayYmd}T${pad2(GRID_END_HOUR)}:00:00`, { timeZone: NY });
-  const clipStart = dayStart;
-  const clipEnd = dayEnd;
-  const top = 0;
+  const clipStart = range.start < dayStart ? dayStart : range.start;
+  const clipEnd = range.end > dayEnd ? dayEnd : range.end;
+  if (clipEnd <= clipStart) return null;
+
+  const top = ((clipStart.getTime() - dayStart.getTime()) / 60000 / SLOT_MINUTES) * ROW_H;
   const h = ((clipEnd.getTime() - clipStart.getTime()) / 60000 / SLOT_MINUTES) * ROW_H;
+  const fullDay = isFullDayBlock(block);
+  const label =
+    block.reason?.trim() ||
+    (fullDay ? "Blocked" : "Blocked");
 
   async function remove() {
     const h = await authHeaders();
@@ -1445,22 +1575,226 @@ function BlockedOverlay({
 
   return (
     <div
-      className="pointer-events-auto absolute right-1 left-1 z-20 flex items-start justify-end rounded border border-slate-300 p-0.5"
+      className={`pointer-events-auto absolute right-1 left-1 z-20 flex flex-col justify-between rounded border p-1 ${
+        fullDay
+          ? "border-slate-300"
+          : "border-slate-400 bg-slate-300/55"
+      }`}
       style={{
         top: Math.max(0, top),
         height: Math.max(ROW_H / 2, h),
-        background:
-          "repeating-linear-gradient(45deg, #f1f5f9 25%, transparent 25%, transparent 50%, #f1f5f9 50%, #f1f5f9 75%, transparent 75%, transparent)",
-        backgroundSize: "8px 8px",
+        background: fullDay
+          ? "repeating-linear-gradient(45deg, #f1f5f9 25%, transparent 25%, transparent 50%, #f1f5f9 50%, #f1f5f9 75%, transparent 75%, transparent)"
+          : undefined,
+        backgroundSize: fullDay ? "8px 8px" : undefined,
       }}
     >
-      <button
-        type="button"
-        onClick={() => void remove()}
-        className="pointer-events-auto rounded bg-white/90 px-1 text-[10px] text-slate-600 shadow"
-      >
-        ×
-      </button>
+      <div className="flex items-start justify-between gap-1 px-0.5">
+        <span className="truncate text-[10px] font-medium text-slate-700">{label}</span>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            void remove();
+          }}
+          className="pointer-events-auto shrink-0 rounded bg-white/90 px-1 text-[10px] text-slate-600 shadow"
+        >
+          ×
+        </button>
+      </div>
+      {!fullDay && block.start_time_of_day && block.end_time_of_day ? (
+        <span className="px-0.5 text-[9px] text-slate-600">
+          {hmTo12h(block.start_time_of_day.slice(0, 5))}–
+          {hmTo12h(block.end_time_of_day.slice(0, 5))}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function SlotActionMenu({
+  context,
+  onClose,
+  onNewAppointment,
+  onBlockTime,
+}: {
+  context: SlotClickContext;
+  onClose: () => void;
+  onNewAppointment: (ctx: SlotClickContext) => void;
+  onBlockTime: (ctx: SlotClickContext) => void;
+}) {
+  const timeLabel = hmTo12h(slotIndexToHm(context.slotIndex));
+  const dateLabel = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  }).format(new Date(`${context.ymd}T12:00:00`));
+
+  return (
+    <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/30 p-4">
+      <div className="w-full max-w-xs rounded-xl bg-white p-4 shadow-xl">
+        <p className="text-sm font-semibold text-slate-900">Schedule action</p>
+        <p className="mt-1 text-xs text-slate-500">
+          {dateLabel} · {timeLabel}
+        </p>
+        <div className="mt-4 space-y-2">
+          <button
+            type="button"
+            className="w-full rounded-lg bg-[#16A34A] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#15803D]"
+            onClick={() => onNewAppointment(context)}
+          >
+            New Appointment
+          </button>
+          <button
+            type="button"
+            className="w-full rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+            onClick={() => onBlockTime(context)}
+          >
+            Block Time
+          </button>
+          <button
+            type="button"
+            className="w-full rounded-lg px-4 py-2 text-sm text-slate-600 hover:bg-slate-100"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BlockTimeModal({
+  context,
+  onClose,
+  onSaved,
+  onError,
+}: {
+  context: SlotClickContext;
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const startHm = slotIndexToHm(context.slotIndex);
+  const [endTime, setEndTime] = useState(() => addMinutesToHm(startHm, 60));
+  const [reason, setReason] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const dateLabel = new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(new Date(`${context.ymd}T12:00:00`));
+
+  async function saveBlock() {
+    if (!endTime || endTime <= startHm) {
+      onError("End time must be after start time.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const h = await authHeaders();
+      const res = await fetch(`${API_BASE}/availability/blocked-time`, {
+        method: "POST",
+        headers: h,
+        body: JSON.stringify({
+          clinician_id: context.clinicianId,
+          start_date: context.ymd,
+          end_date: context.ymd,
+          start_time_of_day: startHm,
+          end_time_of_day: endTime,
+          reason: reason.trim() || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        onError(
+          typeof json?.detail === "string" ? json.detail : `Failed to block time (${res.status})`,
+        );
+        return;
+      }
+      await onSaved();
+    } catch {
+      onError("Could not save block.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+      <div className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="text-base font-semibold text-slate-900">Block Time</h3>
+          <button
+            type="button"
+            className="rounded p-1 text-slate-500 hover:bg-slate-100"
+            onClick={onClose}
+          >
+            ×
+          </button>
+        </div>
+        <div className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Date</label>
+            <input
+              type="text"
+              readOnly
+              className="h-9 w-full rounded-lg border border-gray-200 bg-slate-50 px-3 text-sm text-slate-700"
+              value={dateLabel}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">Start time</label>
+              <input
+                type="text"
+                readOnly
+                className="h-9 w-full rounded-lg border border-gray-200 bg-slate-50 px-3 text-sm text-slate-700"
+                value={hmTo12h(startHm)}
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-slate-600">End time</label>
+              <input
+                type="time"
+                className="h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                value={endTime}
+                onChange={(e) => setEndTime(e.target.value)}
+              />
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium text-slate-600">Reason (optional)</label>
+            <input
+              type="text"
+              className="h-9 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+              placeholder="e.g. Lunch, Meeting, Personal"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
+            className="rounded-lg border border-black/10 px-4 py-2 text-sm"
+            onClick={onClose}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={saving}
+            className="rounded-lg bg-[#16A34A] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+            onClick={() => void saveBlock()}
+          >
+            {saving ? "Saving…" : "Save Block"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1469,6 +1803,9 @@ const BookPatientModal = memo(function BookPatientModal({
   clinicId,
   clinicians,
   locationId,
+  initialDate,
+  initialTime,
+  initialClinicianId,
   onClose,
   onBooked,
   onError,
@@ -1476,6 +1813,9 @@ const BookPatientModal = memo(function BookPatientModal({
   clinicId: string;
   clinicians: ClinicianRow[];
   locationId: string;
+  initialDate?: string;
+  initialTime?: string;
+  initialClinicianId?: string;
   onClose: () => void;
   onBooked: () => void | Promise<void>;
   onError: (message: string) => void;
@@ -1496,11 +1836,21 @@ const BookPatientModal = memo(function BookPatientModal({
   const [treatmentTypes, setTreatmentTypes] = useState<TreatmentTypeOption[]>([]);
   const [loadingTreatmentTypes, setLoadingTreatmentTypes] = useState(false);
   const [treatmentTypeId, setTreatmentTypeId] = useState("");
-  const [selectedDate, setSelectedDate] = useState(() => getEasternYMD(new Date()));
-  const [selectedTime, setSelectedTime] = useState("09:00");
-  const [selectedClinicianId, setSelectedClinicianId] = useState(() => clinicians[0]?.id ?? "");
+  const [selectedDate, setSelectedDate] = useState(
+    () => initialDate || getEasternYMD(new Date()),
+  );
+  const [selectedTime, setSelectedTime] = useState(initialTime || "09:00");
+  const [selectedClinicianId, setSelectedClinicianId] = useState(
+    () => initialClinicianId || clinicians[0]?.id || "",
+  );
   const [isVirtual, setIsVirtual] = useState(false);
   const [confirming, setConfirming] = useState(false);
+
+  useEffect(() => {
+    if (initialDate) setSelectedDate(initialDate);
+    if (initialTime) setSelectedTime(initialTime);
+    if (initialClinicianId) setSelectedClinicianId(initialClinicianId);
+  }, [initialDate, initialTime, initialClinicianId]);
 
   useEffect(() => {
     if (treatmentTypes.length > 0 && !treatmentTypeId) {
