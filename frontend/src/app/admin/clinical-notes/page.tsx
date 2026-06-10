@@ -226,10 +226,12 @@ export default function AdminClinicalNotesPage() {
   const notesAuthorId = (me?.clinic_user_id ?? "").trim() || supabaseUserId;
   const signedByCandidate = supabaseUserId || clinicId;
 
-  const [activeTab, setActiveTab] = useState<"my" | "review">("my");
+  const [activeTab, setActiveTab] = useState<"my" | "all" | "review">("my");
 
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [myNotes, setMyNotes] = useState<ClinicalNote[]>([]);
+  const [allNotes, setAllNotes] = useState<ClinicalNote[]>([]);
+  const [loadingAll, setLoadingAll] = useState(false);
   const [reviewQueue, setReviewQueue] = useState<ClinicalNote[]>([]);
   const [signedRecent, setSignedRecent] = useState<ClinicalNote[]>([]);
 
@@ -395,6 +397,32 @@ export default function AdminClinicalNotesPage() {
     }
   }, [clinicId, notesAuthorId]);
 
+  const loadAllNotes = useCallback(async () => {
+    if (!clinicId) {
+      setAllNotes([]);
+      return;
+    }
+    setLoadingAll(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/clinics/${encodeURIComponent(clinicId)}/clinical-notes`,
+      );
+      if (!res.ok) {
+        setError(await res.text().catch(() => `HTTP ${res.status}`));
+        setAllNotes([]);
+        return;
+      }
+      const json = await res.json();
+      setAllNotes(Array.isArray(json) ? json : []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load clinic notes");
+      setAllNotes([]);
+    } finally {
+      setLoadingAll(false);
+    }
+  }, [clinicId]);
+
   const loadReviewData = useCallback(async () => {
     setLoadingReview(true);
     setError(null);
@@ -435,10 +463,12 @@ export default function AdminClinicalNotesPage() {
   useEffect(() => {
     if (activeTab === "my") {
       void loadMyNotes();
+    } else if (activeTab === "all") {
+      void loadAllNotes();
     } else {
       void loadReviewData();
     }
-  }, [activeTab, loadMyNotes, loadReviewData]);
+  }, [activeTab, loadMyNotes, loadAllNotes, loadReviewData]);
 
   const hasPendingAi = useMemo(
     () =>
@@ -645,6 +675,7 @@ export default function AdminClinicalNotesPage() {
         }
         await flushPendingScribeTests(editingId);
         await loadMyNotes();
+        if (activeTab === "all") void loadAllNotes();
         return editingId;
       }
 
@@ -662,6 +693,7 @@ export default function AdminClinicalNotesPage() {
       setEditingId(newId);
       await flushPendingScribeTests(newId);
       await loadMyNotes();
+      if (activeTab === "all") void loadAllNotes();
       return newId;
     } catch (e) {
       setError(e instanceof Error ? e.message : "Save failed");
@@ -688,6 +720,7 @@ export default function AdminClinicalNotesPage() {
       setEditorOpen(false);
       resetEditor();
       await loadMyNotes();
+      if (activeTab === "all") void loadAllNotes();
       void refreshPendingReviewCount();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Submit failed");
@@ -925,6 +958,19 @@ export default function AdminClinicalNotesPage() {
         <button
           type="button"
           role="tab"
+          aria-selected={activeTab === "all"}
+          onClick={() => setActiveTab("all")}
+          className={`rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
+            activeTab === "all"
+              ? "bg-[var(--color-primary,#16A34A)] text-white"
+              : "text-gray-600 hover:bg-gray-100"
+          }`}
+        >
+          All Clinic Notes
+        </button>
+        <button
+          type="button"
+          role="tab"
           aria-selected={activeTab === "review"}
           onClick={() => setActiveTab("review")}
           className={`relative rounded-lg px-4 py-2 text-sm font-medium transition-colors ${
@@ -1031,7 +1077,94 @@ export default function AdminClinicalNotesPage() {
             </div>
           </div>
         </div>
-      ) : (
+      ) : null}
+
+      {activeTab === "all" ? (
+        <div className="mt-8 space-y-8">
+          <div className={DS_TABLE_WRAP}>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className={DS_TABLE_HEAD}>
+                  <tr>
+                    <th className={DS_TH}>Patient</th>
+                    <th className={DS_TH}>Type</th>
+                    <th className={DS_TH}>Clinician</th>
+                    <th className={DS_TH}>Status</th>
+                    <th className={DS_TH}>Created</th>
+                    <th className={`${DS_TH} text-right`}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {loadingAll ? (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="px-6 py-8 text-center text-gray-500"
+                      >
+                        Loading…
+                      </td>
+                    </tr>
+                  ) : allNotes.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={6}
+                        className="px-6 py-8 text-center text-gray-500"
+                      >
+                        No notes in this clinic yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    allNotes.map((n) => {
+                      const st = (n.status ?? "").toLowerCase();
+                      return (
+                        <tr key={n.id} className={DS_TR}>
+                          <td className={DS_TD_PRIMARY}>
+                            {n.patient_name?.trim() || "—"}
+                          </td>
+                          <td className={DS_TD_PRIMARY}>
+                            {noteTypeLabel(n.note_type)}
+                          </td>
+                          <td className={DS_TD_PRIMARY}>
+                            {n.author_name?.trim() || "—"}
+                          </td>
+                          <td className={DS_TD_PRIMARY}>
+                            <span className={clinicalNoteStatusBadgeClass(st)}>
+                              {clinicalNoteStatusLabel(st)}
+                            </span>
+                          </td>
+                          <td className={DS_TD_PRIMARY}>
+                            {formatNoteDate(n.created_at)}
+                          </td>
+                          <td className={`${DS_TD_PRIMARY} text-right`}>
+                            {canEditNote(n.status) ? (
+                              <button
+                                type="button"
+                                onClick={() => void openEditorForNote(n)}
+                                className={`${DS_SECONDARY_BTN} mr-2`}
+                              >
+                                Edit
+                              </button>
+                            ) : null}
+                            <button
+                              type="button"
+                              onClick={() => void openViewNote(n)}
+                              className={DS_SECONDARY_BTN}
+                            >
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {activeTab === "review" ? (
         <div className="mt-8 space-y-10">
           <div>
             <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-gray-500">
@@ -1176,7 +1309,7 @@ export default function AdminClinicalNotesPage() {
             </div>
           </div>
         </div>
-      )}
+      ) : null}
 
       {/* Note editor */}
       {editorOpen ? (
