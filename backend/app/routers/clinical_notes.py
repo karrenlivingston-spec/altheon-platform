@@ -453,6 +453,195 @@ def create_clinical_note(body: CreateClinicalNoteBody):
     return rows[0]
 
 
+# NOTE: must be registered before GET /clinical-notes/{note_id} so the literal
+# "special-tests" segment is not captured as a note_id.
+@router.get("/clinical-notes/special-tests")
+def list_special_tests_catalog():
+    """All orthopedic special tests grouped by region, then subcategory.
+
+    Seed/reference data (not PHI) — no auth required. Null subcategories are
+    grouped under "General". Ordering follows seed insertion order (created_at)
+    so regions appear in the clinical sequence cervical → functional movement.
+    """
+    try:
+        resp = (
+            supabase.table("orthopedic_special_tests")
+            .select("id,region,subcategory,test_name")
+            .order("created_at")
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    regions: list[dict[str, Any]] = []
+    region_index: dict[str, dict[str, Any]] = {}
+
+    for row in resp.data or []:
+        region = str(row.get("region") or "").strip()
+        if not region:
+            continue
+        subcategory = str(row.get("subcategory") or "").strip() or "General"
+
+        region_entry = region_index.get(region)
+        if region_entry is None:
+            region_entry = {"region": region, "subcategories": [], "_idx": {}}
+            region_index[region] = region_entry
+            regions.append(region_entry)
+
+        sub_entry = region_entry["_idx"].get(subcategory)
+        if sub_entry is None:
+            sub_entry = {"subcategory": subcategory, "tests": []}
+            region_entry["_idx"][subcategory] = sub_entry
+            region_entry["subcategories"].append(sub_entry)
+
+        sub_entry["tests"].append(
+            {
+                "id": str(row.get("id") or ""),
+                "test_name": str(row.get("test_name") or ""),
+            }
+        )
+
+    for region_entry in regions:
+        region_entry.pop("_idx", None)
+
+    return {"regions": regions}
+
+
+_SPECIAL_TEST_RESULTS = frozenset({"Positive", "Negative", "Not Tested"})
+
+
+class SpecialTestResultIn(BaseModel):
+    test_id: str = Field(..., min_length=1)
+    result: str = Field(default="Not Tested")
+    clinician_notes: Optional[str] = None
+
+
+class SaveSpecialTestsBody(BaseModel):
+    results: list[SpecialTestResultIn] = Field(default_factory=list)
+
+
+def _fetch_note_for_clinic(note_id: str, clinic_id: str) -> dict[str, Any]:
+    nid = note_id.strip()
+    cid = clinic_id.strip()
+    if not nid:
+        raise HTTPException(status_code=400, detail="Invalid note_id")
+    if not cid:
+        raise HTTPException(status_code=400, detail="clinic_id is required")
+
+    try:
+        resp = (
+            supabase.table("clinical_notes")
+            .select("id,clinic_id")
+            .eq("id", nid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    rows = resp.data or []
+    if not rows or str(rows[0].get("clinic_id") or "").strip() != cid:
+        raise HTTPException(status_code=404, detail="Clinical note not found")
+    return rows[0]
+
+
+@router.post("/clinical-notes/{note_id}/special-tests")
+def save_note_special_tests(
+    note_id: str,
+    body: SaveSpecialTestsBody,
+    clinic_id: str = Query(..., min_length=1),
+):
+    _fetch_note_for_clinic(note_id, clinic_id)
+
+    nid = note_id.strip()
+    rows: list[dict[str, Any]] = []
+    for item in body.results:
+        result = (item.result or "Not Tested").strip()
+        if result not in _SPECIAL_TEST_RESULTS:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invalid result '{result}'; "
+                    f"allowed: {sorted(_SPECIAL_TEST_RESULTS)}"
+                ),
+            )
+        notes = (item.clinician_notes or "").strip() or None
+        rows.append(
+            {
+                "note_id": nid,
+                "test_id": item.test_id.strip(),
+                "result": result,
+                "clinician_notes": notes,
+                "updated_at": _now_iso(),
+            }
+        )
+
+    if not rows:
+        return {"saved": True, "count": 0}
+
+    try:
+        resp = (
+            supabase.table("note_special_test_results")
+            .upsert(rows, on_conflict="note_id,test_id")
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {"saved": True, "count": len(resp.data or rows)}
+
+
+@router.get("/clinical-notes/{note_id}/special-tests")
+def get_note_special_tests(
+    note_id: str,
+    clinic_id: str = Query(..., min_length=1),
+):
+    _fetch_note_for_clinic(note_id, clinic_id)
+
+    try:
+        resp = (
+            supabase.table("note_special_test_results")
+            .select(
+                "test_id,result,clinician_notes,"
+                "orthopedic_special_tests(test_name,region,subcategory)"
+            )
+            .eq("note_id", note_id.strip())
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    results: list[dict[str, Any]] = []
+    for row in resp.data or []:
+        test = row.get("orthopedic_special_tests") or {}
+        if not isinstance(test, dict):
+            test = {}
+        results.append(
+            {
+                "test_id": str(row.get("test_id") or ""),
+                "test_name": str(test.get("test_name") or ""),
+                "region": str(test.get("region") or ""),
+                "subcategory": str(test.get("subcategory") or "") or "General",
+                "result": str(row.get("result") or "Not Tested"),
+                "clinician_notes": str(row.get("clinician_notes") or ""),
+            }
+        )
+
+    return {"results": results}
+
+
 @router.get("/clinical-notes/{note_id}")
 def get_clinical_note(note_id: str):
     nid = note_id.strip()
