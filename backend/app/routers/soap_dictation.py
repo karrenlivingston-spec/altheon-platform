@@ -7,17 +7,46 @@ Required environment variables:
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import re
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any, Optional
 
 import requests
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
+from app.db import supabase
+
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
 
 _CLAUDE_MODEL = "claude-haiku-4-5-20251001"
+
+_SPECIAL_TESTS_SYSTEM = """You are a clinical data extraction assistant. Extract any orthopedic \
+special test results mentioned in the following physical therapy \
+session transcript. Return ONLY valid JSON, no markdown, no preamble.
+
+Format:
+{
+  "special_tests": [
+    {
+      "test_name": "Lachman Test",
+      "result": "Positive",
+      "clinician_notes": "end feel soft"
+    }
+  ]
+}
+
+Only include tests that were explicitly mentioned with a result \
+(positive, negative, normal, abnormal). \
+Map "normal" and "intact" to "Negative". \
+Map "abnormal", "present", "elicited" to "Positive". \
+If no tests are mentioned, return { "special_tests": [] }."""
 
 _SOAP_SYSTEM = """You are a clinical documentation assistant. You will receive a transcript of a \
 conversation between a clinician and a patient. Extract the clinical content and \
@@ -102,6 +131,154 @@ def _claude_soap_from_transcript(transcript: str) -> str:
         elif isinstance(block, dict) and block.get("text"):
             text_parts.append(str(block["text"]))
     return "".join(text_parts).strip()
+
+
+_POSITIVE_SYNONYMS = frozenset({"positive", "abnormal", "present", "elicited"})
+_NEGATIVE_SYNONYMS = frozenset({"negative", "normal", "intact"})
+
+
+def _normalize_test_result(raw: Any) -> Optional[str]:
+    v = str(raw or "").strip().lower()
+    if v in _POSITIVE_SYNONYMS:
+        return "Positive"
+    if v in _NEGATIVE_SYNONYMS:
+        return "Negative"
+    return None
+
+
+def _extract_json_payload(text: str) -> dict[str, Any]:
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("empty response")
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE)
+    if fence:
+        text = fence.group(1).strip()
+    brace = re.search(r"\{[\s\S]*\}", text)
+    if brace:
+        text = brace.group(0)
+    return json.loads(text)
+
+
+def _claude_extract_special_tests(transcript: str) -> list[dict[str, Any]]:
+    """Second Haiku call: structured special test extraction.
+
+    Never raises — any failure (API, malformed JSON) is logged and an empty
+    list is returned so SOAP generation is unaffected.
+    """
+    api_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if not api_key:
+        return []
+
+    try:
+        import anthropic
+
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model=_CLAUDE_MODEL,
+            max_tokens=2048,
+            system=_SPECIAL_TESTS_SYSTEM,
+            messages=[{"role": "user", "content": transcript}],
+        )
+        blocks = getattr(message, "content", None) or []
+        text_parts: list[str] = []
+        for block in blocks:
+            if hasattr(block, "text"):
+                text_parts.append(str(block.text))
+            elif isinstance(block, dict) and block.get("text"):
+                text_parts.append(str(block["text"]))
+        raw = "".join(text_parts).strip()
+        payload = _extract_json_payload(raw)
+    except Exception:
+        logger.exception("special test extraction failed")
+        return []
+
+    tests = payload.get("special_tests")
+    if not isinstance(tests, list):
+        logger.warning("special test extraction: unexpected payload shape")
+        return []
+
+    out: list[dict[str, Any]] = []
+    for item in tests:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("test_name") or "").strip()
+        result = _normalize_test_result(item.get("result"))
+        if not name or not result:
+            continue
+        out.append(
+            {
+                "test_name": name,
+                "result": result,
+                "clinician_notes": str(item.get("clinician_notes") or "").strip(),
+            }
+        )
+    return out
+
+
+def _match_special_tests(
+    extracted: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Map extracted test names to orthopedic_special_tests rows (case-insensitive)."""
+    if not extracted:
+        return []
+    try:
+        resp = (
+            supabase.table("orthopedic_special_tests")
+            .select("id,test_name")
+            .execute()
+        )
+        rows = resp.data or []
+    except Exception:
+        logger.exception("special test catalog lookup failed")
+        return []
+
+    # First occurrence wins for duplicate names across regions (e.g. Valgus Stress Test).
+    by_name: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = str(row.get("test_name") or "").strip().lower()
+        if key and key not in by_name:
+            by_name[key] = row
+
+    matched: list[dict[str, Any]] = []
+    for item in extracted:
+        row = by_name.get(item["test_name"].lower())
+        if not row:
+            continue
+        matched.append(
+            {
+                "test_id": str(row.get("id") or ""),
+                "test_name": str(row.get("test_name") or item["test_name"]),
+                "result": item["result"],
+                "clinician_notes": item["clinician_notes"] or None,
+            }
+        )
+    return matched
+
+
+def _upsert_note_special_tests(
+    note_id: str, matched: list[dict[str, Any]]
+) -> None:
+    if not note_id or not matched:
+        return
+    now = datetime.now(timezone.utc).isoformat()
+    rows = [
+        {
+            "note_id": note_id,
+            "test_id": m["test_id"],
+            "result": m["result"],
+            "clinician_notes": m["clinician_notes"],
+            "updated_at": now,
+        }
+        for m in matched
+    ]
+    try:
+        supabase.table("note_special_test_results").upsert(
+            rows, on_conflict="note_id,test_id"
+        ).execute()
+    except Exception:
+        logger.exception(
+            "auto-save of special test results failed note_id=%s", note_id
+        )
 
 
 def _elevenlabs_transcribe_file(tmp_path: str) -> str:
@@ -203,10 +380,12 @@ async def transcribe_and_generate(
     audio: UploadFile = File(..., description="Recorded session audio"),
     clinic_id: str = Form(...),
     patient_id: str = Form(default=""),
+    note_id: str = Form(default=""),
 ):
     """Transcribe audio with ElevenLabs Scribe, then structure into SOAP with Claude Haiku."""
     _ = clinic_id.strip()
     _ = (patient_id or "").strip()
+    nid = (note_id or "").strip()
 
     transcript = await _transcribe_upload(audio)
 
@@ -222,11 +401,27 @@ async def transcribe_and_generate(
 
     sections = _parse_soap_sections(soap_raw)
 
+    # Second Haiku pass: orthopedic special test extraction. Best-effort —
+    # never blocks SOAP generation.
+    matched: list[dict[str, Any]] = []
+    try:
+        extracted = _claude_extract_special_tests(transcript)
+        matched = _match_special_tests(extracted)
+        if nid:
+            _upsert_note_special_tests(nid, matched)
+    except Exception:
+        logger.exception("special test pipeline failed")
+        matched = []
+
     return {
         "transcript": transcript,
         "subjective": sections["subjective"],
         "objective": sections["objective"],
         "assessment": sections["assessment"],
         "plan": sections["plan"],
+        "auto_populated_special_tests": [m["test_name"] for m in matched],
+        # Full matched payload so the frontend can save results once the
+        # note draft exists (the scribe runs before the note is created).
+        "special_test_results": matched,
         "status": "success",
     }

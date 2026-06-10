@@ -14,12 +14,21 @@ const RECORDER_MIME_CANDIDATES = [
   "audio/ogg",
 ] as const;
 
+export type ScribeSpecialTestResult = {
+  test_id: string;
+  test_name: string;
+  result: string;
+  clinician_notes: string | null;
+};
+
 export type SoapFromScribe = {
   subjective: string;
   objective: string;
   assessment: string;
   plan: string;
   transcript: string;
+  auto_populated_special_tests: string[];
+  special_test_results: ScribeSpecialTestResult[];
 };
 
 type ScribeUiState = "idle" | "recording" | "processing" | "error";
@@ -50,12 +59,15 @@ function formatElapsed(seconds: number): string {
 type AmbientScribeProps = {
   clinicId: string;
   patientId?: string;
+  /** When dictating into an existing note, results are auto-saved server-side. */
+  noteId?: string;
   onSoapGenerated: (soap: SoapFromScribe) => void;
 };
 
 export function AmbientScribe({
   clinicId,
   patientId,
+  noteId,
   onSoapGenerated,
 }: AmbientScribeProps) {
   const [uiState, setUiState] = useState<ScribeUiState>("idle");
@@ -210,6 +222,7 @@ export function AmbientScribe({
         form.append("audio", blob, filename);
         form.append("clinic_id", clinicId.trim());
         form.append("patient_id", (patientId ?? "").trim());
+        form.append("note_id", (noteId ?? "").trim());
 
         const res = await fetch(
           `${API_BASE}/soap-dictation/transcribe-and-generate`,
@@ -228,12 +241,20 @@ export function AmbientScribe({
         }
 
         const data = (await res.json()) as Record<string, unknown>;
+        const autoNames = Array.isArray(data.auto_populated_special_tests)
+          ? data.auto_populated_special_tests.map((x) => String(x))
+          : [];
+        const testResults = Array.isArray(data.special_test_results)
+          ? (data.special_test_results as ScribeSpecialTestResult[])
+          : [];
         onSoapGenerated({
           subjective: String(data.subjective ?? ""),
           objective: String(data.objective ?? ""),
           assessment: String(data.assessment ?? ""),
           plan: String(data.plan ?? ""),
           transcript: String(data.transcript ?? ""),
+          auto_populated_special_tests: autoNames,
+          special_test_results: testResults,
         });
         resetToIdle();
       } catch (e) {
@@ -258,6 +279,7 @@ export function AmbientScribe({
   }, [
     clinicId,
     patientId,
+    noteId,
     onSoapGenerated,
     resetToIdle,
     clearTimer,

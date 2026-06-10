@@ -22,6 +22,7 @@ import { useClinic } from "@/app/admin/ClinicContext";
 import { supabase } from "@/lib/supabase";
 import {
   AmbientScribe,
+  type ScribeSpecialTestResult,
   type SoapFromScribe,
 } from "@/components/clinical-notes/AmbientScribe";
 import { MeasurementModule } from "@/components/clinical-notes/MeasurementModule";
@@ -261,6 +262,9 @@ export default function AdminClinicalNotesPage() {
   const [showCorrectionField, setShowCorrectionField] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [infoToast, setInfoToast] = useState<string | null>(null);
+  /** Special tests detected by the scribe before the note exists; flushed on first save. */
+  const pendingScribeTestsRef = useRef<ScribeSpecialTestResult[]>([]);
   const [pendingReviewCount, setPendingReviewCount] = useState(0);
 
   const [scribeBannerVisible, setScribeBannerVisible] = useState(false);
@@ -332,6 +336,14 @@ export default function AdminClinicalNotesPage() {
     setScribeBannerVisible(true);
     setTranscriptPanelOpen(false);
     setEditorOpen(true);
+
+    pendingScribeTestsRef.current = soap.special_test_results ?? [];
+    const names = soap.auto_populated_special_tests ?? [];
+    if (names.length > 0) {
+      setInfoToast(
+        `Special tests auto-detected: ${names.join(", ")} — review in Special Tests section`,
+      );
+    }
   }, []);
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -512,6 +524,7 @@ export default function AdminClinicalNotesPage() {
     setScribeBannerVisible(false);
     setSessionTranscript("");
     setTranscriptPanelOpen(false);
+    pendingScribeTestsRef.current = [];
   }
 
   function openNewNote() {
@@ -561,6 +574,32 @@ export default function AdminClinicalNotesPage() {
     }
   }
 
+  async function flushPendingScribeTests(noteId: string) {
+    const pending = pendingScribeTestsRef.current;
+    if (pending.length === 0) return;
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/clinical-notes/${encodeURIComponent(noteId)}/special-tests?clinic_id=${encodeURIComponent(clinicId)}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            results: pending.map((p) => ({
+              test_id: p.test_id,
+              result: p.result,
+              clinician_notes: p.clinician_notes,
+            })),
+          }),
+        },
+      );
+      if (res.ok) {
+        pendingScribeTestsRef.current = [];
+      }
+    } catch {
+      /* keep pending for the next save attempt */
+    }
+  }
+
   async function saveDraft(): Promise<string | null> {
     if (!draftPatientId.trim()) {
       setError("Select a patient.");
@@ -607,6 +646,7 @@ export default function AdminClinicalNotesPage() {
           setError(await res.text().catch(() => res.statusText));
           return null;
         }
+        await flushPendingScribeTests(editingId);
         await loadMyNotes();
         return editingId;
       }
@@ -623,6 +663,7 @@ export default function AdminClinicalNotesPage() {
       const created = (await res.json()) as ClinicalNote;
       const newId = created.id;
       setEditingId(newId);
+      await flushPendingScribeTests(newId);
       await loadMyNotes();
       return newId;
     } catch (e) {
@@ -803,6 +844,12 @@ export default function AdminClinicalNotesPage() {
     return () => window.clearTimeout(t);
   }, [toast]);
 
+  useEffect(() => {
+    if (!infoToast) return;
+    const t = window.setTimeout(() => setInfoToast(null), 8000);
+    return () => window.clearTimeout(t);
+  }, [infoToast]);
+
   return (
     <div className={DS_PAGE_ROOT}>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -846,6 +893,12 @@ export default function AdminClinicalNotesPage() {
       {toast ? (
         <p className="mt-6 rounded-xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
           {toast}
+        </p>
+      ) : null}
+
+      {infoToast ? (
+        <p className="mt-6 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          {infoToast}
         </p>
       ) : null}
 
