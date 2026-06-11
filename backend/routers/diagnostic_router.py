@@ -40,6 +40,7 @@ _VALID_DOC_TYPES = frozenset(
         "xray",
         "pdf_report",
         "photo",
+        "prescription",
         "insurance_card",
         "id_document",
         "other",

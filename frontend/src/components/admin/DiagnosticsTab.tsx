@@ -27,6 +27,7 @@ const DOC_TYPES = [
   { value: "xray", label: "X-ray" },
   { value: "pdf_report", label: "PDF Report" },
   { value: "photo", label: "Photo" },
+  { value: "prescription", label: "Prescription" },
   { value: "insurance_card", label: "Insurance Card" },
   { value: "id_document", label: "ID Document" },
   { value: "other", label: "Other" },
