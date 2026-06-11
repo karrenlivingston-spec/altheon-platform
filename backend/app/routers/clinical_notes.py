@@ -150,69 +150,41 @@ def _clinic_user_display_name(row: Optional[dict[str, Any]]) -> str:
     return "Unknown"
 
 
-def _load_clinic_users_maps(
-    author_ids: list[str],
-) -> tuple[dict[str, dict[str, Any]], dict[str, dict[str, Any]]]:
-    """Match clinic_users by primary id or by user_id (author_id may be either)."""
-    by_cu_id: dict[str, dict[str, Any]] = {}
-    by_user_id: dict[str, dict[str, Any]] = {}
+def _clinician_display_name(row: Optional[dict[str, Any]]) -> str:
+    """clinicians.first_name + " " + last_name, or "Unknown" when unmatched."""
+    if not row:
+        return "Unknown"
+    fn = str(row.get("first_name") or "").strip()
+    ln = str(row.get("last_name") or "").strip()
+    return f"{fn} {ln}".strip() or "Unknown"
+
+
+def _load_clinicians_map(author_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """clinicians rows keyed by id (LEFT JOIN clinicians c ON c.id = cn.author_id)."""
+    by_id: dict[str, dict[str, Any]] = {}
     if not author_ids:
-        return by_cu_id, by_user_id
+        return by_id
 
     try:
-        r1 = (
-            supabase.table("clinic_users")
-            .select("*")
+        resp = (
+            supabase.table("clinicians")
+            .select("id,first_name,last_name")
             .in_("id", author_ids)
             .execute()
         )
-        _handle_supabase_error(r1)
-        for row in r1.data or []:
+        _handle_supabase_error(resp)
+        for row in resp.data or []:
             if not isinstance(row, dict):
                 continue
             cid = str(row.get("id") or "").strip()
-            uid = str(row.get("user_id") or "").strip()
             if cid:
-                by_cu_id[cid] = row
-            if uid:
-                by_user_id[uid] = row
-
-        missing = [a for a in author_ids if a not in by_cu_id and a not in by_user_id]
-        if missing:
-            r2 = (
-                supabase.table("clinic_users")
-                .select("*")
-                .in_("user_id", missing)
-                .execute()
-            )
-            _handle_supabase_error(r2)
-            for row in r2.data or []:
-                if not isinstance(row, dict):
-                    continue
-                cid = str(row.get("id") or "").strip()
-                uid = str(row.get("user_id") or "").strip()
-                if cid:
-                    by_cu_id[cid] = row
-                if uid:
-                    by_user_id[uid] = row
+                by_id[cid] = row
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return by_cu_id, by_user_id
-
-
-def _resolve_clinic_user_row(
-    author_id: str,
-    by_cu_id: dict[str, dict[str, Any]],
-    by_user_id: dict[str, dict[str, Any]],
-) -> Optional[dict[str, Any]]:
-    if author_id in by_cu_id:
-        return by_cu_id[author_id]
-    if author_id in by_user_id:
-        return by_user_id[author_id]
-    return None
+    return by_id
 
 
 def _enrich_notes_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -249,7 +221,7 @@ def _enrich_notes_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    by_cu_id, by_user_id = _load_clinic_users_maps(author_ids)
+    clinicians_by_id = _load_clinicians_map(author_ids)
 
     supervising_by_id: dict[str, dict[str, Any]] = {}
     try:
@@ -277,8 +249,7 @@ def _enrich_notes_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         spid = str(r.get("supervising_pt_id") or "").strip()
         pt = patients_map.get(pid)
         item["patient_name"] = _patient_display_name(pt) if pt else "—"
-        cu = _resolve_clinic_user_row(aid, by_cu_id, by_user_id)
-        item["author_name"] = _clinic_user_display_name(cu)
+        item["author_name"] = _clinician_display_name(clinicians_by_id.get(aid))
         if spid:
             item["supervising_pt_name"] = _clinic_user_display_name(
                 supervising_by_id.get(spid)
