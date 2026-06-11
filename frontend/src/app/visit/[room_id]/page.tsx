@@ -17,7 +17,7 @@ export default function VirtualVisitPage() {
     <Suspense
       fallback={
         <div
-          className="flex min-h-screen items-center justify-center px-6"
+          className="flex h-[100dvh] items-center justify-center px-6"
           style={{
             background:
               "linear-gradient(160deg, #0f2f2f 0%, #0b1f2d 100%)",

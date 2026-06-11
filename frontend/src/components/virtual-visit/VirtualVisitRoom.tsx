@@ -698,10 +698,10 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
 
   return (
     <div
-      className="flex min-h-screen flex-col"
+      className="flex h-[100dvh] flex-col overflow-hidden"
       style={{ background: PAGE_BG }}
     >
-      <header className="border-b border-teal-900/50 px-4 py-3">
+      <header className="shrink-0 border-b border-teal-900/50 px-4 py-3">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-2">
           <div>
             <p className="text-xs text-teal-200/70">{info?.clinic_name}</p>
@@ -717,36 +717,40 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
         </div>
       </header>
 
-      <main className="relative mx-auto flex w-full max-w-5xl flex-1 flex-col p-4">
-        <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black/60 shadow-lg">
+      <main className="relative mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col sm:p-4">
+        {/* Mobile: remote ~80% of remaining viewport; desktop: 16:9 aspect box */}
+        <div className="relative min-h-0 w-full flex-[4] overflow-hidden bg-black/60 sm:aspect-video sm:flex-none sm:rounded-xl sm:shadow-lg">
           <video
             ref={remoteVideoRef}
             autoPlay
             playsInline
-            className="h-full w-full object-cover"
+            className="absolute inset-0 h-full w-full object-cover"
           />
           <video
             ref={localVideoRef}
             autoPlay
             playsInline
             muted
-            className="absolute bottom-3 right-3 h-24 w-32 rounded-lg border-2 border-teal-500/50 object-cover shadow-md sm:h-28 sm:w-40"
+            className="absolute right-3 top-3 z-10 h-[160px] w-[120px] rounded-lg border-2 border-teal-500/50 object-cover shadow-md sm:bottom-3 sm:top-auto sm:h-28 sm:w-40"
           />
         </div>
 
-        {isClinician && clinicIdParam ? (
-          <div className="mt-4 flex justify-center">
+        <div
+          className="flex shrink-0 flex-[1] items-end justify-center px-4 pt-3 sm:flex-none sm:pt-0"
+          style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
+        >
+          {isClinician && clinicIdParam ? (
             <button
               type="button"
               onClick={() => void handleEndVisit()}
               disabled={ending}
-              className="rounded-lg px-5 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+              className="min-h-[44px] rounded-lg px-5 py-2.5 text-sm font-medium text-white disabled:opacity-60"
               style={{ backgroundColor: TEAL }}
             >
               {ending ? "Ending…" : "End Visit"}
             </button>
-          </div>
-        ) : null}
+          ) : null}
+        </div>
       </main>
     </div>
   );
