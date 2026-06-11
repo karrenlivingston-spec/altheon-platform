@@ -148,6 +148,10 @@ const NOTE_TYPE_OPTIONS = [
   { value: "discharge_note", label: "Discharge Note" },
 ] as const;
 
+function showSpecialTestsForNoteType(noteType: string | null | undefined): boolean {
+  return (noteType ?? "").trim().toLowerCase() !== "daily_note";
+}
+
 function patientDisplayName(p: PatientRow): string {
   const s = `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim();
   return s || "—";
@@ -1506,11 +1510,13 @@ export default function AdminClinicalNotesPage() {
                   clinicId={MEASUREMENT_CLINIC_ID}
                 />
               ) : null}
-              <SpecialTestsSection
-                noteId={editingId}
-                clinicId={clinicId}
-                onSaved={(m) => setToast(m)}
-              />
+              {showSpecialTestsForNoteType(draftNoteType) ? (
+                <SpecialTestsSection
+                  noteId={editingId}
+                  clinicId={clinicId}
+                  onSaved={(m) => setToast(m)}
+                />
+              ) : null}
               <label className="block text-sm font-medium text-gray-700">
                 Assessment — clinical reasoning
                 <textarea
@@ -1694,11 +1700,13 @@ export default function AdminClinicalNotesPage() {
                   {viewNote.objective?.trim() || "—"}
                 </p>
               </div>
-              <SpecialTestsSection
-                noteId={viewNote.id}
-                clinicId={clinicId}
-                readOnly
-              />
+              {showSpecialTestsForNoteType(viewNote.note_type) ? (
+                <SpecialTestsSection
+                  noteId={viewNote.id}
+                  clinicId={clinicId}
+                  readOnly
+                />
+              ) : null}
               <div>
                 <p className="text-xs font-semibold uppercase text-gray-500">
                   Assessment
