@@ -22,7 +22,11 @@ import {
   useState,
 } from "react";
 import { Printer } from "lucide-react";
+import { useRouter } from "next/navigation";
 
+import AppointmentPopup, {
+  type AppointmentPopupData,
+} from "@/components/calendar/AppointmentPopup";
 import { MeasurementModule } from "@/components/clinical-notes/MeasurementModule";
 import VirtualVisitButton from "@/components/virtual-visit/VirtualVisitButton";
 
@@ -104,6 +108,7 @@ type BookingPrefill = {
   date: string;
   time: string;
   clinicianId: string;
+  patient?: PatientOption | null;
 };
 
 type ViewMode = "day" | "week" | "month";
@@ -231,6 +236,20 @@ function patientFull(a: CalendarAppointment): string {
   return `${a.patient.first_name ?? ""} ${a.patient.last_name ?? ""}`.trim() || "Patient";
 }
 
+function calendarApptToPopupData(a: CalendarAppointment): AppointmentPopupData {
+  return {
+    id: a.id,
+    patient_id: a.patient.id,
+    patient_name: patientFull(a),
+    patient_phone: a.patient.phone?.trim() || "",
+    clinician_name: clinicianLabel(a.clinician),
+    appointment_type: a.treatment_type.name?.trim() || "",
+    start_time: a.start_time,
+    end_time: a.end_time,
+    status: a.status,
+  };
+}
+
 function safeDate(value: string | Date | null | undefined): Date | null {
   if (!value) return null;
   const d = new Date(value);
@@ -348,6 +367,7 @@ type CalendarViewProps = {
 };
 
 export default function CalendarView({ clinicId, openBookingNonce = 0 }: CalendarViewProps) {
+  const router = useRouter();
   const [view, setView] = useState<ViewMode>("week");
   const [anchorYmd, setAnchorYmd] = useState(() => getEasternYMD(new Date()));
   const [providerId, setProviderId] = useState<string>("");
@@ -378,6 +398,8 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
     message: string;
   } | null>(null);
   const [detailAppt, setDetailAppt] = useState<CalendarAppointment | null>(null);
+  const [popupAppt, setPopupAppt] = useState<CalendarAppointment | null>(null);
+  const [popupAnchor, setPopupAnchor] = useState<DOMRect | null>(null);
   const [detailIntake, setDetailIntake] = useState<IntakeSummary | null>(null);
   const [detailIntakeLoading, setDetailIntakeLoading] = useState(false);
   const [detailIntakeError, setDetailIntakeError] = useState<string | null>(null);
@@ -568,6 +590,127 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
     if (!res.ok) throw new Error(String(res.status));
     await loadData();
   }
+
+  const closeAppointmentPopup = useCallback(() => {
+    setPopupAppt(null);
+    setPopupAnchor(null);
+  }, []);
+
+  const handleApptCardClick = useCallback(
+    (appt: CalendarAppointment, anchorRect: DOMRect) => {
+      setPopupAppt(appt);
+      setPopupAnchor(anchorRect);
+    },
+    [],
+  );
+
+  async function patchAppointmentStatus(
+    id: string,
+    status: "checked_in" | "completed",
+  ) {
+    const h = await authHeaders();
+    const res = await fetch(
+      `${API_BASE}/appointments/${encodeURIComponent(id)}/status`,
+      {
+        method: "PATCH",
+        headers: h,
+        body: JSON.stringify({ status }),
+      },
+    );
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { detail?: string };
+      throw new Error(err.detail || "Failed to update appointment status");
+    }
+  }
+
+  const handlePopupCheckIn = useCallback(
+    async (id: string) => {
+      try {
+        await patchAppointmentStatus(id, "checked_in");
+        closeAppointmentPopup();
+        await loadData();
+        setToast({ kind: "success", message: "Patient checked in" });
+      } catch (e) {
+        setToast({
+          kind: "error",
+          message: e instanceof Error ? e.message : "Check-in failed",
+        });
+      }
+    },
+    [closeAppointmentPopup, loadData],
+  );
+
+  const handlePopupCheckOut = useCallback(
+    async (id: string) => {
+      try {
+        await patchAppointmentStatus(id, "completed");
+        closeAppointmentPopup();
+        await loadData();
+        setToast({ kind: "success", message: "Patient checked out" });
+      } catch (e) {
+        setToast({
+          kind: "error",
+          message: e instanceof Error ? e.message : "Check-out failed",
+        });
+      }
+    },
+    [closeAppointmentPopup, loadData],
+  );
+
+  const handlePopupReschedule = useCallback(
+    (apptData: AppointmentPopupData) => {
+      const calAppt = appointments.find((a) => a.id === apptData.id);
+      closeAppointmentPopup();
+      if (!calAppt) return;
+      const timeHm = formatInTimeZone(new Date(calAppt.start_time), NY, "HH:mm");
+      setBookingPrefill({
+        date: easternYmdOfIso(calAppt.start_time),
+        time: timeHm,
+        clinicianId: calAppt.clinician.id,
+        patient: {
+          id: calAppt.patient.id,
+          first_name: calAppt.patient.first_name,
+          last_name: calAppt.patient.last_name,
+          phone: calAppt.patient.phone,
+        },
+      });
+      setBookModalOpen(true);
+    },
+    [appointments, closeAppointmentPopup],
+  );
+
+  const handlePopupScheduleFollowUp = useCallback(
+    (patientId: string, patientName: string) => {
+      const calAppt = appointments.find((a) => a.patient.id === patientId);
+      closeAppointmentPopup();
+      const nameParts = patientName.trim().split(/\s+/);
+      const first = nameParts[0] ?? "";
+      const last = nameParts.slice(1).join(" ");
+      setBookingPrefill({
+        date: getEasternYMD(new Date()),
+        time: "09:00",
+        clinicianId: calAppt?.clinician.id || clinicians[0]?.id || "",
+        patient: calAppt
+          ? {
+              id: calAppt.patient.id,
+              first_name: calAppt.patient.first_name,
+              last_name: calAppt.patient.last_name,
+              phone: calAppt.patient.phone,
+            }
+          : { id: patientId, first_name: first, last_name: last },
+      });
+      setBookModalOpen(true);
+    },
+    [appointments, clinicians, closeAppointmentPopup],
+  );
+
+  const handlePopupOpenChart = useCallback(
+    (patientId: string) => {
+      closeAppointmentPopup();
+      router.push(`/admin/patients/${patientId}`);
+    },
+    [closeAppointmentPopup, router],
+  );
 
   async function swapAppointments(id1: string, id2: string) {
     const h = await authHeaders();
@@ -858,7 +1001,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
           sensors={sensors}
           activeDrag={activeDrag}
           onSlotClick={setSlotAction}
-          onApptClick={setDetailAppt}
+          onApptClick={handleApptCardClick}
         />
       ) : view === "week" ? (
         <WeekGrid
@@ -869,7 +1012,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
             setAnchorYmd(ymd);
             setView("day");
           }}
-          onCardClick={setDetailAppt}
+          onCardClick={handleApptCardClick}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           sensors={sensors}
@@ -920,6 +1063,20 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
         />
       ) : null}
 
+      {popupAppt && popupAnchor ? (
+        <AppointmentPopup
+          appointment={calendarApptToPopupData(popupAppt)}
+          anchorRect={popupAnchor}
+          clinicId={clinicId}
+          onClose={closeAppointmentPopup}
+          onCheckIn={(id) => void handlePopupCheckIn(id)}
+          onCheckOut={(id) => void handlePopupCheckOut(id)}
+          onReschedule={handlePopupReschedule}
+          onScheduleFollowUp={handlePopupScheduleFollowUp}
+          onOpenChart={handlePopupOpenChart}
+        />
+      ) : null}
+
       {bookModalOpen ? (
         <BookPatientModal
           clinicId={clinicId}
@@ -928,6 +1085,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
           initialDate={bookingPrefill?.date}
           initialTime={bookingPrefill?.time}
           initialClinicianId={bookingPrefill?.clinicianId}
+          initialPatient={bookingPrefill?.patient}
           onClose={() => {
             setBookModalOpen(false);
             setBookingPrefill(null);
@@ -1309,7 +1467,7 @@ function DayGrid({
   sensors: ReturnType<typeof useSensors>;
   activeDrag: CalendarAppointment | null;
   onSlotClick: (ctx: SlotClickContext) => void;
-  onApptClick: (appt: CalendarAppointment) => void;
+  onApptClick: (appt: CalendarAppointment, anchorRect: DOMRect) => void;
 }) {
   const gridHeight = NUM_SLOTS * ROW_H;
   const nowLinePx = useMemo(() => {
@@ -1457,7 +1615,7 @@ function DraggableApptCard({
 }: {
   appt: CalendarAppointment;
   dayYmd: string;
-  onApptClick?: (appt: CalendarAppointment) => void;
+  onApptClick?: (appt: CalendarAppointment, anchorRect: DOMRect) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `appt-${appt.id}`,
@@ -1483,9 +1641,14 @@ function DraggableApptCard({
       {...attributes}
       role="button"
       tabIndex={0}
-      onClick={() => onApptClick?.(appt)}
+      onClick={(e) => {
+        e.stopPropagation();
+        onApptClick?.(appt, (e.currentTarget as HTMLElement).getBoundingClientRect());
+      }}
       onKeyDown={(e) => {
-        if (e.key === "Enter") onApptClick?.(appt);
+        if (e.key === "Enter") {
+          onApptClick?.(appt, (e.currentTarget as HTMLElement).getBoundingClientRect());
+        }
       }}
       className={`absolute right-1 left-1 cursor-grab overflow-hidden rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] active:cursor-grabbing ${
         isDragging ? "scale-[1.03] opacity-90 shadow-lg" : ""
@@ -1806,6 +1969,7 @@ const BookPatientModal = memo(function BookPatientModal({
   initialDate,
   initialTime,
   initialClinicianId,
+  initialPatient,
   onClose,
   onBooked,
   onError,
@@ -1816,6 +1980,7 @@ const BookPatientModal = memo(function BookPatientModal({
   initialDate?: string;
   initialTime?: string;
   initialClinicianId?: string;
+  initialPatient?: PatientOption | null;
   onClose: () => void;
   onBooked: () => void | Promise<void>;
   onError: (message: string) => void;
@@ -1851,6 +2016,13 @@ const BookPatientModal = memo(function BookPatientModal({
     if (initialTime) setSelectedTime(initialTime);
     if (initialClinicianId) setSelectedClinicianId(initialClinicianId);
   }, [initialDate, initialTime, initialClinicianId]);
+
+  useEffect(() => {
+    if (initialPatient) {
+      setSelectedPatient(initialPatient);
+      setStep(2);
+    }
+  }, [initialPatient]);
 
   useEffect(() => {
     if (treatmentTypes.length > 0 && !treatmentTypeId) {
@@ -2312,7 +2484,7 @@ function WeekGrid({
   todayYmd: string;
   appointments: CalendarAppointment[];
   onDayHeaderClick: (ymd: string) => void;
-  onCardClick: (a: CalendarAppointment) => void;
+  onCardClick: (a: CalendarAppointment, anchorRect: DOMRect) => void;
   onDragStart: (e: DragStartEvent) => void;
   onDragEnd: (e: DragEndEvent) => void;
   sensors: ReturnType<typeof useSensors>;
@@ -2362,7 +2534,7 @@ function WeekDayColumn({
   isToday: boolean;
   appointments: CalendarAppointment[];
   onHeaderClick: () => void;
-  onCardClick: (a: CalendarAppointment) => void;
+  onCardClick: (a: CalendarAppointment, anchorRect: DOMRect) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `weekday-${ymd}` });
   const label = formatInTimeZone(new Date(`${ymd}T12:00:00`), NY, "EEE d");
@@ -2394,7 +2566,7 @@ function WeekDraggableCard({
   onCardClick,
 }: {
   appt: CalendarAppointment;
-  onCardClick: (a: CalendarAppointment) => void;
+  onCardClick: (a: CalendarAppointment, anchorRect: DOMRect) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `appt-${appt.id}`,
@@ -2410,9 +2582,14 @@ function WeekDraggableCard({
       role="button"
       tabIndex={0}
       onKeyDown={(e) => {
-        if (e.key === "Enter") onCardClick(appt);
+        if (e.key === "Enter") {
+          onCardClick(appt, (e.currentTarget as HTMLElement).getBoundingClientRect());
+        }
       }}
-      onClick={() => onCardClick(appt)}
+      onClick={(e) => {
+        e.stopPropagation();
+        onCardClick(appt, (e.currentTarget as HTMLElement).getBoundingClientRect());
+      }}
       className={`cursor-grab rounded-lg border border-black/10 bg-white p-2 text-left shadow-sm ${
         isDragging ? "scale-[1.03] opacity-90" : ""
       }`}

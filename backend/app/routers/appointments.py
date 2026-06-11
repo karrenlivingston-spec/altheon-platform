@@ -434,6 +434,59 @@ def _duration_minutes_from_appt_row(row: dict[str, Any]) -> int:
         return 30
 
 
+@router.get("/{appointment_id}")
+def get_appointment(
+    appointment_id: str,
+    clinic_id: str = Query(...),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """Single appointment for calendar popup enrichment."""
+    user_id = _resolve_bearer_user_id(authorization)
+    _assert_user_has_clinic_access(user_id, clinic_id)
+    try:
+        resp = (
+            supabase.table("appointments")
+            .select(
+                "id, clinic_id, patient_id, clinician_id, start_time, end_time, status, notes, "
+                "patients(first_name, last_name, phone, insurance_carrier), "
+                "treatment_types(name), clinicians(first_name, last_name)"
+            )
+            .eq("id", appointment_id)
+            .eq("clinic_id", clinic_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    rows = resp.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    row = rows[0]
+    patient = row.get("patients") or {}
+    clinician = row.get("clinicians") or {}
+    treatment = row.get("treatment_types") or {}
+    p_fn = str(patient.get("first_name") or "").strip()
+    p_ln = str(patient.get("last_name") or "").strip()
+    c_fn = str(clinician.get("first_name") or "").strip()
+    c_ln = str(clinician.get("last_name") or "").strip()
+    return {
+        "id": row.get("id"),
+        "patient_id": row.get("patient_id"),
+        "patient_name": f"{p_fn} {p_ln}".strip(),
+        "patient_phone": patient.get("phone"),
+        "clinician_name": f"{c_fn} {c_ln}".strip(),
+        "appointment_type": treatment.get("name"),
+        "start_time": row.get("start_time"),
+        "end_time": row.get("end_time"),
+        "status": row.get("status"),
+        "insurance_carrier": patient.get("insurance_carrier"),
+        "diagnosis_code": None,
+    }
+
+
 @router.patch("/{appointment_id}/time")
 def update_appointment_time(
     appointment_id: str,

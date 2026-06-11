@@ -262,6 +262,21 @@ def _related_pi_cases(patient_id: str, clinic_id: str) -> list[dict[str, Any]]:
     return out
 
 
+@router.get("/{patient_id}/insurance")
+def get_patient_insurance(patient_id: str, clinic_id: str = Query(...)):
+    """Primary insurance carrier for appointment popup / scheduling context."""
+    if not _has_clinic_access(clinic_id, patient_id):
+        raise HTTPException(status_code=404, detail="Patient not found")
+    row = _fetch_patient_row(patient_id, restrict_clinic_id=clinic_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return {
+        "insurance_carrier": row.get("insurance_carrier"),
+        "insurance_policy_number": row.get("insurance_policy_number"),
+        "insurance_group_number": row.get("insurance_group_number"),
+    }
+
+
 @router.get("/{patient_id}/surveys")
 def list_patient_surveys(patient_id: str, clinic_id: str = Query(...)):
     """Return survey_responses for a patient (newest first)."""
