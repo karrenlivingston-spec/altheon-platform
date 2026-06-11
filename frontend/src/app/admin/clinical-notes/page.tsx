@@ -1517,6 +1517,14 @@ export default function AdminClinicalNotesPage() {
                   onSaved={(m) => setToast(m)}
                 />
               ) : null}
+              {editingId && clinicId ? (
+                <CptDetectionPanel
+                  noteId={editingId}
+                  clinicId={clinicId}
+                  initialCodes={draftCptCodes}
+                  onCodesDetected={setDraftCptCodes}
+                />
+              ) : null}
               <label className="block text-sm font-medium text-gray-700">
                 Assessment — clinical reasoning
                 <textarea
@@ -1535,14 +1543,6 @@ export default function AdminClinicalNotesPage() {
                   className={`mt-1 min-h-[120px] ${DS_INPUT}`}
                 />
               </label>
-              {editingId && clinicId ? (
-                <CptDetectionPanel
-                  noteId={editingId}
-                  clinicId={clinicId}
-                  initialCodes={draftCptCodes}
-                  onCodesDetected={setDraftCptCodes}
-                />
-              ) : null}
             </div>
             <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-5">
               <button
@@ -1705,6 +1705,13 @@ export default function AdminClinicalNotesPage() {
                   noteId={viewNote.id}
                   clinicId={clinicId}
                   readOnly
+                />
+              ) : null}
+              {clinicId ? (
+                <CptDetectionPanel
+                  noteId={viewNote.id}
+                  clinicId={clinicId}
+                  initialCodes={viewNote.cpt_codes_detected}
                 />
               ) : null}
               <div>
