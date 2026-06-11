@@ -1517,14 +1517,12 @@ export default function AdminClinicalNotesPage() {
                   onSaved={(m) => setToast(m)}
                 />
               ) : null}
-              {editingId && clinicId ? (
-                <CptDetectionPanel
-                  noteId={editingId}
-                  clinicId={clinicId}
-                  initialCodes={draftCptCodes}
-                  onCodesDetected={setDraftCptCodes}
-                />
-              ) : null}
+              <CptDetectionPanel
+                noteId={editingId ?? ""}
+                clinicId={clinicId}
+                initialCodes={draftCptCodes ?? []}
+                onCodesDetected={setDraftCptCodes}
+              />
               <label className="block text-sm font-medium text-gray-700">
                 Assessment — clinical reasoning
                 <textarea
@@ -1707,13 +1705,11 @@ export default function AdminClinicalNotesPage() {
                   readOnly
                 />
               ) : null}
-              {clinicId ? (
-                <CptDetectionPanel
-                  noteId={viewNote.id}
-                  clinicId={clinicId}
-                  initialCodes={viewNote.cpt_codes_detected}
-                />
-              ) : null}
+              <CptDetectionPanel
+                noteId={viewNote.id}
+                clinicId={clinicId}
+                initialCodes={viewNote.cpt_codes_detected ?? []}
+              />
               <div>
                 <p className="text-xs font-semibold uppercase text-gray-500">
                   Assessment
