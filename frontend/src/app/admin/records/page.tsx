@@ -394,7 +394,7 @@ export default function AdminRecordsPage() {
               Fetching…
             </span>
           ) : (
-            "Fetch Notes"
+            "Generate"
           )}
         </button>
 

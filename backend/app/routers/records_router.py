@@ -358,17 +358,37 @@ def list_signed_clinical_notes_for_records(
 
     rows = [r for r in (resp.data or []) if isinstance(r, dict)]
     author_ids = list({str(r.get("author_id") or "") for r in rows if r.get("author_id")})
-    authors = _load_clinic_users_map(author_ids)
+    clinicians_by_id: dict[str, dict[str, Any]] = {}
+    if author_ids:
+        try:
+            cresp = (
+                supabase.table("clinicians")
+                .select("id,first_name,last_name")
+                .in_("id", author_ids)
+                .execute()
+            )
+            _handle_supabase_error(cresp)
+            for crow in cresp.data or []:
+                if isinstance(crow, dict) and crow.get("id"):
+                    clinicians_by_id[str(crow["id"])] = crow
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     out: list[dict[str, Any]] = []
     for r in rows:
         aid = str(r.get("author_id") or "")
+        c = clinicians_by_id.get(aid)
+        fn = str((c or {}).get("first_name") or "").strip()
+        ln = str((c or {}).get("last_name") or "").strip()
+        clinician_name = f"{fn} {ln}".strip() or "Unknown"
         out.append(
             {
                 "id": r.get("id"),
                 "note_date": _note_date_iso(r),
                 "note_type": r.get("note_type"),
-                "clinician_name": _author_display_name(authors.get(aid)),
+                "clinician_name": clinician_name,
                 "status": r.get("status"),
             }
         )
