@@ -45,6 +45,7 @@ from routers import superadmin as superadmin_router
 from routers.fee_schedule import router as fee_schedule_router
 from routers.diagnostic_router import router as diagnostic_router
 from routers.benefits_ledger import router as benefits_ledger_router
+from routers.plan_of_care import router as plan_of_care_router
 
 load_dotenv()
 
@@ -91,6 +92,9 @@ app.include_router(
 )
 app.include_router(
     note_pdf_router.router, prefix="/api", tags=["Clinical Note PDF"]
+)
+app.include_router(
+    plan_of_care_router, prefix="/api", tags=["Plan of Care"]
 )
 app.include_router(
     records_router.router, prefix="/api", tags=["Records"]

@@ -30,6 +30,7 @@ import { SpecialTestsSection } from "@/components/clinical-notes/SpecialTestsSec
 import CptDetectionPanel, {
   type CptCode,
 } from "@/components/CptDetectionPanel";
+import PlanOfCareModal from "@/components/clinical-notes/PlanOfCareModal";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
@@ -152,6 +153,10 @@ function showSpecialTestsForNoteType(noteType: string | null | undefined): boole
   return (noteType ?? "").trim().toLowerCase() !== "daily_note";
 }
 
+function isEvaluationNoteType(noteType: string | null | undefined): boolean {
+  return (noteType ?? "").toLowerCase().includes("evaluation");
+}
+
 function patientDisplayName(p: PatientRow): string {
   const s = `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim();
   return s || "—";
@@ -260,6 +265,7 @@ export default function AdminClinicalNotesPage() {
   const [editorBusy, setEditorBusy] = useState(false);
 
   const [viewNote, setViewNote] = useState<ClinicalNote | null>(null);
+  const [pocNote, setPocNote] = useState<ClinicalNote | null>(null);
   const [exportingNoteId, setExportingNoteId] = useState<string | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
 
@@ -1731,20 +1737,40 @@ export default function AdminClinicalNotesPage() {
                 {viewNote.author_name ? ` · ${viewNote.author_name}` : ""}
               </p>
               {(viewNote.status ?? "").toLowerCase() === "signed" ? (
-                <button
-                  type="button"
-                  onClick={() => void exportNotePdf(viewNote)}
-                  disabled={exportingNoteId === viewNote.id}
-                  className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
-                >
-                  {exportingNoteId === viewNote.id
-                    ? "Exporting…"
-                    : "Download PDF"}
-                </button>
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  {isEvaluationNoteType(viewNote.note_type) ? (
+                    <button
+                      type="button"
+                      onClick={() => setPocNote(viewNote)}
+                      className={DS_SECONDARY_BTN}
+                    >
+                      Plan of Care
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => void exportNotePdf(viewNote)}
+                    disabled={exportingNoteId === viewNote.id}
+                    className="rounded-lg bg-teal-600 px-4 py-2 text-sm font-medium text-white hover:bg-teal-700 disabled:opacity-50"
+                  >
+                    {exportingNoteId === viewNote.id
+                      ? "Exporting…"
+                      : "Download PDF"}
+                  </button>
+                </div>
               ) : null}
             </div>
           </div>
         </div>
+      ) : null}
+
+      {pocNote ? (
+        <PlanOfCareModal
+          note={pocNote}
+          clinicId={clinicId}
+          patientName={pocNote.patient_name}
+          onClose={() => setPocNote(null)}
+        />
       ) : null}
 
       {/* PT Review modal */}
