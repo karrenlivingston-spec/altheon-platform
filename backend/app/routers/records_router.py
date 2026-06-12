@@ -444,7 +444,23 @@ def export_records(
         raise HTTPException(status_code=400, detail="One or more notes were not found or are not signed")
 
     author_ids = list({str(n.get("author_id") or "") for n in notes if n.get("author_id")})
-    authors = _load_clinic_users_map(author_ids)
+    clinicians_by_id: dict[str, dict[str, Any]] = {}
+    if author_ids:
+        try:
+            cresp = (
+                supabase.table("clinicians")
+                .select("id,first_name,last_name")
+                .in_("id", author_ids)
+                .execute()
+            )
+            _handle_supabase_error(cresp)
+            for crow in cresp.data or []:
+                if isinstance(crow, dict) and crow.get("id"):
+                    clinicians_by_id[str(crow["id"])] = crow
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
     notes.sort(key=lambda n: str(n.get("signed_at") or n.get("created_at") or ""))
 
     dates = [_note_date_iso(n) for n in notes if _note_date_iso(n)]
@@ -462,10 +478,14 @@ def export_records(
 
     for note in notes:
         aid = str(note.get("author_id") or "")
+        c = clinicians_by_id.get(aid)
+        fn = str((c or {}).get("first_name") or "").strip()
+        ln = str((c or {}).get("last_name") or "").strip()
+        clinician_name = f"{fn} {ln}".strip() or "Unknown"
         builder.note_section(
             note_type=str(note.get("note_type") or ""),
             note_date=_fmt_date(note.get("signed_at") or note.get("created_at")),
-            clinician_name=_author_display_name(authors.get(aid)),
+            clinician_name=clinician_name,
             subjective=str(note.get("subjective") or ""),
             objective=str(note.get("objective") or ""),
             assessment=str(note.get("assessment") or ""),
