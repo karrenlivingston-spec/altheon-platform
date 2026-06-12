@@ -1738,7 +1738,7 @@ export default function AdminClinicalNotesPage() {
               </p>
               {(viewNote.status ?? "").toLowerCase() === "signed" ? (
                 <div className="flex flex-wrap items-center justify-end gap-2">
-                  {isEvaluationNoteType(viewNote.note_type) ? (
+                  {viewNote.note_type?.toLowerCase().includes("evaluation") ? (
                     <button
                       type="button"
                       onClick={() => setPocNote(viewNote)}
