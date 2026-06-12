@@ -30,6 +30,7 @@ from app.routers import (
     pi_cases as pi_cases_api_router,
     clinical_notes as clinical_notes_api_router,
     note_pdf as note_pdf_router,
+    records_router,
     cpt_detection as cpt_detection_router,
     soap_dictation as soap_dictation_router,
     dme as dme_router,
@@ -89,6 +90,9 @@ app.include_router(
 )
 app.include_router(
     note_pdf_router.router, prefix="/api", tags=["Clinical Note PDF"]
+)
+app.include_router(
+    records_router.router, prefix="/api", tags=["Records"]
 )
 app.include_router(
     cpt_detection_router.router, prefix="/api", tags=["CPT Detection"]

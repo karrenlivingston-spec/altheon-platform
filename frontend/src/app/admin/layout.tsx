@@ -15,6 +15,7 @@ import {
   Receipt,
   Briefcase,
   ClipboardList,
+  FileArchive,
   Phone,
   Building2,
   Settings,
@@ -401,6 +402,19 @@ function AdminAuthenticatedShellInner({
                   aria-hidden
                 />
                 Clinical Notes
+              </span>
+            </Link>
+            <Link
+              href="/admin/records"
+              className={navLinkClass("/admin/records")}
+              onClick={() => setSidebarOpen(false)}
+            >
+              <span className="flex items-center gap-3">
+                <FileArchive
+                  className={navIconClass("/admin/records")}
+                  aria-hidden
+                />
+                Records
               </span>
             </Link>
             <Link
