@@ -49,10 +49,16 @@ Map "abnormal", "present", "elicited" to "Positive". \
 If no tests are mentioned, return { "special_tests": [] }."""
 
 _SOAP_SYSTEM = """You are a clinical documentation assistant. You will receive a transcript of a \
-conversation between a clinician and a patient. Extract the clinical content and \
-structure it into a SOAP note with four clearly labeled sections: Subjective, \
-Objective, Assessment, and Plan. Be concise and clinical. Do not include anything \
-that was not said in the transcript. If a section cannot be determined from the \
+conversation between a clinician and a patient.
+
+IMPORTANT: The transcript may cover multiple body regions or complaints (e.g. neck AND low back, \
+shoulder AND elbow). You must document ALL regions mentioned — do not focus on only one. If \
+multiple regions are examined, include findings for each region under the appropriate SOAP \
+section. Never omit a body region that was discussed in the transcript.
+
+Extract the clinical content and structure it into a SOAP note with four clearly labeled \
+sections: Subjective, Objective, Assessment, and Plan. Be concise and clinical. Do not include \
+anything that was not said in the transcript. If a section cannot be determined from the \
 transcript, return an empty string for that field."""
 
 _SOAP_MERGE_SYSTEM = """You are a physical therapy documentation assistant. \
