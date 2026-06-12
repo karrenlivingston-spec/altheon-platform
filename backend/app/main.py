@@ -44,6 +44,7 @@ from routers import retell_webhook as retell_webhook_router
 from routers import superadmin as superadmin_router
 from routers.fee_schedule import router as fee_schedule_router
 from routers.diagnostic_router import router as diagnostic_router
+from routers.benefits_ledger import router as benefits_ledger_router
 
 load_dotenv()
 
@@ -93,6 +94,9 @@ app.include_router(
 )
 app.include_router(
     records_router.router, prefix="/api", tags=["Records"]
+)
+app.include_router(
+    benefits_ledger_router, prefix="/api", tags=["Benefits Ledger"]
 )
 app.include_router(
     cpt_detection_router.router, prefix="/api", tags=["CPT Detection"]

@@ -25,6 +25,7 @@ import {
 
 import { supabase } from "@/lib/supabase";
 import { PatientGroupsSection } from "@/components/admin/PatientGroupsSection";
+import { InsuranceBenefitsLedger } from "@/components/admin/InsuranceBenefitsLedger";
 import { PatientVisitTimeline } from "@/components/admin/PatientVisitTimeline";
 import { OutcomeMeasuresSection } from "@/components/admin/OutcomeMeasuresSection";
 import { DmeSection } from "@/components/dme/DmeSection";
@@ -39,7 +40,12 @@ const SECONDARY_STAGGER_MS = 200;
 const TAB_ACCENT = "var(--color-primary, #0D9488)";
 
 type PageTab = "overview" | "dme" | "pi-cases" | "imaging-diagnostics";
-type SectionTab = "overview" | "appointments" | "billing" | "membership";
+type SectionTab =
+  | "overview"
+  | "appointments"
+  | "billing"
+  | "membership"
+  | "benefits";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -788,6 +794,7 @@ export function PatientDetailView({
     { id: "appointments", label: "Appointments" },
     { id: "billing", label: "Billing" },
     { id: "membership", label: "Memberships" },
+    { id: "benefits", label: "Benefits" },
   ];
 
   return (
@@ -1511,6 +1518,10 @@ export function PatientDetailView({
             </table>
           </div>
         </div>
+      ) : null}
+
+      {sectionTab === "benefits" ? (
+        <InsuranceBenefitsLedger patientId={patientId} clinicId={clinicId} />
       ) : null}
 
       {sectionTab === "membership" ? (
