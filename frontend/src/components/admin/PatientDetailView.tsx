@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { ChevronDown, ChevronRight, Pencil, Printer } from "lucide-react";
+import { Pencil } from "lucide-react";
 
 import {
   appointmentStatusBadgeClass,
@@ -23,13 +23,9 @@ import {
   piCaseStatusBadgeClass,
 } from "@/app/admin/designSystem";
 
-import {
-  injectIntakePrintStylesAndPrint,
-  intakeMedicalHistoryPills,
-  painDotClass,
-} from "@/lib/intakePrint";
 import { supabase } from "@/lib/supabase";
 import { PatientGroupsSection } from "@/components/admin/PatientGroupsSection";
+import { PatientVisitTimeline } from "@/components/admin/PatientVisitTimeline";
 import { OutcomeMeasuresSection } from "@/components/admin/OutcomeMeasuresSection";
 import { DmeSection } from "@/components/dme/DmeSection";
 import { DiagnosticRedFlagBanner } from "@/components/admin/DiagnosticRedFlagBanner";
@@ -116,22 +112,6 @@ type MembershipRow = {
   membership_tiers?: { name?: string } | { name?: string }[] | null;
 };
 
-type IntakeFormRow = {
-  id: string;
-  appointment_id?: string | null;
-  patient_id?: string | null;
-  chief_complaint?: string | null;
-  pain_scale?: number | null;
-  symptom_duration?: string | null;
-  aggravating_factors?: string | null;
-  relieving_factors?: string | null;
-  medical_history_flags?: unknown;
-  allergies?: string | null;
-  other_conditions?: string | null;
-  goals?: string | null;
-  created_at?: string | null;
-};
-
 type SurveyResponseRow = {
   id: string;
   appointment_id?: string | null;
@@ -194,27 +174,6 @@ function avgScoreColorClass(avg: number): string {
   if (avg >= 4) return "text-green-600";
   if (avg >= 3) return "text-amber-600";
   return "text-red-600";
-}
-
-function formatIntakeSubmittedDate(raw: string | null | undefined): string {
-  if (!raw) return "—";
-  try {
-    return new Intl.DateTimeFormat("en-US", {
-      timeZone: NY,
-      weekday: "short",
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-    }).format(new Date(raw));
-  } catch {
-    return "—";
-  }
-}
-
-function chiefComplaintSummary(text: string | null | undefined, maxLen = 80): string {
-  const s = (text ?? "").trim() || "(No complaint recorded)";
-  if (s.length <= maxLen) return s;
-  return `${s.slice(0, maxLen - 1)}…`;
 }
 
 function formatSurveyDate(row: SurveyResponseRow): string {
@@ -293,190 +252,6 @@ function CardSkeleton({ lines = 3 }: { lines?: number }) {
   );
 }
 
-function PatientIntakeHistoryCard({
-  intake,
-  patientDisplay,
-  expanded,
-  onToggle,
-  printDomId,
-}: {
-  intake: IntakeFormRow;
-  patientDisplay: string;
-  expanded: boolean;
-  onToggle: () => void;
-  printDomId: string;
-}) {
-  const submittedLabel = formatIntakeSubmittedDate(intake.created_at);
-
-  return (
-    <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-      <div className="flex items-stretch gap-2 border-b border-gray-100">
-        <button
-          type="button"
-          onClick={onToggle}
-          className="flex min-w-0 flex-1 items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-gray-50"
-        >
-          <span className="shrink-0 text-gray-400" aria-hidden>
-            {expanded ? (
-              <ChevronDown className="h-4 w-4" />
-            ) : (
-              <ChevronRight className="h-4 w-4" />
-            )}
-          </span>
-          <div className="min-w-0 flex-1">
-            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
-              Submitted {submittedLabel}
-            </p>
-            <p className="mt-0.5 line-clamp-2 text-sm font-medium text-gray-900">
-              {chiefComplaintSummary(intake.chief_complaint)}
-            </p>
-          </div>
-        </button>
-        <div className="flex shrink-0 items-center border-l border-gray-100 pr-3 pl-1">
-          <button
-            type="button"
-            className="intake-print-toolbar-btn inline-flex items-center gap-1.5 rounded-md border border-[#16A34A] px-2.5 py-1 text-xs font-medium text-[#16A34A] hover:bg-green-50"
-            title="Download PDF"
-            aria-label="Download PDF"
-            onClick={(e) => {
-              e.stopPropagation();
-              injectIntakePrintStylesAndPrint(printDomId);
-            }}
-          >
-            <Printer className="size-3.5 shrink-0" aria-hidden />
-            Download PDF
-          </button>
-        </div>
-      </div>
-
-      <div
-        id={printDomId}
-        className={
-          expanded
-            ? ""
-            : "max-h-0 overflow-hidden"
-        }
-      >
-        <div className="intake-print-print-only mb-4 hidden px-4 pt-4 text-center text-base font-semibold text-gray-900">
-          Straight To The Point Dry Needling
-        </div>
-        <div className="px-4 pt-4">
-          <p className="text-sm font-semibold text-gray-900">{patientDisplay}</p>
-          <p className="intake-print-field-value intake-print-meta-line mt-1 text-xs text-gray-600">
-            Submitted {submittedLabel}
-          </p>
-        </div>
-
-        <section className="mx-4 mb-4 mt-4 rounded-lg border border-gray-200 bg-white">
-          <header className="border-l-4 border-[#16A34A] bg-gray-50 px-4 py-3">
-            <h3 className="intake-print-doc-title text-sm font-semibold text-gray-900">
-              Pre-Visit Intake Summary
-            </h3>
-          </header>
-          <div className="space-y-3 px-4 py-4">
-            <div className="intake-print-field-row">
-              <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-gray-500">
-                Chief Complaint
-              </p>
-              <p className="intake-print-field-value mt-1 text-sm font-semibold text-gray-900">
-                {intake.chief_complaint?.trim() || "Not provided"}
-              </p>
-            </div>
-            <div className="intake-print-field-row">
-              <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-gray-500">
-                Pain Scale
-              </p>
-              <div className="intake-print-field-value mt-1 flex items-center gap-2 text-sm text-gray-900">
-                <span
-                  className={`h-2.5 w-2.5 rounded-full ${painDotClass(intake.pain_scale)}`}
-                  aria-hidden
-                />
-                <span>
-                  {intake.pain_scale != null
-                    ? `${intake.pain_scale} / 10`
-                    : "Not provided"}
-                </span>
-              </div>
-            </div>
-            <div className="intake-print-field-row">
-              <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-gray-500">
-                Symptom Duration
-              </p>
-              <p className="intake-print-field-value mt-1 text-sm text-gray-900">
-                {intake.symptom_duration?.trim() || "Not provided"}
-              </p>
-            </div>
-            <div className="intake-print-field-row">
-              <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-gray-500">
-                Aggravating Factors
-              </p>
-              <p className="intake-print-field-value mt-1 text-sm text-gray-900">
-                {intake.aggravating_factors?.trim() || "Not provided"}
-              </p>
-            </div>
-            <div className="intake-print-field-row">
-              <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-gray-500">
-                Relieving Factors
-              </p>
-              <p className="intake-print-field-value mt-1 text-sm text-gray-900">
-                {intake.relieving_factors?.trim() || "Not provided"}
-              </p>
-            </div>
-            <div className="intake-print-field-row">
-              <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-gray-500">
-                Medical History Flags
-              </p>
-              <div className="intake-print-field-value mt-1 flex flex-wrap gap-2">
-                {(() => {
-                  const pills = intakeMedicalHistoryPills(
-                    intake.medical_history_flags,
-                  );
-                  if (!pills.length) {
-                    return (
-                      <span className="text-sm text-gray-500">None reported</span>
-                    );
-                  }
-                  return pills.map((pill, idx) => (
-                    <span
-                      key={`${pill}-${idx}`}
-                      className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-xs text-gray-700"
-                    >
-                      {pill}
-                    </span>
-                  ));
-                })()}
-              </div>
-            </div>
-            <div className="intake-print-field-row">
-              <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-gray-500">
-                Allergies
-              </p>
-              <p className="intake-print-field-value mt-1 text-sm text-gray-900">
-                {intake.allergies?.trim() || "Not provided"}
-              </p>
-            </div>
-            <div className="intake-print-field-row">
-              <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-gray-500">
-                Goals
-              </p>
-              <p className="intake-print-field-value mt-1 text-sm text-gray-900">
-                {intake.goals?.trim() || "Not provided"}
-              </p>
-            </div>
-          </div>
-          <footer className="border-t border-gray-100 px-4 py-2 text-xs text-gray-500">
-            Submitted {submittedLabel}
-          </footer>
-        </section>
-
-        <div className="intake-print-print-only intake-print-confidential-footer mx-4 mb-4 hidden px-2 text-center text-xs text-gray-600">
-          Confidential — Clinical Use Only
-        </div>
-      </div>
-    </div>
-  );
-}
-
 async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token ?? "";
@@ -505,11 +280,6 @@ export function PatientDetailView({
   const [membershipRows, setMembershipRows] = useState<MembershipRow[]>([]);
   const [piRows, setPiRows] = useState<PiCaseRow[]>([]);
   const [surveyRows, setSurveyRows] = useState<SurveyResponseRow[]>([]);
-  const [intakeForms, setIntakeForms] = useState<IntakeFormRow[]>([]);
-  const [intakesLoading, setIntakesLoading] = useState(false);
-  const [intakesFetchError, setIntakesFetchError] = useState<string | null>(null);
-  const [expandedIntakeIds, setExpandedIntakeIds] = useState<Set<string>>(() => new Set());
-
   const [appointmentsLoading, setAppointmentsLoading] = useState(false);
   const [appointmentsError, setAppointmentsError] = useState<string | null>(null);
   const [billingLoading, setBillingLoading] = useState(false);
@@ -548,13 +318,10 @@ export function PatientDetailView({
       setBillingRows([]);
       setMembershipRows([]);
       setSurveyRows([]);
-      setIntakeForms([]);
-      setExpandedIntakeIds(new Set());
       setAppointmentsError(null);
       setBillingError(null);
       setMembershipError(null);
       setSurveysError(null);
-      setIntakesFetchError(null);
 
       const h = await authHeaders();
 
@@ -676,44 +443,6 @@ export function PatientDetailView({
         if (!isCancelled()) setSurveysLoading(false);
       }
 
-      await sleep(SECONDARY_STAGGER_MS);
-      if (isCancelled()) return;
-
-      setIntakesLoading(true);
-      try {
-        const res = await fetch(
-          `${API_BASE}/intake/patient/${encodeURIComponent(patientId)}`,
-          { headers: h },
-        );
-        if (isCancelled()) return;
-        if (!res.ok) {
-          const t = await res.text().catch(() => "");
-          setIntakesFetchError(
-            res.status === 401 || res.status === 403
-              ? "Sign in required to load intake history."
-              : t.trim() || `Could not load intakes (${res.status})`,
-          );
-          setIntakeForms([]);
-          return;
-        }
-        const json = (await res.json()) as { intakes?: unknown };
-        const list = Array.isArray(json.intakes)
-          ? (json.intakes as IntakeFormRow[])
-          : [];
-        setIntakeForms(list);
-        if (list.length > 0) {
-          const firstPid = String(list[0].id ?? "").trim();
-          const firstKey = firstPid || "row-0";
-          setExpandedIntakeIds(new Set([firstKey]));
-        }
-      } catch {
-        if (!isCancelled()) {
-          setIntakesFetchError("Could not load intake history.");
-          setIntakeForms([]);
-        }
-      } finally {
-        if (!isCancelled()) setIntakesLoading(false);
-      }
     },
     [patientId, clinicId],
   );
@@ -821,15 +550,6 @@ export function PatientDetailView({
     setPiCasesEverOpened(true);
     void loadPiCases();
   }, [pageTab, patientReady, piCasesEverOpened, loadPiCases]);
-
-  function toggleIntakeExpanded(id: string) {
-    setExpandedIntakeIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  }
 
   const activeMembership = useMemo(() => {
     const active = membershipRows.find(
@@ -1665,41 +1385,12 @@ export function PatientDetailView({
           </div>
 
           <div className={`md:col-span-2 ${DS_CARD}`}>
-            <h2 className={DS_SECTION_HEADER}>Intake History</h2>
-            {intakesLoading ? (
-              <div className="mt-4 space-y-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <div key={i} className={`h-16 w-full ${SKELETON_PULSE}`} />
-                ))}
-              </div>
-            ) : intakesFetchError ? (
-              <p className="mt-4 text-sm text-amber-800">{intakesFetchError}</p>
-            ) : intakeForms.length === 0 ? (
-              <p className="mt-4 text-sm text-gray-500">
-                No intake forms on file yet
-              </p>
-            ) : (
-              <div className="mt-4 space-y-3">
-                {intakeForms.map((row, idx) => {
-                  const pid = String(row.id ?? "").trim();
-                  const fallbackKey = `row-${idx}`;
-                  const toggleKey = pid || fallbackKey;
-                  const domId = `intake-print-${toggleKey}`;
-                  return (
-                    <PatientIntakeHistoryCard
-                      key={toggleKey}
-                      intake={row}
-                      patientDisplay={patientDisplayName(patient)}
-                      expanded={expandedIntakeIds.has(toggleKey)}
-                      printDomId={domId}
-                      onToggle={() => {
-                        toggleIntakeExpanded(toggleKey);
-                      }}
-                    />
-                  );
-                })}
-              </div>
-            )}
+            <h2 className={DS_SECTION_HEADER}>Visit Timeline</h2>
+            <PatientVisitTimeline
+              patientId={patientId}
+              clinicId={clinicId}
+              patientDisplayName={patientDisplayName(patient)}
+            />
           </div>
         </div>
       ) : null}
