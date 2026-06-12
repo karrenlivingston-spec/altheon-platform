@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2 } from "lucide-react";
 
 import { DS_PAGE_ROOT, DS_PAGE_SUBTITLE, DS_PAGE_TITLE } from "@/app/admin/designSystem";
 import { useClinic } from "@/app/admin/ClinicContext";
@@ -30,13 +29,41 @@ async function authHeaders(): Promise<Record<string, string>> {
 }
 
 function headerSubtitle(): string {
-  const line = new Intl.DateTimeFormat("en-US", {
+  return new Intl.DateTimeFormat("en-US", {
     timeZone: NY,
     weekday: "long",
     month: "long",
     day: "numeric",
   }).format(new Date());
-  return line;
+}
+
+function SkeletonBlock({ className }: { className: string }) {
+  return <div className={`animate-pulse rounded-xl bg-gray-200 ${className}`} />;
+}
+
+function DashboardSkeleton() {
+  return (
+    <>
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-4">
+        <div className="space-y-6 lg:col-span-2">
+          <SkeletonBlock className="h-72" />
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <SkeletonBlock className="h-56" />
+            <SkeletonBlock className="h-56" />
+          </div>
+        </div>
+        <div className="space-y-6">
+          <SkeletonBlock className="h-64" />
+          <SkeletonBlock className="h-72" />
+        </div>
+        <div className="space-y-6">
+          <SkeletonBlock className="h-80" />
+          <SkeletonBlock className="h-64" />
+        </div>
+      </div>
+      <SkeletonBlock className="mt-6 h-44" />
+    </>
+  );
 }
 
 export default function AdminOverviewPage() {
@@ -45,42 +72,47 @@ export default function AdminOverviewPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchSummary = useCallback(async () => {
-    if (!clinicId) return;
-    try {
-      const res = await fetch(
-        `${API_BASE}/api/dashboard/summary?clinic_id=${encodeURIComponent(clinicId)}`,
-        { headers: await authHeaders() },
-      );
-      if (!res.ok) {
-        const errJson = (await res.json().catch(() => null)) as {
-          detail?: string;
-        } | null;
-        throw new Error(
-          typeof errJson?.detail === "string"
-            ? errJson.detail
-            : `Failed to load dashboard (${res.status})`,
+  const fetchSummary = useCallback(
+    async (opts?: { silent?: boolean }) => {
+      if (!clinicId) return;
+      if (!opts?.silent) setLoading(true);
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/dashboard/summary?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers: await authHeaders() },
         );
+        if (!res.ok) {
+          const errJson = (await res.json().catch(() => null)) as {
+            detail?: string;
+          } | null;
+          throw new Error(
+            typeof errJson?.detail === "string"
+              ? errJson.detail
+              : `Failed to load dashboard (${res.status})`,
+          );
+        }
+        const json = (await res.json()) as DashboardSummary;
+        setData(json);
+        setError(null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Failed to load dashboard");
+        if (!opts?.silent) setData(null);
+      } finally {
+        setLoading(false);
       }
-      const json = (await res.json()) as DashboardSummary;
-      setData(json);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load dashboard");
-      setData(null);
-    } finally {
-      setLoading(false);
-    }
-  }, [clinicId]);
+    },
+    [clinicId],
+  );
 
   useEffect(() => {
-    setLoading(true);
     void fetchSummary();
     const interval = setInterval(() => {
-      void fetchSummary();
+      void fetchSummary({ silent: true });
     }, 60000);
     return () => clearInterval(interval);
   }, [fetchSummary]);
+
+  const showSkeleton = loading && !data;
 
   return (
     <div className={DS_PAGE_ROOT}>
@@ -95,13 +127,10 @@ export default function AdminOverviewPage() {
         </div>
       ) : null}
 
-      <StatBar data={data} loading={loading} />
+      <StatBar data={data} loading={showSkeleton} />
 
-      {loading && !data ? (
-        <div className="mt-8 flex items-center justify-center gap-2 text-sm text-gray-500">
-          <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-          Loading dashboard…
-        </div>
+      {showSkeleton ? (
+        <DashboardSkeleton />
       ) : data ? (
         <>
           <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-4">
