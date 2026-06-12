@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, Printer } from "lucide-react";
 
 import {
@@ -435,92 +435,101 @@ export function PatientVisitTimeline({
   const [viewNote, setViewNote] = useState<ClinicalNoteRow | null>(null);
   const [viewNoteLoading, setViewNoteLoading] = useState(false);
 
-  const loadTimeline = useCallback(async () => {
+  useEffect(() => {
     if (!patientId || !clinicId) return;
+
+    const controller = new AbortController();
+    const { signal } = controller;
+
     setLoading(true);
     setFetchError(null);
     setItems([]);
     setExpandedDates(new Set());
     setExpandedIntakeIds(new Set());
 
-    try {
-      const h = await authHeaders();
-      const [intakeRes, notesRes] = await Promise.all([
-        fetch(`${API_BASE}/intake/patient/${encodeURIComponent(patientId)}`, {
-          headers: h,
-        }),
-        fetch(
-          `${API_BASE}/api/patients/${encodeURIComponent(patientId)}/clinical-notes`,
-          { headers: h },
-        ),
-      ]);
+    void (async () => {
+      try {
+        const h = await authHeaders();
+        const [intakeRes, notesRes] = await Promise.all([
+          fetch(`${API_BASE}/intake/patient/${encodeURIComponent(patientId)}`, {
+            headers: h,
+            signal,
+          }),
+          fetch(
+            `${API_BASE}/api/patients/${encodeURIComponent(patientId)}/clinical-notes`,
+            { headers: h, signal },
+          ),
+        ]);
 
-      const timelineItems: TimelineItem[] = [];
+        if (signal.aborted) return;
 
-      if (intakeRes.ok) {
-        const intakeJson = (await intakeRes.json()) as { intakes?: unknown };
-        const intakes = Array.isArray(intakeJson.intakes)
-          ? (intakeJson.intakes as IntakeFormRow[])
-          : [];
-        for (const intake of intakes) {
-          const rawDate = intake.submitted_at ?? intake.created_at;
-          const dateKey = toDateKey(rawDate);
-          if (!dateKey) continue;
-          const id = String(intake.id ?? "").trim() || `intake-${dateKey}`;
-          timelineItems.push({
-            kind: "intake",
-            id,
-            dateKey,
-            sortTs: toSortTs(rawDate),
-            intake,
-          });
+        const timelineItems: TimelineItem[] = [];
+
+        if (intakeRes.ok) {
+          const intakeJson = (await intakeRes.json()) as { intakes?: unknown };
+          const intakes = Array.isArray(intakeJson.intakes)
+            ? (intakeJson.intakes as IntakeFormRow[])
+            : [];
+          for (const intake of intakes) {
+            const rawDate = intake.submitted_at ?? intake.created_at;
+            const dateKey = toDateKey(rawDate);
+            if (!dateKey) continue;
+            const id = String(intake.id ?? "").trim() || `intake-${dateKey}`;
+            timelineItems.push({
+              kind: "intake",
+              id,
+              dateKey,
+              sortTs: toSortTs(rawDate),
+              intake,
+            });
+          }
         }
-      }
 
-      if (notesRes.ok) {
-        const notesJson = await notesRes.json();
-        const notes = Array.isArray(notesJson) ? (notesJson as ClinicalNoteRow[]) : [];
-        for (const note of notes) {
-          const rawDate = note.signed_at ?? note.created_at;
-          const dateKey = toDateKey(rawDate);
-          if (!dateKey) continue;
-          timelineItems.push({
-            kind: "note",
-            id: String(note.id),
-            dateKey,
-            sortTs: toSortTs(rawDate),
-            note,
-          });
+        if (notesRes.ok) {
+          const notesJson = await notesRes.json();
+          const notes = Array.isArray(notesJson)
+            ? (notesJson as ClinicalNoteRow[])
+            : [];
+          for (const note of notes) {
+            const rawDate = note.signed_at ?? note.created_at;
+            const dateKey = toDateKey(rawDate);
+            if (!dateKey) continue;
+            timelineItems.push({
+              kind: "note",
+              id: String(note.id),
+              dateKey,
+              sortTs: toSortTs(rawDate),
+              note,
+            });
+          }
         }
-      } else if (!intakeRes.ok) {
-        const detail = await notesRes.text().catch(() => "");
-        throw new Error(
-          intakeRes.status === 401 || intakeRes.status === 403
-            ? "Sign in required to load visit timeline."
-            : detail.trim() || "Could not load visit timeline.",
+
+        if (signal.aborted) return;
+
+        setItems(timelineItems);
+        const dateKeys = [
+          ...new Set(timelineItems.map((i) => i.dateKey)),
+        ].sort((a, b) => b.localeCompare(a));
+        if (dateKeys.length > 0) {
+          setExpandedDates(new Set([dateKeys[0]]));
+        }
+      } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") return;
+        if (e instanceof DOMException && e.name === "AbortError") return;
+        if (signal.aborted) return;
+        setFetchError(
+          e instanceof Error ? e.message : "Could not load visit timeline.",
         );
+        setItems([]);
+      } finally {
+        if (!signal.aborted) setLoading(false);
       }
+    })();
 
-      setItems(timelineItems);
-      const dateKeys = [
-        ...new Set(timelineItems.map((i) => i.dateKey)),
-      ].sort((a, b) => b.localeCompare(a));
-      if (dateKeys.length > 0) {
-        setExpandedDates(new Set([dateKeys[0]]));
-      }
-    } catch (e) {
-      setFetchError(
-        e instanceof Error ? e.message : "Could not load visit timeline.",
-      );
-      setItems([]);
-    } finally {
-      setLoading(false);
-    }
+    return () => {
+      controller.abort();
+    };
   }, [patientId, clinicId]);
-
-  useEffect(() => {
-    void loadTimeline();
-  }, [loadTimeline]);
 
   const groupedByDate = useMemo(() => {
     const map = new Map<string, TimelineItem[]>();
