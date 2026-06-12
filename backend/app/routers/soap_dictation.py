@@ -250,6 +250,30 @@ def _normalize_test_result(raw: Any) -> Optional[str]:
     return None
 
 
+def _detect_body_region(transcript: str) -> Optional[str]:
+    """Infer body region from transcript keywords."""
+    LUMBAR_CONTEXT_TERMS = [
+        "lower back",
+        "lumbar",
+        "l4",
+        "l5",
+        "si joint",
+        "sacral",
+        "sciatic",
+        "lumbosacral",
+    ]
+
+    SLUMP_TEST_TERMS = ["slump test", "slump"]
+
+    transcript_lower = transcript.lower()
+
+    if any(term in transcript_lower for term in SLUMP_TEST_TERMS):
+        if any(term in transcript_lower for term in LUMBAR_CONTEXT_TERMS):
+            return "Lumbar Spine"
+
+    return None
+
+
 def _extract_json_payload(text: str) -> dict[str, Any]:
     text = (text or "").strip()
     if not text:
@@ -492,6 +516,7 @@ async def transcribe_and_generate(
     nid = (note_id or "").strip()
 
     transcript = await _transcribe_upload(audio)
+    body_region = _detect_body_region(transcript)
 
     existing_note = _fetch_clinical_note(nid) if nid else None
     merge_existing = _should_merge_soap(existing_note)
@@ -532,6 +557,7 @@ async def transcribe_and_generate(
 
     return {
         "transcript": transcript,
+        "body_region": body_region,
         "subjective": sections["subjective"],
         "objective": sections["objective"],
         "assessment": sections["assessment"],
