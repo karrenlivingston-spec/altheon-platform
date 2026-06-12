@@ -45,6 +45,18 @@ async function authHeaders(): Promise<Record<string, string>> {
   return h;
 }
 
+function formatDob(value: string | null | undefined): string {
+  const s = String(value ?? "").trim();
+  if (!s) return "";
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
+  const d = new Date(s.includes("T") ? s : `${s}T12:00:00`);
+  if (Number.isNaN(d.getTime())) return "";
+  const mo = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${mo}/${day}/${d.getFullYear()}`;
+}
+
 function formatAppointmentWhen(startIso: string, typeLabel: string): string {
   try {
     const d = new Date(startIso);
@@ -111,6 +123,7 @@ export default function AppointmentPopup({
   const [diagnosis, setDiagnosis] = useState(
     appointment.diagnosis_code?.trim() || "",
   );
+  const [dob, setDob] = useState("");
 
   const status = (appointment.status || "").toLowerCase();
   const showCheckIn = status !== "checked_in" && status !== "completed";
@@ -121,9 +134,9 @@ export default function AppointmentPopup({
     void (async () => {
       try {
         const h = await authHeaders();
-        const [insRes, apptRes] = await Promise.all([
+        const [patientRes, apptRes] = await Promise.all([
           fetch(
-            `${API_BASE}/patients/${encodeURIComponent(appointment.patient_id)}/insurance?clinic_id=${encodeURIComponent(clinicId)}`,
+            `${API_BASE}/patients/${encodeURIComponent(appointment.patient_id)}?clinic_id=${encodeURIComponent(clinicId)}`,
             { headers: h },
           ),
           appointment.diagnosis_code
@@ -133,12 +146,15 @@ export default function AppointmentPopup({
                 { headers: h },
               ),
         ]);
-        if (!cancelled && insRes?.ok) {
-          const insJson = (await insRes.json()) as {
+        if (!cancelled && patientRes?.ok) {
+          const patientJson = (await patientRes.json()) as {
             insurance_carrier?: string | null;
+            date_of_birth?: string | null;
           };
-          const carrier = String(insJson.insurance_carrier ?? "").trim();
+          const carrier = String(patientJson.insurance_carrier ?? "").trim();
           if (carrier) setInsurance(carrier);
+          const formattedDob = formatDob(patientJson.date_of_birth);
+          if (formattedDob) setDob(formattedDob);
         }
         if (!cancelled && apptRes?.ok) {
           const apptJson = (await apptRes.json()) as {
@@ -242,6 +258,7 @@ export default function AppointmentPopup({
         <div className="space-y-3 px-4 py-3">
           <InfoRow label="Appointment" value={apptWhen} />
           <InfoRow label="Clinician" value={appointment.clinician_name} />
+          <InfoRow label="DOB" value={dob || "—"} />
           <InfoRow label="Insurance" value={insurance || "—"} />
           <InfoRow label="Diagnosis" value={diagnosis || "—"} />
         </div>
