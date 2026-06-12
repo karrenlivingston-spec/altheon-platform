@@ -71,6 +71,27 @@ export default function AdminPatientsPage() {
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<{
+    patientId: string;
+    x: number;
+    y: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    function closeMenu() {
+      setContextMenu(null);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") closeMenu();
+    }
+    window.addEventListener("mousedown", closeMenu);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("mousedown", closeMenu);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [contextMenu]);
 
   useEffect(() => {
     let cancelled = false;
@@ -193,6 +214,14 @@ export default function AdminPatientsPage() {
                     <button
                       type="button"
                       onClick={() => setSelectedId(p.id)}
+                      onContextMenu={(e) => {
+                        e.preventDefault();
+                        setContextMenu({
+                          patientId: p.id,
+                          x: e.clientX,
+                          y: e.clientY,
+                        });
+                      }}
                       className={`flex w-full gap-3 px-4 py-3 text-left transition-colors hover:bg-[rgba(22,163,74,0.06)] ${
                         selected
                           ? "border-l-[3px] border-l-[#16A34A] bg-[rgba(22,163,74,0.12)]"
@@ -256,6 +285,25 @@ export default function AdminPatientsPage() {
           />
         )}
       </section>
+
+      {contextMenu ? (
+        <div
+          className="fixed z-50 min-w-[168px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            type="button"
+            className="w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-gray-50"
+            onClick={() => {
+              window.open(`/admin/patients/${contextMenu.patientId}`, "_blank");
+              setContextMenu(null);
+            }}
+          >
+            Open in new tab
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
