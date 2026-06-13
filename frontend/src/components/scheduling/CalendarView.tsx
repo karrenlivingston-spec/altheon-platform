@@ -111,7 +111,8 @@ type BookingPrefill = {
   patient?: PatientOption | null;
 };
 
-type ViewMode = "day" | "week" | "month";
+type ViewMode = "day" | "week" | "month" | "agenda";
+export type { ViewMode };
 type PatientOption = {
   id: string;
   first_name?: string | null;
@@ -364,14 +365,78 @@ function overlapsRange(
 type CalendarViewProps = {
   clinicId: string;
   openBookingNonce?: number;
+  openBlockNonce?: number;
+  hideToolbar?: boolean;
+  hideCalendarGrid?: boolean;
+  view?: ViewMode;
+  onViewChange?: (view: ViewMode) => void;
+  anchorYmd?: string;
+  onAnchorYmdChange?: (ymd: string) => void;
+  providerId?: string;
+  onProviderIdChange?: (id: string) => void;
+  locationId?: string;
+  onLocationIdChange?: (id: string) => void;
+  openAppointmentId?: string;
+  onOpenAppointmentHandled?: () => void;
 };
 
-export default function CalendarView({ clinicId, openBookingNonce = 0 }: CalendarViewProps) {
+export default function CalendarView({
+  clinicId,
+  openBookingNonce = 0,
+  openBlockNonce = 0,
+  hideToolbar = false,
+  hideCalendarGrid = false,
+  view: controlledView,
+  onViewChange,
+  anchorYmd: controlledAnchorYmd,
+  onAnchorYmdChange,
+  providerId: controlledProviderId,
+  onProviderIdChange,
+  locationId: controlledLocationId,
+  onLocationIdChange,
+  openAppointmentId,
+  onOpenAppointmentHandled,
+}: CalendarViewProps) {
   const router = useRouter();
-  const [view, setView] = useState<ViewMode>("week");
-  const [anchorYmd, setAnchorYmd] = useState(() => getEasternYMD(new Date()));
-  const [providerId, setProviderId] = useState<string>("");
-  const [locationId, setLocationId] = useState<string>("");
+  const [internalView, setInternalView] = useState<ViewMode>("week");
+  const [internalAnchorYmd, setInternalAnchorYmd] = useState(() => getEasternYMD(new Date()));
+  const [internalProviderId, setInternalProviderId] = useState<string>("");
+  const [internalLocationId, setInternalLocationId] = useState<string>("");
+
+  const view = controlledView ?? internalView;
+  const setView = useCallback(
+    (v: ViewMode) => {
+      if (onViewChange) onViewChange(v);
+      else setInternalView(v);
+    },
+    [onViewChange],
+  );
+  const anchorYmd = controlledAnchorYmd ?? internalAnchorYmd;
+  const setAnchorYmd = useCallback(
+    (ymd: string | ((prev: string) => string)) => {
+      const next = typeof ymd === "function" ? ymd(anchorYmd) : ymd;
+      if (onAnchorYmdChange) onAnchorYmdChange(next);
+      else setInternalAnchorYmd(next);
+    },
+    [anchorYmd, onAnchorYmdChange],
+  );
+  const providerId = controlledProviderId ?? internalProviderId;
+  const setProviderId = useCallback(
+    (id: string) => {
+      if (onProviderIdChange) onProviderIdChange(id);
+      else setInternalProviderId(id);
+    },
+    [onProviderIdChange],
+  );
+  const locationId = controlledLocationId ?? internalLocationId;
+  const setLocationId = useCallback(
+    (id: string) => {
+      if (onLocationIdChange) onLocationIdChange(id);
+      else setInternalLocationId(id);
+    },
+    [onLocationIdChange],
+  );
+
   const [clinicians, setClinicians] = useState<ClinicianRow[]>([]);
   const [locations, setLocations] = useState<LocationRow[]>([]);
   const [appointments, setAppointments] = useState<CalendarAppointment[]>([]);
@@ -407,14 +472,15 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
   const [todayYmd, setTodayYmd] = useState(() => getEasternYMD(new Date()));
 
   useLayoutEffect(() => {
+    if (controlledAnchorYmd !== undefined) return;
     const ymd = getEasternYMD(new Date());
-    setAnchorYmd(ymd);
+    setInternalAnchorYmd(ymd);
     setTodayYmd(ymd);
-  }, []);
+  }, [controlledAnchorYmd]);
 
   const range = useMemo(() => {
     if (view === "day") return { start: anchorYmd, end: anchorYmd };
-    if (view === "week") {
+    if (view === "week" || view === "agenda") {
       const mon = findMondayYmdOfWeekContaining(anchorYmd);
       return { start: mon, end: addDaysToYmd(mon, 6) };
     }
@@ -541,7 +607,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
         year: "numeric",
       }).format(d);
     }
-    if (view === "week") {
+    if (view === "week" || view === "agenda") {
       const mon = findMondayYmdOfWeekContaining(anchorYmd);
       const sun = addDaysToYmd(mon, 6);
       const monD = new Date(`${mon}T12:00:00`);
@@ -558,7 +624,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
 
   function navigatePrev() {
     if (view === "day") setAnchorYmd((y) => addDaysToYmd(y, -1));
-    else if (view === "week") setAnchorYmd((y) => addDaysToYmd(y, -7));
+    else if (view === "week" || view === "agenda") setAnchorYmd((y) => addDaysToYmd(y, -7));
     else {
       const [yy, mm] = anchorYmd.split("-").map(Number);
       const d = new Date(yy, mm - 2, 1);
@@ -568,7 +634,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
 
   function navigateNext() {
     if (view === "day") setAnchorYmd((y) => addDaysToYmd(y, 1));
-    else if (view === "week") setAnchorYmd((y) => addDaysToYmd(y, 7));
+    else if (view === "week" || view === "agenda") setAnchorYmd((y) => addDaysToYmd(y, 7));
     else {
       const [yy, mm] = anchorYmd.split("-").map(Number);
       const d = new Date(yy, mm, 1);
@@ -827,9 +893,31 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
     detailIntake != null;
 
   useEffect(() => {
+    if (!openAppointmentId || openAppointmentId.startsWith("block-")) return;
+    const appt = appointments.find((a) => a.id === openAppointmentId);
+    if (appt) {
+      setPopupAppt(appt);
+      setPopupAnchor(new DOMRect(window.innerWidth / 2, 160, 0, 0));
+    }
+    onOpenAppointmentHandled?.();
+  }, [openAppointmentId, appointments, onOpenAppointmentHandled]);
+
+  useEffect(() => {
     if (openBookingNonce <= 0) return;
     setBookModalOpen(true);
   }, [openBookingNonce]);
+
+  useEffect(() => {
+    if (openBlockNonce <= 0) return;
+    const ymd = anchorYmd || getEasternYMD(new Date());
+    const clinicianId = providerId || clinicians[0]?.id || "";
+    if (!clinicianId) return;
+    setBlockTimeContext({
+      ymd,
+      clinicianId,
+      slotIndex: 0,
+    });
+  }, [openBlockNonce, anchorYmd, providerId, clinicians]);
 
   useEffect(() => {
     return () => {
@@ -880,6 +968,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
 
   return (
     <div className="space-y-4">
+      {!hideToolbar ? (
       <div className="flex flex-col gap-4 rounded-xl border border-black/10 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.08)] lg:flex-row lg:items-center lg:justify-between">
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-2">
@@ -941,8 +1030,9 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
           </select>
         </div>
       </div>
+      ) : null}
 
-      {undo ? (
+      {!hideCalendarGrid && undo ? (
         <div className="flex items-center justify-between rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
           <span>Appointment moved.</span>
           <button
@@ -959,7 +1049,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
         </div>
       ) : null}
 
-      {loading ? (
+      {!hideCalendarGrid && (loading ? (
         <div className="flex min-h-[280px] flex-col items-center justify-center gap-3 rounded-xl border border-slate-200 bg-white p-10 text-center">
           <span
             className="inline-block size-8 animate-spin rounded-full border-2 border-slate-200 border-t-[#16A34A]"
@@ -1018,6 +1108,46 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
           sensors={sensors}
           activeDrag={activeDrag}
         />
+      ) : view === "agenda" ? (
+        <div className="rounded-xl border border-slate-200 bg-white p-4">
+          <div className="space-y-2">
+            {[...filteredAppointments]
+              .sort(
+                (a, b) =>
+                  Date.parse(a.start_time) - Date.parse(b.start_time),
+              )
+              .map((appt) => (
+                <button
+                  key={appt.id}
+                  type="button"
+                  onClick={(e) => handleApptCardClick(appt, e.currentTarget.getBoundingClientRect())}
+                  className="flex w-full items-center justify-between rounded-lg border border-gray-100 px-4 py-3 text-left hover:bg-gray-50"
+                >
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">
+                      {patientFull(appt)}
+                    </p>
+                    <p className="text-xs text-gray-500">
+                      {appt.treatment_type.name ?? "Visit"} ·{" "}
+                      {formatInTimeZone(
+                        toDate(appt.start_time),
+                        NY,
+                        "EEE MMM d · h:mm a",
+                      )}
+                    </p>
+                  </div>
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs capitalize text-gray-700">
+                    {(appt.status ?? "scheduled").replace(/_/g, " ")}
+                  </span>
+                </button>
+              ))}
+            {filteredAppointments.length === 0 ? (
+              <p className="py-8 text-center text-sm text-gray-500">
+                No appointments in this range.
+              </p>
+            ) : null}
+          </div>
+        </div>
       ) : (
         <MonthGrid
           anchorYmd={anchorYmd}
@@ -1028,7 +1158,7 @@ export default function CalendarView({ clinicId, openBookingNonce = 0 }: Calenda
             setView("day");
           }}
         />
-      )}
+      ))}
 
       {slotAction ? (
         <SlotActionMenu

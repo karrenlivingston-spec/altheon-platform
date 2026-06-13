@@ -29,6 +29,7 @@ from app.routers import (
     intake as intake_router,
     pi_cases as pi_cases_api_router,
     clinical_notes as clinical_notes_api_router,
+    appointments_dashboard as appointments_dashboard_router,
     note_pdf as note_pdf_router,
     records_router,
     cpt_detection as cpt_detection_router,
@@ -72,6 +73,11 @@ app.add_middleware(
 app.include_router(slots.router, prefix="/slots", tags=["slots"])
 app.include_router(measurements_router.router, prefix="")
 app.include_router(outcome_measures_router.router, prefix="")
+app.include_router(
+    appointments_dashboard_router.router,
+    prefix="/api/appointments",
+    tags=["appointments-dashboard"],
+)
 app.include_router(appointments.router, prefix="/appointments", tags=["appointments"])
 app.include_router(availability.router, tags=["availability"])
 app.include_router(patients.router, prefix="/patients", tags=["patients"])
