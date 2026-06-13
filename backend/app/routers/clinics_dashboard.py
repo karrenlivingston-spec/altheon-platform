@@ -128,6 +128,78 @@ def _clinic_address(row: dict[str, Any]) -> str:
     return addr or "—"
 
 
+def _sum_billing_payments(
+    clinic_id: str,
+    month_start: date,
+    today: date,
+    *,
+    record_ids: Optional[list[str]] = None,
+    range_start: Optional[date] = None,
+    range_end: Optional[date] = None,
+) -> tuple[float, dict[str, float]]:
+    """Sum payment amounts in dollars for a clinic; returns (total, daily_map)."""
+    start = range_start or month_start
+    end = range_end or today
+    first_of_month = f"{month_start.isoformat()}T00:00:00"
+    daily: dict[str, float] = {}
+    collected = 0.0
+
+    for col in ("amount_paid", "amount", "total_amount"):
+        try:
+            res = (
+                supabase.table("billing_payments")
+                .select(f"{col}, created_at, payment_date, billing_record_id, clinic_id")
+                .eq("clinic_id", clinic_id)
+                .gte("created_at", first_of_month)
+                .execute()
+            )
+            if getattr(res, "error", None):
+                continue
+            rows = [r for r in (res.data or []) if isinstance(r, dict)]
+            for r in rows:
+                pd = _parse_date(r.get("payment_date") or r.get("created_at"))
+                if pd and not (start <= pd <= end):
+                    continue
+                val = float(r.get(col) or 0)
+                collected += val
+                if pd:
+                    key = pd.isoformat()
+                    daily[key] = daily.get(key, 0) + val
+            break
+        except Exception:
+            continue
+
+    if collected > 0:
+        return round(collected, 2), daily
+
+    record_set = set(record_ids or [])
+    try:
+        res = (
+            supabase.table("billing_payments")
+            .select("amount_cents, payment_date, billing_record_id, created_at")
+            .gte("payment_date", start.isoformat())
+            .lte("payment_date", end.isoformat())
+            .execute()
+        )
+        for p in res.data or []:
+            if not isinstance(p, dict):
+                continue
+            rid = str(p.get("billing_record_id") or "")
+            if record_set and rid not in record_set:
+                continue
+            cents = _int_cents(p.get("amount_cents"))
+            val = cents / 100.0
+            collected += val
+            pd = _parse_date(p.get("payment_date") or p.get("created_at"))
+            if pd:
+                key = pd.isoformat()
+                daily[key] = daily.get(key, 0) + val
+    except Exception as e:
+        print(f"[clinics_dashboard] billing_payments fallback error {clinic_id}: {e}")
+
+    return round(collected, 2), daily
+
+
 def _clinic_live_stats(clinic_id: str) -> dict[str, Any]:
     if clinic_id not in _LIVE_DATA_CLINICS:
         return _empty_clinic_stats()
@@ -206,29 +278,11 @@ def _clinic_live_stats(clinic_id: str) -> dict[str, Any]:
         print(f"[clinics_dashboard] billing_records error {clinic_id}: {e}")
 
     daily: dict[str, float] = {}
-    collected_cents = 0
     try:
-        pay_resp = (
-            supabase.table("billing_payments")
-            .select("amount_cents, payment_date, billing_record_id")
-            .gte("payment_date", month_start.isoformat())
-            .lte("payment_date", today.isoformat())
-            .execute()
+        collected, daily = _sum_billing_payments(
+            clinic_id, month_start, today, record_ids=record_ids
         )
-        record_set = set(record_ids)
-        for p in pay_resp.data or []:
-            if not isinstance(p, dict):
-                continue
-            rid = str(p.get("billing_record_id") or "")
-            if record_set and rid not in record_set:
-                continue
-            cents = _int_cents(p.get("amount_cents"))
-            collected_cents += cents
-            pd = _parse_date(p.get("payment_date"))
-            if pd:
-                key = pd.isoformat()
-                daily[key] = daily.get(key, 0) + cents / 100.0
-        stats["collected_mtd"] = round(collected_cents / 100.0, 2)
+        stats["collected_mtd"] = collected
     except Exception as e:
         print(f"[clinics_dashboard] billing_payments error {clinic_id}: {e}")
 
@@ -279,11 +333,15 @@ def _aggregate_dashboard_stats() -> dict[str, Any]:
     total_clinics = 0
     active_clinics = 0
     inactive_clinics = 0
+    all_clinic_ids: list[str] = []
     try:
-        c_resp = supabase.table("clinics").select("id, status").execute()
+        c_resp = supabase.table("clinics").select("*").execute()
         clinics = [c for c in (c_resp.data or []) if isinstance(c, dict)]
         total_clinics = len(clinics)
         for c in clinics:
+            cid = str(c.get("id") or "")
+            if cid:
+                all_clinic_ids.append(cid)
             st = str(c.get("status") or "active").lower()
             if st == "inactive":
                 inactive_clinics += 1
@@ -340,36 +398,21 @@ def _aggregate_dashboard_stats() -> dict[str, Any]:
     collected_last_month = 0.0
     collection_rates: list[int] = []
     try:
-        for cid in _LIVE_DATA_CLINICS:
+        for cid in all_clinic_ids:
             live = _clinic_live_stats(cid)
             collected_mtd += live["collected_mtd"]
             if live["collection_rate_pct"] > 0:
                 collection_rates.append(live["collection_rate_pct"])
 
-        br_resp = (
-            supabase.table("billing_records")
-            .select("id")
-            .in_("clinic_id", list(_LIVE_DATA_CLINICS))
-            .execute()
-        )
-        live_records = {
-            str(r.get("id") or "")
-            for r in (br_resp.data or [])
-            if isinstance(r, dict) and r.get("id")
-        }
-        pay_resp = (
-            supabase.table("billing_payments")
-            .select("amount_cents, payment_date, billing_record_id")
-            .gte("payment_date", prev_start.isoformat())
-            .lt("payment_date", month_start.isoformat())
-            .execute()
-        )
-        for p in pay_resp.data or []:
-            if not isinstance(p, dict):
-                continue
-            if str(p.get("billing_record_id") or "") not in live_records:
-                continue
-            collected_last_month += _int_cents(p.get("amount_cents")) / 100.0
+        for cid in all_clinic_ids:
+            prev_collected, _ = _sum_billing_payments(
+                cid,
+                month_start,
+                today,
+                range_start=prev_start,
+                range_end=prev_end,
+            )
+            collected_last_month += prev_collected
         collected_vs = _pct_change_float(collected_mtd, collected_last_month)
     except Exception as e:
         print(f"[clinics_dashboard] collections aggregate error: {e}")
@@ -446,17 +489,8 @@ def get_clinic_cards(
 ):
     _require_super_admin(authorization)
     try:
-        resp = (
-            supabase.table("clinics")
-            .select(
-                "id, name, brand_name, slug, logo_url, brand_color, primary_color, "
-                "phone, email, address, agent_name, elevenlabs_agent_id, "
-                "status, billing_model, location_city, location_state, agent_status"
-            )
-            .order("brand_name")
-            .execute()
-        )
-        _handle_supabase_error(resp)
+        resp = supabase.table("clinics").select("*").execute()
+        clinics = resp.data or []
         st_resp = (
             supabase.table("clinic_settings")
             .select("clinic_id, billing_model")
@@ -475,7 +509,7 @@ def get_clinic_cards(
     billing_f = (billing_model or "").strip().lower()
 
     out: list[dict[str, Any]] = []
-    for row in resp.data or []:
+    for row in clinics:
         if not isinstance(row, dict):
             continue
         cid = str(row.get("id") or "")

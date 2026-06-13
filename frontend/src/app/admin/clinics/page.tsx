@@ -86,16 +86,18 @@ export default function AdminClinicsPage() {
     setLoading(true);
     setError(null);
     const headers = await authHeaders();
-    const params = new URLSearchParams({
-      super_admin_clinic_id: clinicId,
-      search: debouncedSearch,
-      status: statusFilter,
-      billing_model: billingFilter,
-    });
+    const filterParams = new URLSearchParams();
+    if (debouncedSearch.trim()) filterParams.set("search", debouncedSearch.trim());
+    if (statusFilter !== "all") filterParams.set("status", statusFilter);
+    if (billingFilter !== "all") filterParams.set("billing_model", billingFilter);
+    const cardsQs = filterParams.toString();
     try {
       const [statsRes, cardsRes] = await Promise.all([
-        fetch(`${API_BASE}/api/clinics/dashboard-stats?${params}`, { headers }),
-        fetch(`${API_BASE}/api/clinics/cards?${params}`, { headers }),
+        fetch(`${API_BASE}/api/clinics/dashboard-stats`, { headers }),
+        fetch(
+          `${API_BASE}/api/clinics/cards${cardsQs ? `?${cardsQs}` : ""}`,
+          { headers },
+        ),
       ]);
       if (statsRes.ok) setStats((await statsRes.json()) as ClinicsDashboardStats);
       if (cardsRes.ok) setCards((await cardsRes.json()) as ClinicCardData[]);
@@ -107,7 +109,7 @@ export default function AdminClinicsPage() {
     } finally {
       setLoading(false);
     }
-  }, [clinicId, debouncedSearch, statusFilter, billingFilter]);
+  }, [debouncedSearch, statusFilter, billingFilter]);
 
   useEffect(() => {
     if (!isSuperAdmin) return;
