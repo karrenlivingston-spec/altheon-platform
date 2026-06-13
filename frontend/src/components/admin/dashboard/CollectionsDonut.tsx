@@ -57,7 +57,7 @@ export default function CollectionsDonut({ data }: CollectionsDonutProps) {
               ))}
             </Pie>
             <Tooltip
-              formatter={(v: number) => formatUsdFromCents(v)}
+              formatter={(v: unknown) => formatUsdFromCents(Number(v))}
               contentStyle={{ fontSize: 12 }}
             />
           </PieChart>
