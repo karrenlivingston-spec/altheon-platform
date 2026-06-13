@@ -31,6 +31,7 @@ from app.routers import (
     clinical_notes as clinical_notes_api_router,
     appointments_dashboard as appointments_dashboard_router,
     voice_agent as voice_agent_router,
+    clinics_dashboard as clinics_dashboard_router,
     note_pdf as note_pdf_router,
     records_router,
     cpt_detection as cpt_detection_router,
@@ -83,6 +84,11 @@ app.include_router(
     voice_agent_router.router,
     prefix="/api",
     tags=["Voice Agent"],
+)
+app.include_router(
+    clinics_dashboard_router.router,
+    prefix="/api",
+    tags=["Clinics Dashboard"],
 )
 app.include_router(appointments.router, prefix="/appointments", tags=["appointments"])
 app.include_router(availability.router, tags=["availability"])
@@ -475,6 +481,7 @@ class SuperAdminClinicPatch(BaseModel):
     primary_color: Optional[str] = None
     logo_url: Optional[str] = None
     billing_model: Optional[Literal["cash", "insurance", "hybrid"]] = None
+    status: Optional[Literal["active", "inactive"]] = None
 
     @field_validator("slug")
     @classmethod
@@ -1431,7 +1438,15 @@ def patch_clinic_super_admin(
 
     billing_model = payload.pop("billing_model", None)
     clinic_allowed = frozenset(
-        {"brand_name", "slug", "agent_name", "primary_color", "logo_url"}
+        {
+            "brand_name",
+            "slug",
+            "agent_name",
+            "primary_color",
+            "logo_url",
+            "status",
+            "agent_status",
+        }
     )
     clinic_updates = {k: v for k, v in payload.items() if k in clinic_allowed}
 
