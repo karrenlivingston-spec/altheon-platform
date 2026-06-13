@@ -30,6 +30,7 @@ from app.routers import (
     pi_cases as pi_cases_api_router,
     clinical_notes as clinical_notes_api_router,
     appointments_dashboard as appointments_dashboard_router,
+    voice_agent as voice_agent_router,
     note_pdf as note_pdf_router,
     records_router,
     cpt_detection as cpt_detection_router,
@@ -77,6 +78,11 @@ app.include_router(
     appointments_dashboard_router.router,
     prefix="/api/appointments",
     tags=["appointments-dashboard"],
+)
+app.include_router(
+    voice_agent_router.router,
+    prefix="/api",
+    tags=["Voice Agent"],
 )
 app.include_router(appointments.router, prefix="/appointments", tags=["appointments"])
 app.include_router(availability.router, tags=["availability"])
