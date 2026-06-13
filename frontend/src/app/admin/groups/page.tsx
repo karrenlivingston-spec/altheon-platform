@@ -1,10 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 
 import { useClinic } from "@/app/admin/ClinicContext";
 import {
   activeInactiveBadgeClass,
+  DS_CARD,
   DS_INPUT,
   DS_PAGE_ROOT,
   DS_PAGE_SUBTITLE,
@@ -18,17 +20,10 @@ import {
   DS_TR,
 } from "@/app/admin/designSystem";
 
-const API_BASE = "https://altheon-platform.onrender.com";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
 
-const COLOR_OPTIONS = [
-  "gray",
-  "green",
-  "blue",
-  "purple",
-  "amber",
-  "red",
-] as const;
-
+const COLOR_OPTIONS = ["gray", "green", "blue", "purple", "amber", "red"] as const;
 type GroupColor = (typeof COLOR_OPTIONS)[number];
 
 type PatientGroup = {
@@ -40,6 +35,46 @@ type PatientGroup = {
   priority_flag?: boolean | null;
   is_active?: boolean | null;
   created_at?: string | null;
+};
+
+type GroupStats = {
+  total_patients: number;
+  active_groups: number;
+  total_groups: number;
+  appointments_mtd: number;
+  revenue_mtd_cents: number;
+};
+type GroupCard = {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
+  priority_flag: boolean;
+  is_active: boolean;
+  patient_count: number;
+  revenue_mtd_cents: number;
+  appointments_mtd: number;
+};
+type InsightItem = { name: string; value: GroupCard } | null;
+type GroupInsights = {
+  top_patients: InsightItem;
+  top_appointments: InsightItem;
+  top_revenue: InsightItem;
+};
+type DistributionSegment = {
+  name: string;
+  count: number;
+  pct: number;
+  color: string;
+};
+type GroupDistribution = { total: number; segments: DistributionSegment[] };
+type ActivityRow = {
+  group_name: string;
+  group_color: string;
+  activity: string;
+  patients_affected: number;
+  timestamp: string;
+  performed_by: string;
 };
 
 const PRIORITY_BADGE =
@@ -58,6 +93,19 @@ function colorDotClass(color: string | null | undefined): string {
   return `h-2.5 w-2.5 shrink-0 rounded-full ${map[c] ?? map.gray}`;
 }
 
+function colorBgClass(color: string | null | undefined): string {
+  const c = (color ?? "gray").trim().toLowerCase();
+  const map: Record<string, string> = {
+    gray: "bg-gray-100",
+    green: "bg-green-50",
+    blue: "bg-blue-50",
+    purple: "bg-purple-50",
+    amber: "bg-amber-50",
+    red: "bg-red-50",
+  };
+  return map[c] ?? map.gray;
+}
+
 function normalizeColor(value: string): GroupColor {
   const c = value.trim().toLowerCase();
   return (COLOR_OPTIONS as readonly string[]).includes(c)
@@ -65,8 +113,75 @@ function normalizeColor(value: string): GroupColor {
     : "gray";
 }
 
+function formatPrice(cents: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format((Number(cents) || 0) / 100);
+}
+
+function formatTimestamp(ts: string): string {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  return (
+    d.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }) +
+    " · " +
+    d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })
+  );
+}
+
+function groupIcon(name: string): string {
+  const n = name.toLowerCase();
+  if (n.includes("vip")) return "👑";
+  if (n.includes("pi") || n.includes("personal injury")) return "⚖️";
+  if (n.includes("workers") || n.includes("comp")) return "📋";
+  if (n.includes("dry needl") || n.includes("needling")) return "🪡";
+  if (n.includes("high risk") || n.includes("risk")) return "❤️";
+  if (n.includes("new patient")) return "🏃";
+  return "📁";
+}
+
+function StatCard({
+  icon,
+  value,
+  label,
+  sub,
+  trend,
+}: {
+  icon: string;
+  value: string;
+  label: string;
+  sub?: string;
+  trend?: string;
+}) {
+  return (
+    <div className={`${DS_CARD} flex items-start gap-4 min-w-0`}>
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-green-50 text-xl">
+        {icon}
+      </div>
+      <div className="min-w-0">
+        <p className="text-2xl font-bold tabular-nums text-gray-900 leading-tight">
+          {value}
+        </p>
+        <p className="mt-0.5 text-xs font-medium text-gray-500 uppercase tracking-wide">
+          {label}
+        </p>
+        {sub && <p className="mt-0.5 text-xs text-gray-400">{sub}</p>}
+        {trend && (
+          <p className="mt-1 text-xs font-semibold text-green-600">{trend}</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminGroupsPage() {
   const { clinicId } = useClinic();
+
   const [groups, setGroups] = useState<PatientGroup[]>([]);
   const [memberCounts, setMemberCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -82,9 +197,26 @@ export default function AdminGroupsPage() {
   const [submitBusy, setSubmitBusy] = useState(false);
   const [deletingId, setDeletingId] = useState<string | null>(null);
 
+  const [stats, setStats] = useState<GroupStats>({
+    total_patients: 0,
+    active_groups: 0,
+    total_groups: 0,
+    appointments_mtd: 0,
+    revenue_mtd_cents: 0,
+  });
+  const [cards, setCards] = useState<GroupCard[]>([]);
+  const [insights, setInsights] = useState<GroupInsights>({
+    top_patients: null,
+    top_appointments: null,
+    top_revenue: null,
+  });
+  const [distribution, setDistribution] = useState<GroupDistribution>({
+    total: 0,
+    segments: [],
+  });
+  const [activity, setActivity] = useState<ActivityRow[]>([]);
+
   const loadGroups = useCallback(async () => {
-    setLoading(true);
-    setError(null);
     try {
       const res = await fetch(
         `${API_BASE}/groups?clinic_id=${encodeURIComponent(clinicId)}`,
@@ -119,14 +251,49 @@ export default function AdminGroupsPage() {
       setError(e instanceof Error ? e.message : "Failed to load groups");
       setGroups([]);
       setMemberCounts({});
-    } finally {
-      setLoading(false);
     }
   }, [clinicId]);
 
+  const loadDashboard = useCallback(async () => {
+    try {
+      const [statsRes, cardsRes, insightsRes, distRes, activityRes] =
+        await Promise.all([
+          fetch(
+            `${API_BASE}/api/groups/stats?clinic_id=${encodeURIComponent(clinicId)}`,
+          ),
+          fetch(
+            `${API_BASE}/api/groups/cards?clinic_id=${encodeURIComponent(clinicId)}`,
+          ),
+          fetch(
+            `${API_BASE}/api/groups/insights?clinic_id=${encodeURIComponent(clinicId)}`,
+          ),
+          fetch(
+            `${API_BASE}/api/groups/distribution?clinic_id=${encodeURIComponent(clinicId)}`,
+          ),
+          fetch(
+            `${API_BASE}/api/groups/activity?clinic_id=${encodeURIComponent(clinicId)}`,
+          ),
+        ]);
+      if (statsRes.ok) setStats(await statsRes.json());
+      if (cardsRes.ok) setCards(await cardsRes.json());
+      if (insightsRes.ok) setInsights(await insightsRes.json());
+      if (distRes.ok) setDistribution(await distRes.json());
+      if (activityRes.ok) setActivity(await activityRes.json());
+    } catch {
+      // dashboard errors are non-blocking
+    }
+  }, [clinicId]);
+
+  const loadAll = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    await Promise.all([loadGroups(), loadDashboard()]);
+    setLoading(false);
+  }, [loadGroups, loadDashboard]);
+
   useEffect(() => {
-    void loadGroups();
-  }, [loadGroups]);
+    void loadAll();
+  }, [loadAll]);
 
   function openCreateModal() {
     setEditingGroup(null);
@@ -193,7 +360,7 @@ export default function AdminGroupsPage() {
         }
       }
       setModalOpen(false);
-      await loadGroups();
+      await loadAll();
     } finally {
       setSubmitBusy(false);
     }
@@ -215,7 +382,7 @@ export default function AdminGroupsPage() {
         setError(await res.text().catch(() => res.statusText));
         return;
       }
-      await loadGroups();
+      await loadAll();
     } finally {
       setDeletingId(null);
     }
@@ -227,7 +394,7 @@ export default function AdminGroupsPage() {
         <div>
           <h1 className={DS_PAGE_TITLE}>Patient Groups</h1>
           <p className={DS_PAGE_SUBTITLE}>
-            Organize patients into groups for priority routing and reporting
+            Organize patients into groups for priority routing and reporting.
           </p>
         </div>
         <button
@@ -240,106 +407,335 @@ export default function AdminGroupsPage() {
       </div>
 
       {error ? (
-        <div className="mt-6 rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
+        <div className="mt-4 rounded-2xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
           {error}
         </div>
       ) : null}
 
-      <div className={`${DS_TABLE_WRAP} mt-8`}>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead className={DS_TABLE_HEAD}>
-              <tr>
-                <th className={DS_TH}>Name</th>
-                <th className={DS_TH}>Description</th>
-                <th className={DS_TH}>Priority</th>
-                <th className={DS_TH}>Status</th>
-                <th className={`${DS_TH} text-right`}>Members</th>
-                <th className={`${DS_TH} text-right`}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="px-6 py-10 text-center text-sm text-gray-500"
-                  >
-                    Loading groups…
-                  </td>
-                </tr>
-              ) : groups.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={6}
-                    className="px-6 py-10 text-center text-sm text-gray-500"
-                  >
-                    No groups yet. Create one to get started.
-                  </td>
-                </tr>
-              ) : (
-                groups.map((group) => {
-                  const active = group.is_active !== false;
-                  const busy = deletingId === group.id;
-                  return (
-                    <tr key={group.id} className={DS_TR}>
-                      <td className={DS_TD_PRIMARY}>
-                        <span className="inline-flex items-center gap-2 font-medium">
-                          <span
-                            className={colorDotClass(group.color)}
-                            aria-hidden
-                          />
-                          {group.name}
-                        </span>
-                      </td>
-                      <td className={`${DS_TD_PRIMARY} max-w-xs`}>
-                        <span className="line-clamp-2 text-gray-600">
-                          {group.description?.trim() || "—"}
-                        </span>
-                      </td>
-                      <td className={DS_TD_PRIMARY}>
-                        {group.priority_flag ? (
-                          <span className={PRIORITY_BADGE}>Priority</span>
-                        ) : (
-                          "—"
-                        )}
-                      </td>
-                      <td className={DS_TD_PRIMARY}>
-                        <span className={activeInactiveBadgeClass(active)}>
-                          {active ? "Active" : "Inactive"}
-                        </span>
-                      </td>
-                      <td
-                        className={`${DS_TD_PRIMARY} text-right tabular-nums`}
+      <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
+        <StatCard
+          icon="👥"
+          value={loading ? "—" : String(stats.total_patients)}
+          label="Total Patients in Groups"
+        />
+        <StatCard
+          icon="⭐"
+          value={loading ? "—" : String(stats.active_groups)}
+          label="Active Groups"
+          sub={
+            stats.total_groups > stats.active_groups
+              ? `${stats.total_groups - stats.active_groups} archived`
+              : undefined
+          }
+        />
+        <StatCard
+          icon="📅"
+          value={loading ? "—" : String(stats.appointments_mtd)}
+          label="Appointments (MTD)"
+        />
+        <StatCard
+          icon="💵"
+          value={loading ? "—" : formatPrice(stats.revenue_mtd_cents)}
+          label="Revenue (MTD)"
+        />
+      </div>
+
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <div className="lg:col-span-2">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-base font-semibold text-gray-900">
+              Patient Groups
+            </h2>
+          </div>
+
+          {loading ? (
+            <p className="text-sm text-gray-500">Loading groups…</p>
+          ) : cards.length === 0 ? (
+            <p className="text-sm text-gray-500">
+              No groups yet. Create one to get started.
+            </p>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2">
+              {cards.map((g) => {
+                const busy = deletingId === g.id;
+                const fullGroup = groups.find((gr) => gr.id === g.id);
+                return (
+                  <div key={g.id} className={DS_CARD}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div
+                        className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg ${colorBgClass(g.color)}`}
                       >
-                        {memberCounts[group.id] ?? 0}
-                      </td>
-                      <td
-                        className={`${DS_TD_PRIMARY} whitespace-nowrap text-right`}
-                      >
+                        {groupIcon(g.name)}
+                      </div>
+                      {g.priority_flag && (
+                        <span className={PRIORITY_BADGE}>Priority</span>
+                      )}
+                    </div>
+                    <h3 className="mt-3 text-base font-semibold text-gray-900">
+                      {g.name}
+                    </h3>
+                    {g.description && (
+                      <p className="mt-0.5 text-xs text-gray-500 line-clamp-2">
+                        {g.description}
+                      </p>
+                    )}
+
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <div>
+                        <p className="text-2xl font-bold tabular-nums text-gray-900">
+                          {g.patient_count}
+                        </p>
+                        <p className="text-xs text-gray-400">Patients</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-bold tabular-nums text-gray-900">
+                          {formatPrice(g.revenue_mtd_cents)}
+                        </p>
+                        <p className="text-xs text-gray-400">Revenue (MTD)</p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 flex items-center justify-between gap-2">
+                      <span className={activeInactiveBadgeClass(g.is_active)}>
+                        {g.is_active ? "Active" : "Inactive"}
+                      </span>
+                      <div className="flex gap-2">
                         <button
                           type="button"
-                          onClick={() => openEditModal(group)}
-                          className={`${DS_SECONDARY_BTN} mr-2`}
+                          onClick={() => fullGroup && openEditModal(fullGroup)}
                           disabled={busy}
+                          className={`${DS_SECONDARY_BTN} disabled:opacity-50`}
                         >
                           Edit
                         </button>
                         <button
                           type="button"
-                          onClick={() => void deleteGroup(group)}
+                          onClick={() => fullGroup && void deleteGroup(fullGroup)}
                           disabled={busy}
                           className="rounded-lg border border-red-100 px-3 py-1.5 text-sm text-red-700 transition-colors hover:bg-red-50 disabled:opacity-50"
                         >
-                          {busy ? "Deleting…" : "Delete"}
+                          {busy ? "…" : "Delete"}
                         </button>
-                      </td>
-                    </tr>
-                  );
-                })
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <button
+                type="button"
+                onClick={openCreateModal}
+                className={`${DS_CARD} flex flex-col items-center justify-center gap-2 border-dashed text-gray-400 hover:border-green-400 hover:text-green-600 transition-colors min-h-[180px]`}
+              >
+                <span className="text-2xl">+</span>
+                <span className="text-sm font-medium">Create New Group</span>
+                <span className="text-xs text-gray-400">
+                  Build a custom patient group
+                </span>
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-col gap-4">
+          <div className={DS_CARD}>
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-4">
+              Group Insights
+            </p>
+            <div className="space-y-4">
+              {insights.top_patients?.value && (
+                <div className="flex items-start gap-3">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-green-50 text-sm">
+                    👑
+                  </span>
+                  <div>
+                    <p className="text-xs text-green-600 font-medium">
+                      Top by Patients
+                    </p>
+                    <p className="text-sm font-semibold text-gray-900">
+                      {insights.top_patients.value.name}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {insights.top_patients.value.patient_count} patients
+                    </p>
+                  </div>
+                </div>
               )}
-            </tbody>
-          </table>
+              {insights.top_appointments?.value && (
+                <div className="flex items-start gap-3">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-50 text-sm">
+                    📅
+                  </span>
+                  <div>
+                    <p className="text-xs text-gray-500 font-medium">
+                      Most Appointments
+                    </p>
+                    <p className="text-sm font-semibold text-gray-900">
+                      {insights.top_appointments.value.name}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {insights.top_appointments.value.appointments_mtd}{" "}
+                      appointments (MTD)
+                    </p>
+                  </div>
+                </div>
+              )}
+              {insights.top_revenue?.value && (
+                <div className="flex items-start gap-3">
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-50 text-sm">
+                    💰
+                  </span>
+                  <div>
+                    <p className="text-xs text-gray-500 font-medium">
+                      Top Revenue
+                    </p>
+                    <p className="text-sm font-semibold text-gray-900">
+                      {insights.top_revenue.value.name}
+                    </p>
+                    <p className="text-xs text-gray-400">
+                      {formatPrice(insights.top_revenue.value.revenue_mtd_cents)}{" "}
+                      (MTD)
+                    </p>
+                  </div>
+                </div>
+              )}
+              {!insights.top_patients &&
+                !insights.top_appointments &&
+                !insights.top_revenue && (
+                  <p className="text-sm text-gray-400">No group data yet.</p>
+                )}
+            </div>
+          </div>
+
+          <div className={DS_CARD}>
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500 mb-4">
+              Group Distribution
+            </p>
+            {distribution.total > 0 ? (
+              <div className="flex items-center gap-4">
+                <div className="relative shrink-0">
+                  <ResponsiveContainer width={120} height={120}>
+                    <PieChart>
+                      <Pie
+                        data={distribution.segments}
+                        cx="50%"
+                        cy="50%"
+                        innerRadius={38}
+                        outerRadius={55}
+                        dataKey="count"
+                        startAngle={90}
+                        endAngle={-270}
+                        strokeWidth={0}
+                      >
+                        {distribution.segments.map((s, i) => (
+                          <Cell key={i} fill={s.color} />
+                        ))}
+                      </Pie>
+                    </PieChart>
+                  </ResponsiveContainer>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                    <span className="text-lg font-bold text-gray-900">
+                      {distribution.total}
+                    </span>
+                    <span className="text-[10px] text-gray-400">
+                      Total Patients
+                    </span>
+                  </div>
+                </div>
+                <div className="flex-1 space-y-1.5">
+                  {distribution.segments.map((s) => (
+                    <div
+                      key={s.name}
+                      className="flex items-center justify-between gap-2"
+                    >
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        <span
+                          className="h-2.5 w-2.5 rounded-full shrink-0"
+                          style={{ background: s.color }}
+                        />
+                        <span className="text-xs text-gray-600 truncate">
+                          {s.name}
+                        </span>
+                      </div>
+                      <span className="text-xs font-semibold text-gray-800 shrink-0">
+                        {s.pct}%
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-gray-400">
+                No patients in groups yet.
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-6">
+        <h2 className="text-base font-semibold text-gray-900 mb-4">
+          Recent Group Activity
+        </h2>
+        <div className={DS_TABLE_WRAP}>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-left text-sm">
+              <thead className={DS_TABLE_HEAD}>
+                <tr>
+                  <th className={DS_TH}>Group</th>
+                  <th className={DS_TH}>Activity</th>
+                  <th className={`${DS_TH} text-right`}>Patients Affected</th>
+                  <th className={DS_TH}>Date &amp; Time</th>
+                  <th className={DS_TH}>Performed By</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-6 py-10 text-center text-sm text-gray-500"
+                    >
+                      Loading…
+                    </td>
+                  </tr>
+                ) : activity.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={5}
+                      className="px-6 py-10 text-center text-sm text-gray-500"
+                    >
+                      No recent activity.
+                    </td>
+                  </tr>
+                ) : (
+                  activity.map((row, i) => (
+                    <tr key={i} className={DS_TR}>
+                      <td className={DS_TD_PRIMARY}>
+                        <span className="inline-flex items-center gap-2 font-medium">
+                          <span
+                            className={colorDotClass(row.group_color)}
+                            aria-hidden
+                          />
+                          {row.group_name}
+                        </span>
+                      </td>
+                      <td className={DS_TD_PRIMARY}>{row.activity}</td>
+                      <td
+                        className={`${DS_TD_PRIMARY} text-right tabular-nums`}
+                      >
+                        {row.patients_affected}
+                      </td>
+                      <td className={`whitespace-nowrap ${DS_TD_PRIMARY}`}>
+                        {formatTimestamp(row.timestamp)}
+                      </td>
+                      <td className={DS_TD_PRIMARY}>{row.performed_by}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
 

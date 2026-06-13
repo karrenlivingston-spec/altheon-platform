@@ -33,6 +33,7 @@ from app.routers import (
     voice_agent as voice_agent_router,
     clinics_dashboard as clinics_dashboard_router,
     memberships_dashboard as memberships_dashboard_router,
+    groups_dashboard as groups_dashboard_router,
     note_pdf as note_pdf_router,
     records_router,
     cpt_detection as cpt_detection_router,
@@ -95,6 +96,11 @@ app.include_router(
     memberships_dashboard_router.router,
     prefix="/api",
     tags=["Memberships Dashboard"],
+)
+app.include_router(
+    groups_dashboard_router.router,
+    prefix="/api",
+    tags=["Groups Dashboard"],
 )
 app.include_router(appointments.router, prefix="/appointments", tags=["appointments"])
 app.include_router(availability.router, tags=["availability"])
