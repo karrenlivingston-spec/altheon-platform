@@ -132,10 +132,12 @@ export function membershipStatusBadgeClass(status: string): string {
 /** PI case lifecycle */
 export function piCaseStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
-  if (s === "open") return `${BADGE} bg-blue-50 text-blue-700`;
-  if (s === "in_treatment") return `${BADGE} bg-amber-50 text-amber-700`;
-  if (s === "pending_settlement") return `${BADGE} bg-amber-50 text-amber-700`;
-  if (s === "settled") return `${BADGE} bg-green-50 text-green-700`;
+  if (s === "intake_open" || s === "open") return `${BADGE} bg-blue-50 text-blue-700`;
+  if (s === "treatment" || s === "in_treatment") return `${BADGE} bg-sky-50 text-sky-700`;
+  if (s === "records_requested") return `${BADGE} bg-amber-50 text-amber-700`;
+  if (s === "settlement_negotiation" || s === "pending_settlement")
+    return `${BADGE} bg-purple-50 text-purple-700`;
+  if (s === "closed_settled" || s === "settled") return `${BADGE} bg-green-50 text-green-700`;
   if (s === "closed") return `${BADGE} bg-gray-100 text-gray-600`;
   return `${BADGE} bg-gray-100 text-gray-500`;
 }
