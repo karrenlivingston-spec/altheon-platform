@@ -49,7 +49,8 @@ type PageTab =
   | "documents"
   | "notes"
   | "legal"
-  | "memberships";
+  | "memberships"
+  | "benefits";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -256,8 +257,15 @@ function CardSkeleton({ lines = 3 }: { lines?: number }) {
 }
 
 async function authHeaders(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token ?? "";
+  const readToken = async () => {
+    const { data } = await supabase.auth.getSession();
+    return data.session?.access_token ?? "";
+  };
+  let token = await readToken();
+  if (!token) {
+    await sleep(150);
+    token = await readToken();
+  }
   const h: Record<string, string> = { "Content-Type": "application/json" };
   if (token) h.Authorization = `Bearer ${token}`;
   return h;
@@ -549,31 +557,47 @@ export function PatientDetailView({
     };
   }, [patientReady, patientId, clinicId, loadSecondaryResources]);
 
-  const loadHeaderStats = useCallback(async () => {
-    if (!patientId || !clinicId) return;
-    setHeaderStatsLoading(true);
-    try {
-      const h = await authHeaders();
-      const res = await fetch(
-        `${API_BASE}/api/patients/${encodeURIComponent(patientId)}/header-stats?clinic_id=${encodeURIComponent(clinicId)}`,
-        { headers: h },
-      );
-      if (!res.ok) {
-        setHeaderStats(null);
-        return;
+  const loadHeaderStats = useCallback(
+    async (isCancelled?: () => boolean) => {
+      if (!patientId || !clinicId) return;
+      setHeaderStatsLoading(true);
+      try {
+        const h = await authHeaders();
+        if (isCancelled?.()) return;
+        const res = await fetch(
+          `${API_BASE}/api/patients/${encodeURIComponent(patientId)}/header-stats?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers: h },
+        );
+        if (isCancelled?.()) return;
+        if (!res.ok) {
+          setHeaderStats(null);
+          return;
+        }
+        const json = (await res.json()) as PatientHeaderStats;
+        if (isCancelled?.()) return;
+        setHeaderStats(json);
+      } catch {
+        if (!isCancelled?.()) setHeaderStats(null);
+      } finally {
+        if (!isCancelled?.()) setHeaderStatsLoading(false);
       }
-      setHeaderStats((await res.json()) as PatientHeaderStats);
-    } catch {
-      setHeaderStats(null);
-    } finally {
-      setHeaderStatsLoading(false);
-    }
-  }, [patientId, clinicId]);
+    },
+    [patientId, clinicId],
+  );
 
   useEffect(() => {
-    if (!patientReady || !patientId || !clinicId) return;
-    void loadHeaderStats();
-  }, [patientReady, patientId, clinicId, loadHeaderStats]);
+    if (!patientId || !clinicId) {
+      setHeaderStats(null);
+      setHeaderStatsLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setHeaderStats(null);
+    void loadHeaderStats(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [patientId, clinicId, loadHeaderStats]);
 
   useEffect(() => {
     if (pageTab !== "legal" || !patientReady || piCasesEverOpened) return;
@@ -614,6 +638,7 @@ export function PatientDetailView({
     { id: "notes", label: "Notes" },
     { id: "legal", label: "Legal" },
     { id: "memberships", label: "Memberships" },
+    { id: "benefits", label: "Benefits" },
   ];
 
   function setDraftField<K extends keyof PatientRecord>(
@@ -1385,6 +1410,10 @@ export function PatientDetailView({
             )}
           </div>
         </div>
+      ) : null}
+
+      {pageTab === "benefits" ? (
+        <InsuranceBenefitsLedger patientId={patientId} clinicId={clinicId} />
       ) : null}
 
       {pageTab === "clinical" ? (
