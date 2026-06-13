@@ -24,6 +24,10 @@ type RecentActivityProps = {
   items: ActivityItem[];
 };
 
+function formatActivityDescription(description: string): string {
+  return description.replace(/^Claim\s+claim\s+/i, "Claim ");
+}
+
 export default function RecentActivity({ items }: RecentActivityProps) {
   return (
     <div className={DS_CARD}>
@@ -56,7 +60,9 @@ export default function RecentActivity({ items }: RecentActivityProps) {
                     {style.icon}
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-gray-900">{item.description}</span>
+                    <span className="block text-gray-900">
+                      {formatActivityDescription(item.description)}
+                    </span>
                     <span className="text-xs text-gray-500">
                       {relativeTime(item.timestamp)}
                     </span>

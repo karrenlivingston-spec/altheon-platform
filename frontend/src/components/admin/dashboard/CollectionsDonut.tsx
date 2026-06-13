@@ -16,6 +16,7 @@ type CollectionsDonutProps = {
 export default function CollectionsDonut({ data }: CollectionsDonutProps) {
   const paid = data.collections_mtd_cents;
   const total = data.total_billed_mtd_cents;
+  const isEmpty = total === 0;
   const pending = Math.max(0, total - paid);
   const denied = data.claims_requiring_action.denied.amount_cents;
 
@@ -25,7 +26,11 @@ export default function CollectionsDonut({ data }: CollectionsDonutProps) {
     { name: "Overdue", value: denied, color: "#dc2626" },
   ].filter((s) => s.value > 0);
 
-  const chartData = slices.length > 0 ? slices : [{ name: "No data", value: 1, color: "#e5e7eb" }];
+  const chartData = isEmpty
+    ? [{ name: "Empty", value: 1, color: "#e5e7eb" }]
+    : slices.length > 0
+      ? slices
+      : [{ name: "No data", value: 1, color: "#e5e7eb" }];
   const sum = slices.reduce((a, s) => a + s.value, 0) || 1;
 
   return (
@@ -62,11 +67,19 @@ export default function CollectionsDonut({ data }: CollectionsDonutProps) {
             />
           </PieChart>
         </ResponsiveContainer>
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-xs text-gray-500">MTD Billed</span>
-          <span className="text-sm font-bold text-gray-900">
-            {formatUsdFromCents(total)}
-          </span>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center px-4 text-center">
+          {isEmpty ? (
+            <span className="text-xs font-medium text-gray-500">
+              No collections this month
+            </span>
+          ) : (
+            <>
+              <span className="text-xs text-gray-500">MTD Billed</span>
+              <span className="text-sm font-bold text-gray-900">
+                {formatUsdFromCents(total)}
+              </span>
+            </>
+          )}
         </div>
       </div>
       <ul className="mt-2 space-y-1 text-xs">
