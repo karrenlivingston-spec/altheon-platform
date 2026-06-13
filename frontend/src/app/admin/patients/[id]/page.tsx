@@ -13,6 +13,7 @@ export default function PatientDetailPage() {
 
   return (
     <PatientDetailView
+      key={patientId}
       patientId={patientId}
       clinicId={clinicId}
       embedded={false}

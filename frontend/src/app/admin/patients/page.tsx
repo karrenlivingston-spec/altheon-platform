@@ -121,12 +121,11 @@ export default function AdminPatientsPage() {
   const filteredCount = filteredList.length;
 
   return (
-    <div className="flex min-h-[calc(100dvh-6rem)] flex-col md:flex-row md:min-h-[calc(100vh-8rem)]">
+    <div className="-mx-6 -my-6 flex h-[calc(100vh-3rem)] min-h-0 w-[calc(100%+3rem)] max-w-none flex-col md:flex-row">
       <aside
-        className={`flex w-full shrink-0 flex-col border-[#e2e8f0] bg-white md:w-[340px] md:border-r ${
+        className={`flex h-full min-h-0 w-full shrink-0 flex-col border-[#e2e8f0] bg-white md:w-[340px] md:border-r ${
           selectedId ? "hidden md:flex" : "flex"
         }`}
-        style={{ maxHeight: "100%" }}
       >
         <div className="border-b border-[#e2e8f0] p-4">
           <h1 className={DS_PAGE_TITLE}>Patients</h1>
@@ -285,7 +284,7 @@ export default function AdminPatientsPage() {
       </aside>
 
       <section
-        className={`min-h-0 flex-1 bg-[#f8fafc] ${
+        className={`min-h-0 flex-1 overflow-hidden bg-[#f8fafc] ${
           selectedId ? "flex" : "hidden md:flex"
         } flex-col`}
       >
@@ -298,6 +297,7 @@ export default function AdminPatientsPage() {
           </div>
         ) : (
           <PatientDetailView
+            key={selectedId}
             patientId={selectedId}
             clinicId={clinicId}
             embedded

@@ -767,7 +767,7 @@ export function PatientDetailView({
   }
 
   const rootClass = embedded
-    ? "flex min-h-0 flex-1 flex-col overflow-y-auto bg-[#f8fafc] px-4 pb-8 pt-4"
+    ? "flex h-full min-h-0 w-full flex-1 flex-col overflow-y-auto bg-[#f0f4f8] px-4 pb-8 pt-2 md:px-6"
     : DS_PAGE_ROOT;
 
   if (loadingPatient && !patient) {
@@ -785,6 +785,11 @@ export function PatientDetailView({
           </div>
         ) : null}
         <PatientHeaderSkeleton />
+        <div className="mb-6 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-gray-200 bg-gray-200 md:grid-cols-3 xl:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-20 animate-pulse bg-white" />
+          ))}
+        </div>
         <div className="mt-6 grid gap-6 md:grid-cols-2">
           <div className={`rounded-2xl border border-gray-100 bg-white p-6 shadow-sm`}>
             <CardSkeleton lines={8} />
@@ -814,7 +819,27 @@ export function PatientDetailView({
   }
 
   if (!patient || !draft) {
-    return null;
+    return (
+      <div className={rootClass}>
+        {onBack ? (
+          <div className="mb-4">
+            <button
+              type="button"
+              onClick={onBack}
+              className={`text-sm font-medium text-gray-600 transition-colors hover:text-gray-900 ${embedded ? "md:hidden" : ""}`}
+            >
+              {embedded ? "← Back" : "← Patients"}
+            </button>
+          </div>
+        ) : null}
+        <PatientHeaderSkeleton />
+        <div className="mb-6 grid grid-cols-2 gap-px overflow-hidden rounded-xl border border-gray-200 bg-gray-200 md:grid-cols-3 xl:grid-cols-6">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="h-20 animate-pulse bg-white" />
+          ))}
+        </div>
+      </div>
+    );
   }
 
   const display = editMode ? draft : patient;
