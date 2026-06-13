@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
@@ -256,6 +256,464 @@ def _enrich_notes_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             )
         out.append(item)
     return out
+
+
+_AI_PIPELINE_STATUSES = frozenset(
+    {
+        "ai_review_pending",
+        "ready_for_review",
+        "ai_flagged",
+        "needs_correction",
+    }
+)
+_NEEDS_REVIEW_STATUSES = frozenset(
+    {"ready_for_review", "needs_correction", "ai_flagged"}
+)
+
+
+def _patient_pt_id(patient_id: str) -> str:
+    tail = str(patient_id or "").replace("-", "")[-6:].upper()
+    return f"PT-{tail}" if tail else "—"
+
+
+def _is_ai_generated(row: dict[str, Any]) -> bool:
+    if row.get("ai_reviewed_at"):
+        return True
+    return str(row.get("status") or "") in _AI_PIPELINE_STATUSES
+
+
+def _review_status_label(row: dict[str, Any]) -> Optional[str]:
+    st = str(row.get("status") or "")
+    if st in _NEEDS_REVIEW_STATUSES:
+        return "needs_review"
+    if st == "signed":
+        return "reviewed"
+    return None
+
+
+def _signature_status_label(row: dict[str, Any]) -> str:
+    if row.get("signed_at") or str(row.get("status") or "") == "signed":
+        return "signed"
+    return "not_signed"
+
+
+def _trend_pct(current: int, previous: int) -> Optional[float]:
+    if previous == 0:
+        return None
+    return round(((current - previous) / previous) * 100, 1)
+
+
+def _created_in_range(row: dict[str, Any], start: date, end: date) -> bool:
+    raw = row.get("created_at")
+    if not raw:
+        return False
+    try:
+        dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        d = dt.date()
+        return start <= d <= end
+    except ValueError:
+        return False
+
+
+def _load_appointments_map(appointment_ids: list[str]) -> dict[str, dict[str, Any]]:
+    by_id: dict[str, dict[str, Any]] = {}
+    ids = [i for i in appointment_ids if i]
+    if not ids:
+        return by_id
+    try:
+        resp = (
+            supabase.table("appointments")
+            .select("id,start_time,clinician_id")
+            .in_("id", ids)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+        for row in resp.data or []:
+            if isinstance(row, dict) and row.get("id"):
+                by_id[str(row["id"])] = row
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return by_id
+
+
+def _enrich_notes_for_list(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    enriched = _enrich_notes_rows(rows)
+    appt_ids = list(
+        {str(r.get("appointment_id") or "") for r in enriched if r.get("appointment_id")}
+    )
+    appt_map = _load_appointments_map(appt_ids)
+    out: list[dict[str, Any]] = []
+    for item in enriched:
+        shaped = dict(item)
+        pid = str(item.get("patient_id") or "")
+        shaped["patient_pt_id"] = _patient_pt_id(pid)
+        appt_id = str(item.get("appointment_id") or "")
+        appt = appt_map.get(appt_id)
+        shaped["visit_date"] = (
+            appt.get("start_time") if appt else item.get("created_at")
+        )
+        shaped["body_region"] = None
+        shaped["clinician_name"] = (
+            item.get("supervising_pt_name")
+            or item.get("author_name")
+            or "—"
+        )
+        shaped["ai_generated"] = _is_ai_generated(item)
+        shaped["review_status"] = _review_status_label(item)
+        shaped["signature_status"] = _signature_status_label(item)
+        shaped["attorney_requested"] = False
+        shaped["attorney_request_date"] = None
+        out.append(shaped)
+    return out
+
+
+def _fetch_clinic_notes_rows(clinic_id: str) -> list[dict[str, Any]]:
+    resp = (
+        supabase.table("clinical_notes")
+        .select("*")
+        .eq("clinic_id", clinic_id)
+        .execute()
+    )
+    _handle_supabase_error(resp)
+    return [r for r in (resp.data or []) if isinstance(r, dict)]
+
+
+@router.get("/clinical-notes/stats")
+def get_clinical_notes_stats(clinic_id: str = Query(..., min_length=1)):
+    cid = clinic_id.strip()
+    try:
+        today = date.today()
+        first_of_month = today.replace(day=1)
+        last_month_end = first_of_month - timedelta(days=1)
+        last_month_start = last_month_end.replace(day=1)
+
+        rows = _fetch_clinic_notes_rows(cid)
+
+        def in_last_month(r: dict[str, Any]) -> bool:
+            return _created_in_range(r, last_month_start, last_month_end)
+
+        total = len(rows)
+        ai_generated = sum(1 for r in rows if _is_ai_generated(r))
+        needs_review = sum(
+            1 for r in rows if str(r.get("status") or "") in _NEEDS_REVIEW_STATUSES
+        )
+        provider_signed = sum(
+            1 for r in rows if str(r.get("status") or "") == "signed"
+        )
+        attorney_requested = 0
+
+        total_last = sum(1 for r in rows if in_last_month(r))
+        ai_last = sum(1 for r in rows if in_last_month(r) and _is_ai_generated(r))
+        review_last = sum(
+            1
+            for r in rows
+            if in_last_month(r)
+            and str(r.get("status") or "") in _NEEDS_REVIEW_STATUSES
+        )
+        signed_last = sum(
+            1
+            for r in rows
+            if in_last_month(r) and str(r.get("status") or "") == "signed"
+        )
+        attorney_last = 0
+
+        completed = provider_signed
+
+        # Insights
+        ai_reviewed_rows = [r for r in rows if r.get("ai_reviewed_at")]
+        ai_passed = sum(
+            1
+            for r in ai_reviewed_rows
+            if str(r.get("status") or "") not in ("ai_flagged", "needs_correction")
+        )
+        ai_acceptance_rate = (
+            round((ai_passed / len(ai_reviewed_rows)) * 100, 1)
+            if ai_reviewed_rows
+            else 0.0
+        )
+
+        turnaround_days: list[float] = []
+        for r in rows:
+            if not r.get("signed_at") or not r.get("ai_reviewed_at"):
+                continue
+            try:
+                signed = datetime.fromisoformat(
+                    str(r["signed_at"]).replace("Z", "+00:00")
+                )
+                reviewed = datetime.fromisoformat(
+                    str(r["ai_reviewed_at"]).replace("Z", "+00:00")
+                )
+                delta = (signed - reviewed).total_seconds() / 86400
+                if delta >= 0:
+                    turnaround_days.append(delta)
+            except ValueError:
+                continue
+        review_turnaround_days = (
+            round(sum(turnaround_days) / len(turnaround_days), 1)
+            if turnaround_days
+            else 0.0
+        )
+
+        signed_within_48h = 0
+        signed_total = 0
+        for r in rows:
+            if str(r.get("status") or "") != "signed" or not r.get("signed_at"):
+                continue
+            signed_total += 1
+            try:
+                created = datetime.fromisoformat(
+                    str(r.get("created_at") or "").replace("Z", "+00:00")
+                )
+                signed = datetime.fromisoformat(
+                    str(r["signed_at"]).replace("Z", "+00:00")
+                )
+                if (signed - created).total_seconds() <= 48 * 3600:
+                    signed_within_48h += 1
+            except ValueError:
+                continue
+        signature_compliance_48h_pct = (
+            round((signed_within_48h / signed_total) * 100, 1)
+            if signed_total
+            else 0.0
+        )
+
+        ai_by_type: dict[str, int] = {}
+        for r in rows:
+            if not _is_ai_generated(r):
+                continue
+            nt = str(r.get("note_type") or "other")
+            ai_by_type[nt] = ai_by_type.get(nt, 0) + 1
+        ai_type_total = sum(ai_by_type.values()) or 1
+        top_ai_types = sorted(
+            [
+                {
+                    "note_type": k,
+                    "count": v,
+                    "pct": round((v / ai_type_total) * 100, 1),
+                }
+                for k, v in ai_by_type.items()
+            ],
+            key=lambda x: -x["count"],
+        )[:5]
+
+        daily_counts: list[int] = []
+        for offset in range(29, -1, -1):
+            d = today - timedelta(days=offset)
+            daily_counts.append(
+                sum(1 for r in rows if _created_in_range(r, d, d))
+            )
+
+        return {
+            "total_notes": total,
+            "ai_generated": ai_generated,
+            "ai_generated_pct": round((ai_generated / total * 100) if total else 0),
+            "needs_review": needs_review,
+            "provider_signed": provider_signed,
+            "provider_signed_pct": round(
+                (provider_signed / total * 100) if total else 0
+            ),
+            "attorney_requested": attorney_requested,
+            "completed": completed,
+            "tab_counts": {
+                "all": total,
+                "needs_review": needs_review,
+                "ai_generated": ai_generated,
+                "provider_signed": provider_signed,
+                "attorney_requested": attorney_requested,
+                "completed": completed,
+            },
+            "trends": {
+                "total": _trend_pct(total, total_last),
+                "ai_generated": _trend_pct(ai_generated, ai_last),
+                "needs_review": _trend_pct(needs_review, review_last),
+                "provider_signed": _trend_pct(provider_signed, signed_last),
+                "attorney_requested": _trend_pct(attorney_requested, attorney_last),
+            },
+            "insights": {
+                "ai_acceptance_rate": ai_acceptance_rate,
+                "ai_acceptance_trend": None,
+                "ai_daily_counts": daily_counts,
+                "top_ai_note_types": top_ai_types,
+                "review_turnaround_days": review_turnaround_days,
+                "review_turnaround_trend": None,
+                "signature_compliance_48h_pct": signature_compliance_48h_pct,
+                "signature_compliance_trend": None,
+            },
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Clinical notes stats failed: {exc}"
+        ) from exc
+
+
+def _note_matches_filters(
+    row: dict[str, Any],
+    *,
+    review_status: Optional[str],
+    signature_status: Optional[str],
+    ai_generated: Optional[bool],
+    attorney_requested: Optional[bool],
+    note_type: Optional[str],
+    clinician_id: Optional[str],
+    date_from: Optional[str],
+    date_to: Optional[str],
+    search: Optional[str],
+    enriched: Optional[dict[str, Any]] = None,
+) -> bool:
+    item = enriched or row
+    if review_status:
+        rs = str(review_status).strip().lower()
+        label = _review_status_label(row)
+        if rs == "needs_review" and label != "needs_review":
+            return False
+        if rs == "reviewed" and label != "reviewed":
+            return False
+    if signature_status:
+        ss = str(signature_status).strip().lower()
+        label = _signature_status_label(row)
+        if ss == "signed" and label != "signed":
+            return False
+        if ss in ("not_signed", "unsigned") and label != "not_signed":
+            return False
+    if ai_generated is not None:
+        if _is_ai_generated(row) != ai_generated:
+            return False
+    if attorney_requested is not None:
+        if bool(attorney_requested) is True:
+            return False
+    if note_type and str(note_type).strip().lower() not in ("", "all"):
+        if str(row.get("note_type") or "").lower() != str(note_type).strip().lower():
+            return False
+    if clinician_id and str(clinician_id).strip():
+        cid = str(clinician_id).strip()
+        if str(row.get("supervising_pt_id") or "") != cid and str(
+            row.get("author_id") or ""
+        ) != cid:
+            return False
+    if date_from:
+        try:
+            start = date.fromisoformat(str(date_from)[:10])
+            if not _created_in_range(row, start, date.max):
+                raw = row.get("created_at")
+                if raw:
+                    dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                    if dt.date() < start:
+                        return False
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            end = date.fromisoformat(str(date_to)[:10])
+            raw = row.get("created_at")
+            if raw:
+                dt = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+                if dt.date() > end:
+                    return False
+        except ValueError:
+            pass
+    if search and str(search).strip():
+        q = str(search).strip().lower()
+        hay = " ".join(
+            [
+                str(item.get("patient_name") or ""),
+                str(item.get("note_type") or ""),
+                str(item.get("clinician_name") or ""),
+                str(item.get("patient_pt_id") or ""),
+            ]
+        ).lower()
+        if q not in hay and q not in hay.replace("_", " "):
+            return False
+    return True
+
+
+@router.get("/clinical-notes")
+def list_clinical_notes(
+    clinic_id: str = Query(..., min_length=1),
+    author_id: Optional[str] = Query(default=None),
+    status: Optional[str] = Query(default=None),
+    review_status: Optional[str] = Query(default=None),
+    signature_status: Optional[str] = Query(default=None),
+    ai_generated: Optional[bool] = Query(default=None),
+    attorney_requested: Optional[bool] = Query(default=None),
+    note_type: Optional[str] = Query(default=None),
+    clinician_id: Optional[str] = Query(default=None),
+    date_from: Optional[str] = Query(default=None),
+    date_to: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=10, ge=1, le=100),
+):
+    cid = clinic_id.strip()
+    try:
+        q = supabase.table("clinical_notes").select("*").eq("clinic_id", cid)
+        if status and str(status).strip():
+            q = q.eq("status", str(status).strip())
+        if author_id and str(author_id).strip():
+            resolved = _author_id_for_clinical_notes_filter(
+                cid, str(author_id).strip()
+            )
+            q = q.eq("author_id", resolved)
+        if note_type and str(note_type).strip().lower() not in ("", "all", "other"):
+            q = q.eq("note_type", str(note_type).strip().lower())
+        if clinician_id and str(clinician_id).strip():
+            q = q.eq("supervising_pt_id", str(clinician_id).strip())
+        if date_from:
+            q = q.gte("created_at", f"{str(date_from)[:10]}T00:00:00")
+        if date_to:
+            q = q.lte("created_at", f"{str(date_to)[:10]}T23:59:59")
+        resp = q.order("created_at", desc=True).execute()
+        _handle_supabase_error(resp)
+        raw_rows = [r for r in (resp.data or []) if isinstance(r, dict)]
+
+        enriched_all = _enrich_notes_for_list(raw_rows)
+        paired = list(zip(raw_rows, enriched_all))
+        filtered_pairs = [
+            (raw, enr)
+            for raw, enr in paired
+            if _note_matches_filters(
+                raw,
+                review_status=review_status,
+                signature_status=signature_status,
+                ai_generated=ai_generated,
+                attorney_requested=attorney_requested,
+                note_type=note_type,
+                clinician_id=None if clinician_id else None,
+                date_from=None,
+                date_to=None,
+                search=search,
+                enriched=enr,
+            )
+        ]
+        if clinician_id and str(clinician_id).strip():
+            cid_filter = str(clinician_id).strip()
+            filtered_pairs = [
+                (raw, enr)
+                for raw, enr in filtered_pairs
+                if str(raw.get("supervising_pt_id") or "") == cid_filter
+                or str(raw.get("author_id") or "") == cid_filter
+            ]
+
+        total_count = len(filtered_pairs)
+        start = (page - 1) * page_size
+        page_pairs = filtered_pairs[start : start + page_size]
+        notes = [enr for _, enr in page_pairs]
+
+        return {
+            "total_count": total_count,
+            "page": page,
+            "page_size": page_size,
+            "notes": notes,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Clinical notes list failed: {exc}"
+        ) from exc
 
 
 _PATCHABLE_STATUSES = frozenset({"draft", "ai_flagged", "needs_correction"})
