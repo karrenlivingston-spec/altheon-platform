@@ -9,7 +9,6 @@ import {
   billingStatusBadgeClass,
   DS_CARD,
   DS_INPUT,
-  DS_PAGE_ROOT,
   DS_PRIMARY_BTN,
   DS_SECONDARY_BTN,
   DS_TABLE_HEAD,
@@ -766,13 +765,13 @@ export function PatientDetailView({
     );
   }
 
-  const rootClass = embedded
-    ? "flex h-full min-h-0 w-full flex-1 flex-col overflow-y-auto bg-[#f0f4f8] px-4 pb-8 pt-2 md:px-6"
-    : DS_PAGE_ROOT;
+  const shellClass = embedded
+    ? "flex h-full min-h-0 w-full flex-1 flex-col overflow-hidden bg-[#f0f4f8] px-4 pt-2 md:px-6"
+    : "flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#f0f4f8] -mx-6 px-8 pt-8";
 
   if (loadingPatient && !patient) {
     return (
-      <div className={rootClass}>
+      <div className={shellClass}>
         {onBack ? (
           <div className="mb-4">
             <button
@@ -820,7 +819,7 @@ export function PatientDetailView({
 
   if (!patient || !draft) {
     return (
-      <div className={rootClass}>
+      <div className={shellClass}>
         {onBack ? (
           <div className="mb-4">
             <button
@@ -1048,62 +1047,65 @@ export function PatientDetailView({
   }
 
   return (
-    <div className={rootClass}>
-      {onBack ? (
-        <div className="mb-4">
-          <button
-            type="button"
-            onClick={onBack}
-            className={`text-sm font-medium text-gray-600 transition-colors hover:text-gray-900 ${embedded ? "md:hidden" : ""}`}
-          >
-            {embedded ? "← Back" : "← Patients"}
-          </button>
-        </div>
-      ) : null}
-
-      <PatientHeader
-        patient={display}
-        patientDisplayId={patientDisplayId}
-        onEditProfile={beginEdit}
-        editMode={editMode}
-        onSave={() => void saveEdit()}
-        onCancel={cancelEdit}
-        saveBusy={saveBusy}
-      />
-
-      <PatientQuickStats stats={headerStats} loading={headerStatsLoading} />
-
-      {patientReady ? (
-        <DiagnosticRedFlagBanner patientId={patientId} clinicId={clinicId} />
-      ) : null}
-
-      <div className="sticky top-0 z-20 -mx-1 mb-6 border-b border-gray-200 bg-[#f8fafc]/95 px-1 pb-0 backdrop-blur-sm">
-        <div className="flex gap-1 overflow-x-auto" role="tablist" aria-label="Patient sections">
-          {pageTabs.map((t) => (
+    <div className={shellClass}>
+      <div className="shrink-0">
+        {onBack ? (
+          <div className="mb-4">
             <button
-              key={t.id}
               type="button"
-              role="tab"
-              aria-selected={pageTab === t.id}
-              onClick={() => setPageTab(t.id)}
-              className={[
-                "rounded-t-lg px-4 py-2.5 text-sm font-medium transition-colors",
-                pageTab === t.id
-                  ? "border-b-2 text-[var(--color-primary,#0D9488)]"
-                  : "border-b-2 border-transparent text-gray-500 hover:text-gray-800",
-              ].join(" ")}
-              style={
-                pageTab === t.id
-                  ? { borderBottomColor: TAB_ACCENT, color: TAB_ACCENT }
-                  : undefined
-              }
+              onClick={onBack}
+              className={`text-sm font-medium text-gray-600 transition-colors hover:text-gray-900 ${embedded ? "md:hidden" : ""}`}
             >
-              {t.label}
+              {embedded ? "← Back" : "← Patients"}
             </button>
-          ))}
+          </div>
+        ) : null}
+
+        <PatientHeader
+          patient={display}
+          patientDisplayId={patientDisplayId}
+          onEditProfile={beginEdit}
+          editMode={editMode}
+          onSave={() => void saveEdit()}
+          onCancel={cancelEdit}
+          saveBusy={saveBusy}
+        />
+
+        <PatientQuickStats stats={headerStats} loading={headerStatsLoading} />
+
+        {patientReady ? (
+          <DiagnosticRedFlagBanner patientId={patientId} clinicId={clinicId} />
+        ) : null}
+
+        <div className="border-b border-gray-200 bg-[#f0f4f8]">
+          <div className="flex gap-1 overflow-x-auto" role="tablist" aria-label="Patient sections">
+            {pageTabs.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                role="tab"
+                aria-selected={pageTab === t.id}
+                onClick={() => setPageTab(t.id)}
+                className={[
+                  "rounded-t-lg px-4 py-2.5 text-sm font-medium transition-colors",
+                  pageTab === t.id
+                    ? "border-b-2 text-[var(--color-primary,#0D9488)]"
+                    : "border-b-2 border-transparent text-gray-500 hover:text-gray-800",
+                ].join(" ")}
+                style={
+                  pageTab === t.id
+                    ? { borderBottomColor: TAB_ACCENT, color: TAB_ACCENT }
+                    : undefined
+                }
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
+      <div className="min-h-0 flex-1 overflow-y-auto pb-8">
       {actionError ? (
         <p className="mb-4 rounded-2xl border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
           {actionError}
@@ -1597,6 +1599,7 @@ export function PatientDetailView({
           </div>
         </>
       ) : null}
+      </div>
     </div>
   );
 }
