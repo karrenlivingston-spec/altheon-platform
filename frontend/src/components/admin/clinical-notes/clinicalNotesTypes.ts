@@ -63,6 +63,7 @@ export type ClinicalNoteListItem = {
   cpt_codes_detected?: unknown[] | null;
   ai_feedback?: string | null;
   correction_notes?: string | null;
+  signed_despite_ai_flag?: boolean | null;
 };
 
 export type ScopeTab = "my" | "all" | "review";

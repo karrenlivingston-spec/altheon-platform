@@ -128,6 +128,24 @@ def _clinic_address(row: dict[str, Any]) -> str:
     return addr or "—"
 
 
+def _record_ids_for_clinic(clinic_id: str) -> list[str]:
+    try:
+        res = (
+            supabase.table("billing_records")
+            .select("id")
+            .eq("clinic_id", clinic_id)
+            .execute()
+        )
+        return [
+            str(r["id"])
+            for r in (res.data or [])
+            if isinstance(r, dict) and r.get("id")
+        ]
+    except Exception as e:
+        print(f"[clinics_dashboard] billing_records lookup error {clinic_id}: {e}")
+        return []
+
+
 def _sum_billing_payments(
     clinic_id: str,
     month_start: date,
@@ -137,42 +155,21 @@ def _sum_billing_payments(
     range_start: Optional[date] = None,
     range_end: Optional[date] = None,
 ) -> tuple[float, dict[str, float]]:
-    """Sum payment amounts in dollars for a clinic; returns (total, daily_map)."""
+    """Sum payment amounts in dollars for a clinic; returns (total, daily_map).
+
+    billing_payments has no clinic_id column — it is scoped to a clinic via
+    billing_record_id -> billing_records.id (clinic_id). record_ids must be
+    pre-populated by the caller from billing_records for this clinic_id.
+    """
     start = range_start or month_start
     end = range_end or today
-    first_of_month = f"{month_start.isoformat()}T00:00:00"
     daily: dict[str, float] = {}
     collected = 0.0
 
-    for col in ("amount_paid", "amount", "total_amount"):
-        try:
-            res = (
-                supabase.table("billing_payments")
-                .select(f"{col}, created_at, payment_date, billing_record_id, clinic_id")
-                .eq("clinic_id", clinic_id)
-                .gte("created_at", first_of_month)
-                .execute()
-            )
-            if getattr(res, "error", None):
-                continue
-            rows = [r for r in (res.data or []) if isinstance(r, dict)]
-            for r in rows:
-                pd = _parse_date(r.get("payment_date") or r.get("created_at"))
-                if pd and not (start <= pd <= end):
-                    continue
-                val = float(r.get(col) or 0)
-                collected += val
-                if pd:
-                    key = pd.isoformat()
-                    daily[key] = daily.get(key, 0) + val
-            break
-        except Exception:
-            continue
-
-    if collected > 0:
-        return round(collected, 2), daily
-
     record_set = set(record_ids or [])
+    if not record_set:
+        return 0.0, daily
+
     try:
         res = (
             supabase.table("billing_payments")
@@ -184,16 +181,15 @@ def _sum_billing_payments(
         for p in res.data or []:
             if not isinstance(p, dict):
                 continue
-            rid = str(p.get("billing_record_id") or "")
-            if record_set and rid not in record_set:
+            if str(p.get("billing_record_id") or "") not in record_set:
                 continue
             cents = _int_cents(p.get("amount_cents"))
             val = cents / 100.0
             collected += val
-            pd = _parse_date(p.get("payment_date") or p.get("created_at"))
+            pd = p.get("payment_date")
             if pd:
-                key = pd.isoformat()
-                daily[key] = daily.get(key, 0) + val
+                key = str(pd)[:10]
+                daily[key] = daily.get(key, 0.0) + val
     except Exception as e:
         print(f"[clinics_dashboard] billing_payments fallback error {clinic_id}: {e}")
 
@@ -405,10 +401,12 @@ def _aggregate_dashboard_stats() -> dict[str, Any]:
                 collection_rates.append(live["collection_rate_pct"])
 
         for cid in all_clinic_ids:
+            record_ids = _record_ids_for_clinic(cid)
             prev_collected, _ = _sum_billing_payments(
                 cid,
                 month_start,
                 today,
+                record_ids=record_ids,
                 range_start=prev_start,
                 range_end=prev_end,
             )

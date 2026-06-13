@@ -1308,10 +1308,10 @@ def sign_clinical_note(note_id: str, body: SignNoteBody):
 
     note_row = crows[0]
     st = str(note_row.get("status") or "").strip().lower()
-    if st != "ready_for_review":
+    if st not in ("ready_for_review", "ai_flagged"):
         raise HTTPException(
             status_code=409,
-            detail="Note must be in ready_for_review status to sign",
+            detail=f"Note must be in ready_for_review or ai_flagged status to sign (current: {st or 'unknown'})",
         )
 
     clinic_id_note = str(note_row.get("clinic_id") or "").strip()
@@ -1328,6 +1328,7 @@ def sign_clinical_note(note_id: str, body: SignNoteBody):
         "status": "signed",
         "signed_at": _now_iso(),
         "signed_by": resolved_signed_by,
+        "signed_despite_ai_flag": st == "ai_flagged",
         "updated_at": _now_iso(),
     }
     try:

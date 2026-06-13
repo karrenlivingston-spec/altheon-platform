@@ -248,6 +248,7 @@ export default function AdminClinicalNotesPage() {
   const [correctionNotes, setCorrectionNotes] = useState("");
   const [showCorrectionField, setShowCorrectionField] = useState(false);
   const [reviewBusy, setReviewBusy] = useState(false);
+  const [signAnywayBusy, setSignAnywayBusy] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
   const [infoToast, setInfoToast] = useState<string | null>(null);
   /** Special tests detected by the scribe before the note exists; flushed on first save. */
@@ -822,6 +823,37 @@ export default function AdminClinicalNotesPage() {
       setError(e instanceof Error ? e.message : "Sign failed");
     } finally {
       setReviewBusy(false);
+    }
+  }
+
+  async function signAnyway(note: ClinicalNote) {
+    const confirmed = window.confirm(
+      "This note was flagged by AI review. Sign anyway? This will be recorded on the note for audit purposes.",
+    );
+    if (!confirmed) return;
+
+    setSignAnywayBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/clinical-notes/${encodeURIComponent(note.id)}/sign`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ signed_by: signedByCandidate }),
+        },
+      );
+      if (!res.ok) {
+        setError(await res.text().catch(() => res.statusText));
+        return;
+      }
+      setToast("Note signed successfully");
+      setViewNote(null);
+      await refreshDashboard();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Sign failed");
+    } finally {
+      setSignAnywayBusy(false);
     }
   }
 
@@ -1412,16 +1444,29 @@ export default function AdminClinicalNotesPage() {
                 <p className="mt-1 whitespace-pre-wrap">
                   {viewNote.ai_feedback?.trim() || "—"}
                 </p>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setViewNote(null);
-                    void openEditorForNote(viewNote);
-                  }}
-                  className={`${DS_SECONDARY_BTN} mt-3`}
-                >
-                  Edit Note
-                </button>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setViewNote(null);
+                      void openEditorForNote(viewNote);
+                    }}
+                    className={DS_SECONDARY_BTN}
+                  >
+                    Edit Note
+                  </button>
+                  <button
+                    type="button"
+                    disabled={signAnywayBusy}
+                    onClick={() => void signAnyway(viewNote)}
+                    className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-60"
+                  >
+                    {signAnywayBusy ? "Signing…" : "Sign Anyway"}
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-red-700">
+                  Signing anyway overrides the AI flag and will be recorded on the note for review.
+                </p>
               </div>
             ) : null}
 
