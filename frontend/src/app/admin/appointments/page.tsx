@@ -35,8 +35,16 @@ import {
   findMondayYmdOfWeekContaining,
   getEasternYMD,
 } from "@/components/adminEastern";
-import CalendarView, { type ViewMode } from "@/components/scheduling/CalendarView";
+import CalendarView, {
+  type CalendarBookPrefill,
+  type ViewMode,
+} from "@/components/scheduling/CalendarView";
 import PatientFlow from "@/components/scheduling/PatientFlow";
+import NewPatientModal from "@/components/admin/patients/NewPatientModal";
+import AddToWaitlistModal from "@/components/admin/appointments/AddToWaitlistModal";
+import WaitlistViewModal, {
+  type WaitlistBookRequest,
+} from "@/components/admin/appointments/WaitlistViewModal";
 import { supabase } from "@/lib/supabase";
 
 const API_BASE =
@@ -97,6 +105,14 @@ export default function AdminAppointmentsPage() {
   const [openAppointmentId, setOpenAppointmentId] = useState<string | undefined>();
   const [patientFlowOpen, setPatientFlowOpen] = useState(false);
   const [newApptMenuOpen, setNewApptMenuOpen] = useState(false);
+  const [newPatientModalOpen, setNewPatientModalOpen] = useState(false);
+  const [addWaitlistOpen, setAddWaitlistOpen] = useState(false);
+  const [waitlistViewOpen, setWaitlistViewOpen] = useState(false);
+  const [waitlistCount, setWaitlistCount] = useState(0);
+  const [bookPrefillNonce, setBookPrefillNonce] = useState(0);
+  const [bookPrefill, setBookPrefill] = useState<CalendarBookPrefill | null>(
+    null,
+  );
 
   const weekMonday = useMemo(
     () => findMondayYmdOfWeekContaining(anchorYmd),
@@ -117,6 +133,21 @@ export default function AdminAppointmentsPage() {
     ]);
     setClinicians(clinRes.ok ? await clinRes.json() : []);
     setLocations((locRes.data as LocationOption[]) ?? []);
+  }, [clinicId]);
+
+  const loadWaitlistCount = useCallback(async () => {
+    if (!clinicId) return;
+    try {
+      const h = await authHeaders();
+      const res = await fetch(
+        `${API_BASE}/api/waitlist?clinic_id=${encodeURIComponent(clinicId)}&status=waiting`,
+        { headers: h },
+      );
+      const json = res.ok ? await res.json() : [];
+      setWaitlistCount(Array.isArray(json) ? json.length : 0);
+    } catch {
+      setWaitlistCount(0);
+    }
   }, [clinicId]);
 
   const loadDashboard = useCallback(async () => {
@@ -190,8 +221,42 @@ export default function AdminAppointmentsPage() {
   }, [loadMeta]);
 
   useEffect(() => {
+    void loadWaitlistCount();
+  }, [loadWaitlistCount]);
+
+  useEffect(() => {
     void loadDashboard();
   }, [loadDashboard]);
+
+  function handleWaitlistBookNow(request: WaitlistBookRequest) {
+    setWaitlistViewOpen(false);
+    setBookPrefill({
+      patient: request.patient,
+      date: request.date,
+      time: request.time,
+      clinicianId: request.clinicianId,
+      waitlistEntryId: request.waitlistEntryId,
+    });
+    setBookPrefillNonce((n) => n + 1);
+  }
+
+  async function handleAppointmentBooked(info: { waitlistEntryId?: string }) {
+    if (!info.waitlistEntryId) return;
+    try {
+      const h = await authHeaders();
+      await fetch(
+        `${API_BASE}/api/waitlist/${encodeURIComponent(info.waitlistEntryId)}`,
+        {
+          method: "PATCH",
+          headers: { ...h, "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "booked" }),
+        },
+      );
+      await loadWaitlistCount();
+    } catch {
+      // Appointment still booked; waitlist status update is best-effort.
+    }
+  }
 
   function goToday() {
     setAnchorYmd(getEasternYMD(new Date()));
@@ -247,8 +312,17 @@ export default function AdminAppointmentsPage() {
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button type="button" className={DS_SECONDARY_BTN}>
+          <button
+            type="button"
+            className={`${DS_SECONDARY_BTN} relative`}
+            onClick={() => setWaitlistViewOpen(true)}
+          >
             Waitlist
+            {waitlistCount > 0 ? (
+              <span className="ml-1.5 inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-emerald-600 px-1.5 py-0.5 text-xs font-medium text-white">
+                {waitlistCount}
+              </span>
+            ) : null}
           </button>
           <button
             type="button"
@@ -320,11 +394,19 @@ export default function AdminAppointmentsPage() {
           >
             + Block Time
           </button>
-          <button type="button" className={DS_SECONDARY_BTN}>
+          <button
+            type="button"
+            className={DS_SECONDARY_BTN}
+            onClick={() => setNewPatientModalOpen(true)}
+          >
             + New Patient
           </button>
-          <button type="button" className={DS_SECONDARY_BTN}>
-            Waitlist
+          <button
+            type="button"
+            className={DS_SECONDARY_BTN}
+            onClick={() => setAddWaitlistOpen(true)}
+          >
+            + Waitlist
           </button>
           <button type="button" className={DS_SECONDARY_BTN}>
             Group Session
@@ -441,6 +523,10 @@ export default function AdminAppointmentsPage() {
             onLocationIdChange={setLocationId}
             openAppointmentId={openAppointmentId}
             onOpenAppointmentHandled={() => setOpenAppointmentId(undefined)}
+            bookPrefillNonce={bookPrefillNonce}
+            bookPrefill={bookPrefill}
+            onBookPrefillConsumed={() => setBookPrefill(null)}
+            onAppointmentBooked={handleAppointmentBooked}
           />
         </div>
 
@@ -454,6 +540,25 @@ export default function AdminAppointmentsPage() {
           />
         </div>
       </div>
+
+      <NewPatientModal
+        open={newPatientModalOpen}
+        onClose={() => setNewPatientModalOpen(false)}
+        onCreated={() => setNewPatientModalOpen(false)}
+      />
+
+      <AddToWaitlistModal
+        open={addWaitlistOpen}
+        onClose={() => setAddWaitlistOpen(false)}
+        onAdded={() => void loadWaitlistCount()}
+      />
+
+      <WaitlistViewModal
+        open={waitlistViewOpen}
+        onClose={() => setWaitlistViewOpen(false)}
+        onBookNow={handleWaitlistBookNow}
+        onChanged={() => void loadWaitlistCount()}
+      />
     </div>
   );
 }

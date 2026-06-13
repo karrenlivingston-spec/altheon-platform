@@ -34,6 +34,7 @@ from app.routers import (
     clinics_dashboard as clinics_dashboard_router,
     memberships_dashboard as memberships_dashboard_router,
     groups_dashboard as groups_dashboard_router,
+    waitlist as waitlist_router,
     note_pdf as note_pdf_router,
     records_router,
     cpt_detection as cpt_detection_router,
@@ -101,6 +102,11 @@ app.include_router(
     groups_dashboard_router.router,
     prefix="/api",
     tags=["Groups Dashboard"],
+)
+app.include_router(
+    waitlist_router.router,
+    prefix="/api",
+    tags=["Waitlist"],
 )
 app.include_router(appointments.router, prefix="/appointments", tags=["appointments"])
 app.include_router(availability.router, tags=["availability"])

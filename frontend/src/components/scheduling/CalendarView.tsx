@@ -19,6 +19,7 @@ import {
   useEffect,
   useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { Printer } from "lucide-react";
@@ -109,6 +110,14 @@ type BookingPrefill = {
   time: string;
   clinicianId: string;
   patient?: PatientOption | null;
+};
+
+export type CalendarBookPrefill = {
+  patient: PatientOption;
+  date?: string;
+  time?: string;
+  clinicianId?: string;
+  waitlistEntryId?: string;
 };
 
 type ViewMode = "day" | "week" | "month" | "agenda";
@@ -378,6 +387,12 @@ type CalendarViewProps = {
   onLocationIdChange?: (id: string) => void;
   openAppointmentId?: string;
   onOpenAppointmentHandled?: () => void;
+  bookPrefillNonce?: number;
+  bookPrefill?: CalendarBookPrefill | null;
+  onBookPrefillConsumed?: () => void;
+  onAppointmentBooked?: (info: {
+    waitlistEntryId?: string;
+  }) => void | Promise<void>;
 };
 
 export default function CalendarView({
@@ -396,6 +411,10 @@ export default function CalendarView({
   onLocationIdChange,
   openAppointmentId,
   onOpenAppointmentHandled,
+  bookPrefillNonce = 0,
+  bookPrefill = null,
+  onBookPrefillConsumed,
+  onAppointmentBooked,
 }: CalendarViewProps) {
   const router = useRouter();
   const [internalView, setInternalView] = useState<ViewMode>("week");
@@ -456,6 +475,7 @@ export default function CalendarView({
   } | null>(null);
   const [bookModalOpen, setBookModalOpen] = useState(false);
   const [bookingPrefill, setBookingPrefill] = useState<BookingPrefill | null>(null);
+  const waitlistEntryIdRef = useRef<string | null>(null);
   const [slotAction, setSlotAction] = useState<SlotClickContext | null>(null);
   const [blockTimeContext, setBlockTimeContext] = useState<SlotClickContext | null>(null);
   const [toast, setToast] = useState<{
@@ -904,8 +924,22 @@ export default function CalendarView({
 
   useEffect(() => {
     if (openBookingNonce <= 0) return;
+    waitlistEntryIdRef.current = null;
     setBookModalOpen(true);
   }, [openBookingNonce]);
+
+  useEffect(() => {
+    if (bookPrefillNonce <= 0 || !bookPrefill) return;
+    setBookingPrefill({
+      date: bookPrefill.date || getEasternYMD(new Date()),
+      time: bookPrefill.time || "09:00",
+      clinicianId: bookPrefill.clinicianId || "",
+      patient: bookPrefill.patient,
+    });
+    waitlistEntryIdRef.current = bookPrefill.waitlistEntryId ?? null;
+    setBookModalOpen(true);
+    onBookPrefillConsumed?.();
+  }, [bookPrefillNonce, bookPrefill, onBookPrefillConsumed]);
 
   useEffect(() => {
     if (openBlockNonce <= 0) return;
@@ -1219,11 +1253,17 @@ export default function CalendarView({
           onClose={() => {
             setBookModalOpen(false);
             setBookingPrefill(null);
+            waitlistEntryIdRef.current = null;
           }}
           onBooked={async () => {
+            const waitlistEntryId = waitlistEntryIdRef.current ?? undefined;
             setBookModalOpen(false);
             setBookingPrefill(null);
+            waitlistEntryIdRef.current = null;
             setToast({ kind: "success", message: "Appointment booked" });
+            if (onAppointmentBooked) {
+              await onAppointmentBooked({ waitlistEntryId });
+            }
             await loadData();
           }}
           onError={(message) => {

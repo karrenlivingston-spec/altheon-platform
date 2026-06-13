@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Grid3X3, List, Phone, User } from "lucide-react";
 
 import { PatientDetailView } from "@/components/admin/PatientDetailView";
@@ -9,6 +9,9 @@ import {
   patientDisplayName,
   patientInitials,
 } from "@/components/admin/patients/patientTypes";
+import NewPatientModal, {
+  type CreatedPatient,
+} from "@/components/admin/patients/NewPatientModal";
 import { useClinic } from "@/app/admin/ClinicContext";
 import {
   DS_INPUT,
@@ -64,6 +67,26 @@ export default function AdminPatientsPage() {
     x: number;
     y: number;
   } | null>(null);
+  const [newPatientModalOpen, setNewPatientModalOpen] = useState(false);
+
+  const loadPatients = useCallback(async () => {
+    setLoading(true);
+    try {
+      const ptRes = await fetch(
+        `${API_BASE}/patients?clinic_id=${encodeURIComponent(clinicId)}`,
+      );
+      const ptJson = ptRes.ok ? await ptRes.json() : [];
+      setPatients(Array.isArray(ptJson) ? ptJson : []);
+    } catch {
+      setPatients([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [clinicId]);
+
+  useEffect(() => {
+    void loadPatients();
+  }, [loadPatients]);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -81,27 +104,11 @@ export default function AdminPatientsPage() {
     };
   }, [contextMenu]);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const ptRes = await fetch(
-          `${API_BASE}/patients?clinic_id=${encodeURIComponent(clinicId)}`,
-        );
-        const ptJson = ptRes.ok ? await ptRes.json() : [];
-        if (!cancelled) {
-          setPatients(Array.isArray(ptJson) ? ptJson : []);
-        }
-      } catch {
-        if (!cancelled) setPatients([]);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [clinicId]);
+  function handlePatientCreated(patient: CreatedPatient) {
+    setNewPatientModalOpen(false);
+    void loadPatients();
+    setSelectedId(patient.id);
+  }
 
   const filteredList = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -180,7 +187,11 @@ export default function AdminPatientsPage() {
             <p className="text-sm font-medium text-[#64748b]">
               {loading ? "…" : `${filteredCount} Patient${filteredCount === 1 ? "" : "s"}`}
             </p>
-            <button type="button" className={`${DS_SECONDARY_BTN} shrink-0 py-1.5 text-xs`}>
+            <button
+              type="button"
+              className={`${DS_SECONDARY_BTN} shrink-0 py-1.5 text-xs`}
+              onClick={() => setNewPatientModalOpen(true)}
+            >
               + New Patient
             </button>
           </div>
@@ -324,6 +335,12 @@ export default function AdminPatientsPage() {
           </button>
         </div>
       ) : null}
+
+      <NewPatientModal
+        open={newPatientModalOpen}
+        onClose={() => setNewPatientModalOpen(false)}
+        onCreated={handlePatientCreated}
+      />
     </div>
   );
 }

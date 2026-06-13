@@ -323,7 +323,7 @@ def list_patients(clinic_id: str = Query(...), search: Optional[str] = Query(def
 
 @router.post("", status_code=201)
 def create_patient(body: dict = Body(...)):
-    """Create a patient row with clinic_id set to STTPDN and clinic access."""
+    """Create a patient row for the requested clinic (defaults to STTPDN if omitted)."""
     first_name = (body.get("first_name") or "").strip()
     last_name = (body.get("last_name") or "").strip()
     if not first_name or not last_name:
@@ -331,10 +331,12 @@ def create_patient(body: dict = Body(...)):
             status_code=400, detail="first_name and last_name are required"
         )
 
+    clinic_id = (body.get("clinic_id") or "").strip() or STTPDN_CLINIC_ID
+
     insert_data: dict[str, Any] = {
         "first_name": first_name,
         "last_name": last_name,
-        "clinic_id": STTPDN_CLINIC_ID,
+        "clinic_id": clinic_id,
     }
     for key in _PATCHABLE_PATIENT_FIELDS:
         if key in ("first_name", "last_name"):
@@ -360,7 +362,7 @@ def create_patient(body: dict = Body(...)):
         access_ins = (
             supabase.table("patient_clinic_access")
             .insert(
-                {"patient_id": patient_id, "clinic_id": STTPDN_CLINIC_ID}
+                {"patient_id": patient_id, "clinic_id": clinic_id}
             )
             .execute()
         )
