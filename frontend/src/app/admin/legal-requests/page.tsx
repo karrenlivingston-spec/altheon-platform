@@ -1,304 +1,375 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { Search } from "lucide-react";
 
 import {
-  DS_CARD,
+  DS_INPUT,
   DS_PAGE_ROOT,
   DS_PAGE_SUBTITLE,
   DS_PAGE_TITLE,
   DS_PRIMARY_BTN,
-  DS_TABLE_HEAD,
-  DS_TABLE_WRAP,
-  DS_TD_PRIMARY,
-  DS_TD_SECONDARY,
-  DS_TH,
-  DS_TR,
-  legalStatusBadgeClass,
 } from "@/app/admin/designSystem";
-
 import { useClinic } from "@/app/admin/ClinicContext";
+import LegalRequestModal, {
+  type LegalRequestFormValues,
+} from "@/components/admin/legal-requests/LegalRequestModal";
+import LegalRequestsKanban from "@/components/admin/legal-requests/LegalRequestsKanban";
+import LegalRequestsStatBar from "@/components/admin/legal-requests/LegalRequestsStatBar";
+import {
+  LegalRequest,
+  LegalRequestStats,
+  LegalRequestStatus,
+  nextStatus,
+  prevStatus,
+} from "@/components/admin/legal-requests/legalRequestsTypes";
+import { supabase } from "@/lib/supabase";
 
-const API_BASE = "https://altheon-platform.onrender.com";
-const NY = "America/New_York";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
 
-/** Backend GET /legal-requests may not exist on Render yet — UI still works with empty data. */
-
-type LegalRequestRow = {
-  id: string;
-  created_at?: string;
-  attorney_name?: string;
-  firm_name?: string;
-  attorney_phone?: string;
-  patient_name?: string;
-  request_type?: string;
-  status?: string;
-};
-
-function formatReceived(iso?: string): string {
-  if (!iso) return "—";
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: NY,
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(iso));
+async function authHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token ?? "";
+  const h: Record<string, string> = {};
+  if (token) h.Authorization = `Bearer ${token}`;
+  return h;
 }
 
 export default function AdminLegalRequestsPage() {
   const { clinicId } = useClinic();
-  const [rows, setRows] = useState<LegalRequestRow[]>([]);
+  const [requests, setRequests] = useState<LegalRequest[]>([]);
+  const [stats, setStats] = useState<LegalRequestStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [fetchNote, setFetchNote] = useState<string | null>(null);
-  const [updatingIds, setUpdatingIds] = useState<Record<string, boolean>>({});
+  const [statsLoading, setStatsLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<"create" | "edit">("create");
+  const [editingRequest, setEditingRequest] = useState<LegalRequest | null>(null);
+  const [saving, setSaving] = useState(false);
 
-  async function refreshRows() {
-    setFetchNote(null);
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search), 300);
+    return () => window.clearTimeout(t);
+  }, [search]);
+
+  const loadStats = useCallback(async () => {
+    if (!clinicId) return;
+    setStatsLoading(true);
     try {
       const res = await fetch(
-        `${API_BASE}/legal-requests?clinic_id=${encodeURIComponent(clinicId)}`,
+        `${API_BASE}/api/legal-requests/stats?clinic_id=${encodeURIComponent(clinicId)}`,
+        { headers: await authHeaders() },
       );
-      if (res.status === 404) {
-        setFetchNote(
-          "GET /legal-requests is not deployed yet — showing empty list until the endpoint exists.",
-        );
-        setRows([]);
+      if (!res.ok) {
+        setStats(null);
         return;
       }
+      setStats((await res.json()) as LegalRequestStats);
+    } catch {
+      setStats(null);
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [clinicId]);
+
+  const loadRequests = useCallback(async () => {
+    if (!clinicId) {
+      setRequests([]);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({ clinic_id: clinicId });
+      if (debouncedSearch.trim()) {
+        params.set("search", debouncedSearch.trim());
+      }
+      const res = await fetch(
+        `${API_BASE}/api/legal-requests?${params.toString()}`,
+        { headers: await authHeaders() },
+      );
       if (!res.ok) {
-        setFetchNote(`Could not load legal requests (HTTP ${res.status}).`);
-        setRows([]);
+        setError(`Could not load legal requests (HTTP ${res.status}).`);
+        setRequests([]);
         return;
       }
       const data = await res.json();
-      setRows(Array.isArray(data) ? data : []);
+      setRequests(Array.isArray(data) ? data : []);
     } catch {
-      setFetchNote("Could not load legal requests (network error).");
-      setRows([]);
+      setError("Could not load legal requests (network error).");
+      setRequests([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [clinicId, debouncedSearch]);
+
+  useEffect(() => {
+    void loadStats();
+  }, [loadStats]);
+
+  useEffect(() => {
+    void loadRequests();
+  }, [loadRequests]);
+
+  const searchPatients = useCallback(
+    async (query: string) => {
+      if (!clinicId) return [];
+      const params = new URLSearchParams({ clinic_id: clinicId });
+      if (query.trim()) params.set("search", query.trim());
+      const res = await fetch(`${API_BASE}/patients?${params.toString()}`, {
+        headers: await authHeaders(),
+      });
+      const json = res.ok ? await res.json() : [];
+      return Array.isArray(json) ? json : [];
+    },
+    [clinicId],
+  );
+
+  const patchStatus = useCallback(
+    async (requestId: string, status: LegalRequestStatus) => {
+      let previous: LegalRequest[] = [];
+      setRequests((rows) => {
+        previous = rows;
+        return rows.map((r) => (r.id === requestId ? { ...r, status } : r));
+      });
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/legal-requests/${encodeURIComponent(requestId)}`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+              ...(await authHeaders()),
+            },
+            body: JSON.stringify({ status }),
+          },
+        );
+        if (!res.ok) {
+          setRequests(previous);
+          setError(`Status update failed (HTTP ${res.status}).`);
+          return;
+        }
+        const updated = (await res.json()) as LegalRequest;
+        setRequests((rows) =>
+          rows.map((r) => (r.id === requestId ? { ...r, ...updated } : r)),
+        );
+        void loadStats();
+      } catch {
+        setRequests(previous);
+        setError("Status update failed (network error).");
+      }
+    },
+    [loadStats],
+  );
+
+  function openCreate() {
+    setModalMode("create");
+    setEditingRequest(null);
+    setModalOpen(true);
+  }
+
+  function openEdit(request: LegalRequest) {
+    setModalMode("edit");
+    setEditingRequest(request);
+    setModalOpen(true);
+  }
+
+  async function handleCreate(values: LegalRequestFormValues) {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/legal-requests`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(await authHeaders()),
+        },
+        body: JSON.stringify({
+          clinic_id: clinicId,
+          patient_id: values.patient_id || null,
+          patient_name: values.patient_name,
+          requesting_party_name: values.requesting_party_name,
+          requesting_party_type: values.requesting_party_type,
+          request_date: values.request_date,
+          request_method: values.request_method,
+          documents_requested: values.documents_requested,
+          attorney_name: values.attorney_name || null,
+          firm_name: values.firm_name || null,
+          attorney_phone: values.attorney_phone || null,
+          attorney_email: values.attorney_email || null,
+          request_type: values.request_type,
+          notes: values.notes || null,
+        }),
+      });
+      if (!res.ok) {
+        setError(`Create failed (HTTP ${res.status}).`);
+        return;
+      }
+      const created = (await res.json()) as LegalRequest;
+      setRequests((rows) => [created, ...rows]);
+      setModalOpen(false);
+      void loadStats();
+    } catch {
+      setError("Create failed (network error).");
+    } finally {
+      setSaving(false);
     }
   }
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      setFetchNote(null);
-      try {
-        const res = await fetch(
-          `${API_BASE}/legal-requests?clinic_id=${encodeURIComponent(clinicId)}`,
-        );
-        if (res.status === 404) {
-          if (!cancelled) {
-            setFetchNote(
-              "GET /legal-requests is not deployed yet — showing empty list until the endpoint exists.",
-            );
-            setRows([]);
-          }
-          return;
-        }
-        if (!res.ok) {
-          if (!cancelled) {
-            setFetchNote(`Could not load legal requests (HTTP ${res.status}).`);
-            setRows([]);
-          }
-          return;
-        }
-        const data = await res.json();
-        if (!cancelled) {
-          setRows(Array.isArray(data) ? data : []);
-        }
-      } catch {
-        if (!cancelled) {
-          setFetchNote("Could not load legal requests (network error).");
-          setRows([]);
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const counts = useMemo(() => {
-    const total = rows.length;
-    let pending = 0;
-    let inProgress = 0;
-    let completed = 0;
-    for (const r of rows) {
-      const s = (r.status ?? "").toLowerCase();
-      if (s === "pending") pending += 1;
-      else if (s === "in_progress") inProgress += 1;
-      else if (s === "completed") completed += 1;
-    }
-    return { total, pending, inProgress, completed };
-  }, [rows]);
-
-  async function patchStatus(id: string, status: "in_progress" | "completed") {
-    setUpdatingIds((p) => ({ ...p, [id]: true }));
+  async function handleEdit(values: LegalRequestFormValues) {
+    if (!editingRequest) return;
+    setSaving(true);
+    setError(null);
     try {
-      const params = new URLSearchParams({
-        clinic_id: clinicId,
-      });
       const res = await fetch(
-        `${API_BASE}/legal-requests/${encodeURIComponent(id)}/status?${params.toString()}`,
+        `${API_BASE}/api/legal-requests/${encodeURIComponent(editingRequest.id)}`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status }),
+          headers: {
+            "Content-Type": "application/json",
+            ...(await authHeaders()),
+          },
+          body: JSON.stringify({
+            patient_id: values.patient_id || null,
+            patient_name: values.patient_name,
+            requesting_party_name: values.requesting_party_name,
+            requesting_party_type: values.requesting_party_type,
+            request_date: values.request_date,
+            request_method: values.request_method,
+            documents_requested: values.documents_requested,
+            documents_prepared: values.documents_prepared,
+            send_date: values.send_date || null,
+            send_method: values.send_method || null,
+            status: values.status,
+            attorney_name: values.attorney_name || null,
+            firm_name: values.firm_name || null,
+            attorney_phone: values.attorney_phone || null,
+            attorney_email: values.attorney_email || null,
+            request_type: values.request_type,
+            notes: values.notes || null,
+          }),
         },
       );
       if (!res.ok) {
-        setFetchNote(
-          `Status update failed (HTTP ${res.status}). ${await res.text().catch(() => "")}`.trim(),
-        );
+        setError(`Save failed (HTTP ${res.status}).`);
         return;
       }
-      setFetchNote(null);
-      await refreshRows();
+      const updated = (await res.json()) as LegalRequest;
+      setRequests((rows) =>
+        rows.map((r) => (r.id === updated.id ? { ...r, ...updated } : r)),
+      );
+      setModalOpen(false);
+      void loadStats();
+    } catch {
+      setError("Save failed (network error).");
     } finally {
-      setUpdatingIds((p) => {
-        const n = { ...p };
-        delete n[id];
-        return n;
-      });
+      setSaving(false);
     }
+  }
+
+  async function handleArchive(request: LegalRequest) {
+    const previous = requests;
+    setRequests((rows) => rows.filter((r) => r.id !== request.id));
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/legal-requests/${encodeURIComponent(request.id)}`,
+        { method: "DELETE", headers: await authHeaders() },
+      );
+      if (!res.ok) {
+        setRequests(previous);
+        setError(`Archive failed (HTTP ${res.status}).`);
+        return;
+      }
+      void loadStats();
+    } catch {
+      setRequests(previous);
+      setError("Archive failed (network error).");
+    }
+  }
+
+  function handleMoveForward(request: LegalRequest) {
+    const next = nextStatus(request.status);
+    if (!next) return;
+    void patchStatus(request.id, next);
+  }
+
+  function handleMoveBack(request: LegalRequest) {
+    const prev = prevStatus(request.status);
+    if (!prev) return;
+    void patchStatus(request.id, prev);
   }
 
   return (
     <div className={DS_PAGE_ROOT}>
-      <h1 className={DS_PAGE_TITLE}>Legal Requests</h1>
-      <p className={DS_PAGE_SUBTITLE}>Attorney and records requests</p>
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-500">
-          {loading ? "…" : `${counts.total} request${counts.total === 1 ? "" : "s"}`}
-        </span>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <h1 className={DS_PAGE_TITLE}>Legal Requests</h1>
+          <p className={DS_PAGE_SUBTITLE}>
+            Medical record requests and attorney correspondence
+          </p>
+        </div>
+        <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-center lg:w-auto">
+          <div className="relative min-w-0 flex-1 sm:min-w-[260px]">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search patient, attorney, or firm…"
+              className={`${DS_INPUT} w-full pl-9`}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={openCreate}
+            className={`${DS_PRIMARY_BTN} inline-flex min-h-[44px] shrink-0 items-center justify-center px-4 py-2.5`}
+          >
+            + New Request
+          </button>
+        </div>
       </div>
 
-      {fetchNote ? (
-        <p className="mt-8 rounded-2xl border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
-          {fetchNote}
+      <div className="mt-5">
+        <LegalRequestsStatBar stats={stats} loading={statsLoading} />
+      </div>
+
+      {error ? (
+        <p className="mt-6 rounded-xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
+          {error}
         </p>
       ) : null}
 
-      <div className="mt-8 grid grid-cols-2 gap-6 sm:grid-cols-4">
-        <SummaryCard label="Total Requests" value={String(counts.total)} />
-        <SummaryCard label="Pending" value={String(counts.pending)} />
-        <SummaryCard label="In Progress" value={String(counts.inProgress)} />
-        <SummaryCard label="Completed" value={String(counts.completed)} />
+      <div className="mt-6">
+        {loading ? (
+          <p className="py-16 text-center text-sm text-gray-500">Loading board…</p>
+        ) : (
+          <LegalRequestsKanban
+            requests={requests}
+            onEdit={openEdit}
+            onMove={(id, status) => void patchStatus(id, status)}
+            onMoveForward={handleMoveForward}
+            onMoveBack={handleMoveBack}
+            onArchive={(r) => void handleArchive(r)}
+          />
+        )}
       </div>
 
-      <div className={`${DS_TABLE_WRAP} mt-8`}>
-        <div className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead className={DS_TABLE_HEAD}>
-              <tr>
-                <th className={DS_TH}>Date Received</th>
-                <th className={DS_TH}>Attorney Name</th>
-                <th className={DS_TH}>Firm Name</th>
-                <th className={DS_TH}>Phone</th>
-                <th className={DS_TH}>Patient Name</th>
-                <th className={DS_TH}>Request Type</th>
-                <th className={DS_TH}>Status</th>
-                <th className={DS_TH}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td
-                    colSpan={8}
-                    className="px-6 py-10 text-center text-gray-500"
-                  >
-                    Loading…
-                  </td>
-                </tr>
-              ) : rows.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={8}
-                    className="px-6 py-10 text-center text-gray-500"
-                  >
-                    No legal requests logged yet.
-                  </td>
-                </tr>
-              ) : (
-                rows.map((row) => {
-                  const st = (row.status ?? "pending").toLowerCase();
-                  const busy = !!updatingIds[row.id];
-                  return (
-                    <tr key={row.id} className={DS_TR}>
-                      <td className={`${DS_TD_SECONDARY} whitespace-nowrap`}>
-                        {formatReceived(row.created_at)}
-                      </td>
-                      <td className={`${DS_TD_PRIMARY} font-medium`}>
-                        {row.attorney_name ?? "—"}
-                      </td>
-                      <td className={DS_TD_PRIMARY}>{row.firm_name ?? "—"}</td>
-                      <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
-                        {row.attorney_phone ?? "—"}
-                      </td>
-                      <td className={`${DS_TD_PRIMARY} font-medium`}>
-                        {row.patient_name ?? "—"}
-                      </td>
-                      <td className={DS_TD_PRIMARY}>{row.request_type ?? "—"}</td>
-                      <td className={DS_TD_PRIMARY}>
-                        <span className={`capitalize ${legalStatusBadgeClass(st)}`}>
-                          {st.replace(/_/g, " ")}
-                        </span>
-                      </td>
-                      <td className={DS_TD_PRIMARY}>
-                        <div className="flex flex-wrap gap-2">
-                          {st === "pending" ? (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => void patchStatus(row.id, "in_progress")}
-                              className={`${DS_PRIMARY_BTN} hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50`}
-                            >
-                              Start
-                            </button>
-                          ) : null}
-                          {st === "in_progress" ? (
-                            <button
-                              type="button"
-                              disabled={busy}
-                              onClick={() => void patchStatus(row.id, "completed")}
-                              className={`${DS_PRIMARY_BTN} hover:scale-[1.02] active:scale-[0.98] disabled:opacity-50`}
-                            >
-                              Complete
-                            </button>
-                          ) : null}
-                          {st === "completed" ? (
-                            <span
-                              className={`capitalize ${legalStatusBadgeClass(st)}`}
-                            >
-                              {st.replace(/_/g, " ")}
-                            </span>
-                          ) : null}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function SummaryCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className={DS_CARD}>
-      <p className="text-3xl font-semibold tabular-nums text-gray-900">{value}</p>
-      <p className="mt-2 text-xs font-medium uppercase tracking-wider text-gray-500">
-        {label}
-      </p>
+      <LegalRequestModal
+        open={modalOpen}
+        mode={modalMode}
+        initial={editingRequest}
+        clinicId={clinicId}
+        saving={saving}
+        onClose={() => setModalOpen(false)}
+        onSubmit={(values) =>
+          void (modalMode === "create" ? handleCreate(values) : handleEdit(values))
+        }
+        searchPatients={searchPatients}
+      />
     </div>
   );
 }

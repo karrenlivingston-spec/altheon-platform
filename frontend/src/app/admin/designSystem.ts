@@ -88,6 +88,18 @@ export function billingStatusBadgeClass(status: string): string {
 export function legalStatusBadgeClass(status: string): string {
   const s = status.toLowerCase();
   switch (s) {
+    case "received":
+      return `${BADGE} bg-blue-50 text-blue-700`;
+    case "gathering_records":
+      return `${BADGE} bg-amber-50 text-amber-700`;
+    case "provider_review":
+      return `${BADGE} bg-purple-50 text-purple-700`;
+    case "ready":
+      return `${BADGE} bg-green-50 text-green-700`;
+    case "delivered":
+      return `${BADGE} bg-gray-100 text-gray-600`;
+    case "archived":
+      return `${BADGE} bg-gray-100 text-gray-500`;
     case "pending":
       return `${BADGE} bg-amber-50 text-amber-700`;
     case "in_progress":

@@ -396,7 +396,7 @@ def dashboard_summary(clinic: ClinicUserDep):
                 supabase.table("legal_requests")
                 .select("id", count="exact")
                 .eq("clinic_id", cid)
-                .eq("status", "in_progress")
+                .not_.in_("status", ["delivered", "archived"])
                 .execute()
             )
             _handle_supabase_error(legal_resp)

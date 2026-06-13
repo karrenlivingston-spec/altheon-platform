@@ -76,7 +76,7 @@ app.include_router(appointments.router, prefix="/appointments", tags=["appointme
 app.include_router(availability.router, tags=["availability"])
 app.include_router(patients.router, prefix="/patients", tags=["patients"])
 app.include_router(
-    legal_requests.router, prefix="/legal-requests", tags=["legal-requests"]
+    legal_requests.router, prefix="/api/legal-requests", tags=["legal-requests"]
 )
 app.include_router(next_available.router, prefix="/next-available", tags=["next-available"])
 app.include_router(memberships.router, tags=["Memberships"])
