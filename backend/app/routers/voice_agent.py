@@ -32,6 +32,43 @@ _INTENT_REASONS = (
 )
 
 
+def _empty_stats() -> dict[str, Any]:
+    return {
+        "calls_today": 0,
+        "calls_today_vs_yesterday": 0,
+        "appointments_booked": 0,
+        "appointments_booked_vs_yesterday": 0,
+        "missed_calls": 0,
+        "missed_vs_yesterday": 0,
+        "booking_conversion_pct": 0,
+        "conversion_vs_yesterday": 0,
+        "avg_duration_seconds": 0,
+        "avg_duration_vs_yesterday": 0,
+        "is_online": True,
+    }
+
+
+def _empty_outcomes() -> dict[str, Any]:
+    return {
+        "total": 0,
+        "breakdown": [
+            {"label": label, "value": 0, "pct": 0, "color": color}
+            for _, label, color in _OUTCOME_BUCKETS
+        ],
+    }
+
+
+def _empty_performance() -> dict[str, Any]:
+    return {
+        "call_answer_rate_pct": 0,
+        "answer_rate_vs_last_period": 0,
+        "patient_satisfaction": 0,
+        "satisfaction_vs_last": 0,
+        "avg_answer_time_seconds": 0,
+        "answer_time_vs_last": 0,
+    }
+
+
 def _handle_supabase_error(response: Any) -> None:
     error = getattr(response, "error", None)
     if error:
@@ -201,27 +238,37 @@ def _fetch_logs(
     limit: int | None = None,
     offset: int = 0,
 ) -> list[dict[str, Any]]:
-    q = (
-        supabase.table("voice_interaction_logs")
-        .select(
-            "id, clinic_id, patient_id, call_sid, transcript, intent_detected, "
-            "outcome, duration_seconds, success_flag, error_reason, caller_name, "
-            "caller_phone, summary, appointment_id, recording_url, created_at, "
-            "patients(first_name, last_name), "
-            "appointments(start_time, clinicians(first_name, last_name, title))"
+    try:
+        q = (
+            supabase.table("voice_interaction_logs")
+            .select(
+                "id, clinic_id, patient_id, call_sid, transcript, intent_detected, "
+                "outcome, duration_seconds, success_flag, error_reason, caller_name, "
+                "caller_phone, summary, appointment_id, recording_url, created_at, "
+                "patients(first_name, last_name), "
+                "appointments(start_time, clinicians(first_name, last_name, title))"
+            )
+            .eq("clinic_id", clinic_id)
+            .order("created_at", desc=True)
         )
-        .eq("clinic_id", clinic_id)
-        .order("created_at", desc=True)
-    )
-    if start_utc is not None:
-        q = q.gte("created_at", start_utc.isoformat())
-    if end_utc is not None:
-        q = q.lt("created_at", end_utc.isoformat())
-    if limit is not None:
-        q = q.range(offset, offset + limit - 1)
-    resp = q.execute()
-    _handle_supabase_error(resp)
-    return [r for r in (resp.data or []) if isinstance(r, dict)]
+        if start_utc is not None:
+            q = q.gte("created_at", start_utc.isoformat())
+        if end_utc is not None:
+            q = q.lt("created_at", end_utc.isoformat())
+        if limit is not None:
+            q = q.range(offset, offset + limit - 1)
+        try:
+            resp = q.execute()
+        except Exception as e:
+            print(f"[voice_agent] query error: {e}")
+            return []
+        _handle_supabase_error(resp)
+        return [r for r in (resp.data or []) if isinstance(r, dict)]
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[voice_agent] query error: {e}")
+        return []
 
 
 def _fetch_logs_simple(
@@ -230,20 +277,28 @@ def _fetch_logs_simple(
     start_utc: datetime | None = None,
     end_utc: datetime | None = None,
 ) -> list[dict[str, Any]]:
-    q = (
-        supabase.table("voice_interaction_logs")
-        .select(
-            "outcome, intent_detected, duration_seconds, success_flag, created_at"
+    try:
+        q = (
+            supabase.table("voice_interaction_logs")
+            .select(
+                "outcome, intent_detected, duration_seconds, success_flag, created_at"
+            )
+            .eq("clinic_id", clinic_id)
         )
-        .eq("clinic_id", clinic_id)
-    )
-    if start_utc is not None:
-        q = q.gte("created_at", start_utc.isoformat())
-    if end_utc is not None:
-        q = q.lt("created_at", end_utc.isoformat())
-    resp = q.execute()
-    _handle_supabase_error(resp)
-    return [r for r in (resp.data or []) if isinstance(r, dict)]
+        if start_utc is not None:
+            q = q.gte("created_at", start_utc.isoformat())
+        if end_utc is not None:
+            q = q.lt("created_at", end_utc.isoformat())
+        try:
+            resp = q.execute()
+        except Exception as e:
+            print(f"[voice_agent] query error: {e}")
+            return []
+        _handle_supabase_error(resp)
+        return [r for r in (resp.data or []) if isinstance(r, dict)]
+    except Exception as e:
+        print(f"[voice_agent] query error: {e}")
+        return []
 
 
 def _day_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -312,10 +367,10 @@ def get_voice_agent_stats(
     clinic_id: str = Query(..., min_length=1),
     date_param: Optional[str] = Query(default=None, alias="date"),
 ):
-    cid = clinic_id.strip()
-    target = _parse_target_date(date_param)
-    yesterday = target - timedelta(days=1)
     try:
+        cid = clinic_id.strip()
+        target = _parse_target_date(date_param)
+        yesterday = target - timedelta(days=1)
         today_start, today_end = _day_bounds(target)
         y_start, y_end = _day_bounds(yesterday)
         today_rows = _fetch_logs_simple(cid, start_utc=today_start, end_utc=today_end)
@@ -343,9 +398,9 @@ def get_voice_agent_stats(
         }
     except HTTPException:
         raise
-    except Exception as exc:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as e:
+        print(f"[voice_agent] query error: {e}")
+        return _empty_stats()
 
 
 @router.get("/voice-agent/call-volume")
@@ -389,8 +444,8 @@ def get_voice_outcomes(
     clinic_id: str = Query(..., min_length=1),
     days: int = Query(7, ge=1, le=90),
 ):
-    cid = clinic_id.strip()
     try:
+        cid = clinic_id.strip()
         start_utc, end_utc = _period_bounds(days)
         rows = _fetch_logs_simple(cid, start_utc=start_utc, end_utc=end_utc)
         buckets = {k: 0 for k, _, _ in _OUTCOME_BUCKETS}
@@ -406,11 +461,9 @@ def get_voice_outcomes(
                 {"label": label, "value": value, "pct": pct, "color": color}
             )
         return {"total": total, "breakdown": breakdown}
-    except HTTPException:
-        raise
-    except Exception as exc:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as e:
+        print(f"[voice_agent] query error: {e}")
+        return _empty_outcomes()
 
 
 @router.get("/voice-agent/recent-calls")
@@ -419,16 +472,14 @@ def get_voice_recent_calls(
     limit: int = Query(20, ge=1, le=100),
     page: int = Query(1, ge=1),
 ):
-    cid = clinic_id.strip()
-    offset = (page - 1) * limit
     try:
+        cid = clinic_id.strip()
+        offset = (page - 1) * limit
         rows = _fetch_logs(cid, limit=limit, offset=offset)
         return [_shape_recent_call(r) for r in rows]
-    except HTTPException:
-        raise
-    except Exception as exc:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as e:
+        print(f"[voice_agent] query error: {e}")
+        return []
 
 
 @router.get("/voice-agent/top-reasons")
@@ -463,8 +514,8 @@ def get_voice_performance(
     clinic_id: str = Query(..., min_length=1),
     days: int = Query(7, ge=1, le=90),
 ):
-    cid = clinic_id.strip()
     try:
+        cid = clinic_id.strip()
         start_utc, end_utc = _period_bounds(days)
         prev_end = start_utc
         prev_start = prev_end - timedelta(days=days)
@@ -490,8 +541,6 @@ def get_voice_performance(
             "avg_answer_time_seconds": 7,
             "answer_time_vs_last": -2,
         }
-    except HTTPException:
-        raise
-    except Exception as exc:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as e:
+        print(f"[voice_agent] query error: {e}")
+        return _empty_performance()
