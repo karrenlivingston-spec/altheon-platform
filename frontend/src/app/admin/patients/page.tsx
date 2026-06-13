@@ -1,15 +1,24 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { User } from "lucide-react";
+import { Grid3X3, List, Phone, User } from "lucide-react";
 
 import { PatientDetailView } from "@/components/admin/PatientDetailView";
+import {
+  formatDob,
+  patientDisplayName,
+  patientInitials,
+} from "@/components/admin/patients/patientTypes";
 import { useClinic } from "@/app/admin/ClinicContext";
-import { DS_INPUT, DS_PAGE_SUBTITLE, DS_PAGE_TITLE } from "@/app/admin/designSystem";
+import {
+  DS_INPUT,
+  DS_PAGE_SUBTITLE,
+  DS_PAGE_TITLE,
+  DS_SECONDARY_BTN,
+} from "@/app/admin/designSystem";
 
-const API_BASE = "https://altheon-platform.onrender.com";
-
-const NY = "America/New_York";
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
 
 type PatientRow = {
   id: string;
@@ -17,59 +26,38 @@ type PatientRow = {
   last_name?: string;
   phone?: string | null;
   email?: string | null;
+  date_of_birth?: string | null;
+  gender?: string | null;
   created_at?: string | null;
 };
 
-type AppointmentRow = {
-  id: string;
-  patient_id: string;
-  start_time: string;
-};
-
-function getEasternYMD(d: Date): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: NY,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(d);
-  const y = parts.find((p) => p.type === "year")?.value ?? "1970";
-  const mo = parts.find((p) => p.type === "month")?.value ?? "01";
-  const day = parts.find((p) => p.type === "day")?.value ?? "01";
-  return `${y}-${mo}-${day}`;
-}
-
-function formatFirstSeenDate(iso: string): string {
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: NY,
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(iso));
-}
-
-function patientDisplayName(p: PatientRow): string {
-  const s = `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim();
-  return s || "—";
-}
+type SortOption = "last_name_az";
 
 function normalizePhone(s: string): string {
   return s.replace(/\D/g, "");
 }
 
-function patientInitials(p: PatientRow): string {
-  const a = (p.first_name ?? "").trim().charAt(0);
-  const b = (p.last_name ?? "").trim().charAt(0);
-  const s = `${a}${b}`.toUpperCase();
-  return s || "?";
+function sortPatients(list: PatientRow[], sort: SortOption): PatientRow[] {
+  const copy = [...list];
+  if (sort === "last_name_az") {
+    copy.sort((a, b) => {
+      const la = (a.last_name ?? "").trim().toLowerCase();
+      const lb = (b.last_name ?? "").trim().toLowerCase();
+      const cmp = la.localeCompare(lb);
+      if (cmp !== 0) return cmp;
+      return (a.first_name ?? "").trim().localeCompare((b.first_name ?? "").trim());
+    });
+  }
+  return copy;
 }
 
 export default function AdminPatientsPage() {
   const { clinicId } = useClinic();
   const [patients, setPatients] = useState<PatientRow[]>([]);
-  const [appointments, setAppointments] = useState<AppointmentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<SortOption>("last_name_az");
+  const [viewMode, setViewMode] = useState<"list" | "grid">("list");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{
     patientId: string;
@@ -97,21 +85,15 @@ export default function AdminPatientsPage() {
     let cancelled = false;
     (async () => {
       try {
-        const [ptRes, apRes] = await Promise.all([
-          fetch(`${API_BASE}/patients?clinic_id=${encodeURIComponent(clinicId)}`),
-          fetch(`${API_BASE}/appointments?clinic_id=${encodeURIComponent(clinicId)}`),
-        ]);
+        const ptRes = await fetch(
+          `${API_BASE}/patients?clinic_id=${encodeURIComponent(clinicId)}`,
+        );
         const ptJson = ptRes.ok ? await ptRes.json() : [];
-        const apJson = apRes.ok ? await apRes.json() : [];
         if (!cancelled) {
           setPatients(Array.isArray(ptJson) ? ptJson : []);
-          setAppointments(Array.isArray(apJson) ? apJson : []);
         }
       } catch {
-        if (!cancelled) {
-          setPatients([]);
-          setAppointments([]);
-        }
+        if (!cancelled) setPatients([]);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -121,50 +103,27 @@ export default function AdminPatientsPage() {
     };
   }, [clinicId]);
 
-  const statsByPatient = useMemo(() => {
-    const map = new Map<string, { first: Date | null; count: number }>();
-    for (const a of appointments) {
-      const pid = a.patient_id;
-      if (!pid) continue;
-      const t = new Date(a.start_time);
-      if (Number.isNaN(t.getTime())) continue;
-      const cur = map.get(pid) ?? { first: null, count: 0 };
-      cur.count += 1;
-      if (!cur.first || t < cur.first) cur.first = t;
-      map.set(pid, cur);
-    }
-    return map;
-  }, [appointments]);
-
-  const todayEasternYmd = useMemo(() => getEasternYMD(new Date()), []);
-  const windowEndYmd = useMemo(() => {
-    const [y, m, d] = todayEasternYmd.split("-").map(Number);
-    const t = Date.UTC(y, m - 1, d + 14, 12, 0, 0);
-    return getEasternYMD(new Date(t));
-  }, [todayEasternYmd]);
-
   const filteredList = useMemo(() => {
     const q = search.trim().toLowerCase();
     const qPhone = normalizePhone(search);
-    return patients
-      .filter((p) => {
-        if (!q && !qPhone) return true;
-        const name = patientDisplayName(p).toLowerCase();
-        const phone = String(p.phone ?? "");
-        const phoneNorm = normalizePhone(phone);
-        if (q && (name.includes(q) || phone.toLowerCase().includes(q))) return true;
-        if (qPhone && phoneNorm.includes(qPhone)) return true;
-        return false;
-      })
-      .sort((a, b) => patientDisplayName(a).localeCompare(patientDisplayName(b)));
-  }, [patients, search]);
+    const filtered = patients.filter((p) => {
+      if (!q && !qPhone) return true;
+      const name = patientDisplayName(p).toLowerCase();
+      const phone = String(p.phone ?? "");
+      const phoneNorm = normalizePhone(phone);
+      if (q && (name.includes(q) || phone.toLowerCase().includes(q))) return true;
+      if (qPhone && phoneNorm.includes(qPhone)) return true;
+      return false;
+    });
+    return sortPatients(filtered, sort);
+  }, [patients, search, sort]);
 
   const filteredCount = filteredList.length;
 
   return (
     <div className="flex min-h-[calc(100dvh-6rem)] flex-col md:flex-row md:min-h-[calc(100vh-8rem)]">
       <aside
-        className={`flex w-full shrink-0 flex-col border-[#e2e8f0] bg-white md:w-[320px] md:border-r ${
+        className={`flex w-full shrink-0 flex-col border-[#e2e8f0] bg-white md:w-[340px] md:border-r ${
           selectedId ? "hidden md:flex" : "flex"
         }`}
         style={{ maxHeight: "100%" }}
@@ -180,35 +139,100 @@ export default function AdminPatientsPage() {
             className={`${DS_INPUT} mt-4 w-full`}
             aria-label="Search patients"
           />
-          <p className="mt-2 text-sm text-[#64748b]">
-            {loading ? "…" : `${filteredCount} patient${filteredCount === 1 ? "" : "s"}`}
-          </p>
+          <div className="mt-3 flex items-center gap-2">
+            <select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as SortOption)}
+              className={`${DS_INPUT} flex-1`}
+              aria-label="Sort patients"
+            >
+              <option value="last_name_az">Last Name (A-Z)</option>
+            </select>
+            <div className="flex shrink-0 rounded-lg border border-gray-200 p-0.5">
+              <button
+                type="button"
+                onClick={() => setViewMode("list")}
+                className={`rounded-md p-1.5 ${
+                  viewMode === "list"
+                    ? "bg-gray-100 text-gray-900"
+                    : "text-gray-400 hover:text-gray-600"
+                }`}
+                aria-label="List view"
+                aria-pressed={viewMode === "list"}
+              >
+                <List className="h-4 w-4" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("grid")}
+                className={`rounded-md p-1.5 ${
+                  viewMode === "grid"
+                    ? "bg-gray-100 text-gray-900"
+                    : "text-gray-400 hover:text-gray-600"
+                }`}
+                aria-label="Grid view"
+                aria-pressed={viewMode === "grid"}
+              >
+                <Grid3X3 className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          <div className="mt-3 flex items-center justify-between gap-2">
+            <p className="text-sm font-medium text-[#64748b]">
+              {loading ? "…" : `${filteredCount} Patient${filteredCount === 1 ? "" : "s"}`}
+            </p>
+            <button type="button" className={`${DS_SECONDARY_BTN} shrink-0 py-1.5 text-xs`}>
+              + New Patient
+            </button>
+          </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {loading ? (
             <p className="p-4 text-sm text-[#64748b]">Loading…</p>
           ) : filteredList.length === 0 ? (
             <p className="p-4 text-sm text-[#64748b]">No patients match your search.</p>
+          ) : viewMode === "grid" ? (
+            <ul className="grid grid-cols-2 gap-2 p-3">
+              {filteredList.map((p) => {
+                const selected = selectedId === p.id;
+                return (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(p.id)}
+                      className={`flex w-full flex-col items-center rounded-xl border p-3 text-center transition-colors hover:bg-[rgba(22,163,74,0.06)] ${
+                        selected
+                          ? "border-[#16A34A] bg-[rgba(22,163,74,0.12)]"
+                          : "border-[#e2e8f0]"
+                      }`}
+                    >
+                      <span
+                        className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-semibold text-white"
+                        style={{ backgroundColor: "#16A34A" }}
+                      >
+                        {patientInitials(p)}
+                      </span>
+                      <p className="mt-2 truncate text-sm font-bold text-[#0f172a]">
+                        {patientDisplayName(p)}
+                      </p>
+                      <span className="mt-1 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-700">
+                        Active
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           ) : (
             <ul className="divide-y divide-[#e2e8f0]">
               {filteredList.map((p) => {
-                const s = statsByPatient.get(p.id);
-                const firstSeen =
-                  s?.first != null
-                    ? formatFirstSeenDate(s.first.toISOString())
-                    : p.created_at
-                      ? formatFirstSeenDate(p.created_at)
-                      : null;
-                let active = false;
-                for (const a of appointments) {
-                  if (a.patient_id !== p.id) continue;
-                  const ymd = getEasternYMD(new Date(a.start_time));
-                  if (ymd >= todayEasternYmd && ymd <= windowEndYmd) {
-                    active = true;
-                    break;
-                  }
-                }
                 const selected = selectedId === p.id;
+                const dobGender = [
+                  p.date_of_birth ? formatDob(p.date_of_birth) : null,
+                  p.gender?.trim() || null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ");
                 return (
                   <li key={p.id}>
                     <button
@@ -226,7 +250,7 @@ export default function AdminPatientsPage() {
                         selected
                           ? "border-l-[3px] border-l-[#16A34A] bg-[rgba(22,163,74,0.12)]"
                           : "border-l-[3px] border-l-transparent"
-                      } `}
+                      }`}
                     >
                       <span
                         className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white"
@@ -235,25 +259,21 @@ export default function AdminPatientsPage() {
                         {patientInitials(p)}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <p className="truncate font-semibold text-[#0f172a]">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate font-bold text-[#0f172a]">
                             {patientDisplayName(p)}
                           </p>
-                          <span
-                            className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${
-                              active ? "bg-[#16A34A]" : "bg-gray-300"
-                            }`}
-                            title={active ? "Active" : "Inactive"}
-                          />
+                          <span className="shrink-0 rounded-full bg-green-50 px-2 py-0.5 text-[10px] font-medium text-green-700">
+                            Active
+                          </span>
                         </div>
-                        <p className="mt-0.5 text-[0.8rem] text-[#64748b]">
+                        {dobGender ? (
+                          <p className="mt-0.5 text-[0.8rem] text-[#64748b]">{dobGender}</p>
+                        ) : null}
+                        <p className="mt-0.5 flex items-center gap-1 text-[0.8rem] text-[#64748b]">
+                          <Phone className="h-3 w-3 shrink-0" aria-hidden />
                           {p.phone?.trim() || "—"}
                         </p>
-                        {firstSeen ? (
-                          <p className="mt-0.5 text-[0.8rem] text-[#64748b]">
-                            First seen {firstSeen}
-                          </p>
-                        ) : null}
                       </div>
                     </button>
                   </li>

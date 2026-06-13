@@ -10,7 +10,6 @@ import {
   DS_CARD,
   DS_INPUT,
   DS_PAGE_ROOT,
-  DS_PAGE_TITLE,
   DS_PRIMARY_BTN,
   DS_SECONDARY_BTN,
   DS_TABLE_HEAD,
@@ -31,6 +30,10 @@ import { OutcomeMeasuresSection } from "@/components/admin/OutcomeMeasuresSectio
 import { DmeSection } from "@/components/dme/DmeSection";
 import { DiagnosticRedFlagBanner } from "@/components/admin/DiagnosticRedFlagBanner";
 import { DiagnosticsTab } from "@/components/admin/DiagnosticsTab";
+import PatientHeader from "@/components/admin/patients/PatientHeader";
+import PatientQuickStats from "@/components/admin/patients/PatientQuickStats";
+import PatientOverviewTab from "@/components/admin/patients/PatientOverviewTab";
+import type { PatientHeaderStats } from "@/components/admin/patients/patientTypes";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
@@ -39,13 +42,15 @@ const NY = "America/New_York";
 const SECONDARY_STAGGER_MS = 200;
 const TAB_ACCENT = "var(--color-primary, #0D9488)";
 
-type PageTab = "overview" | "dme" | "pi-cases" | "imaging-diagnostics";
-type SectionTab =
+type PageTab =
   | "overview"
   | "appointments"
+  | "clinical"
   | "billing"
-  | "membership"
-  | "benefits";
+  | "documents"
+  | "notes"
+  | "legal"
+  | "memberships";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -143,13 +148,6 @@ function clinicianLabel(id: string): string {
 function patientDisplayName(p: PatientRecord): string {
   const s = `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim();
   return s || "Patient";
-}
-
-function initials(p: PatientRecord): string {
-  const a = (p.first_name ?? "").trim().charAt(0);
-  const b = (p.last_name ?? "").trim().charAt(0);
-  const s = `${a}${b}`.toUpperCase();
-  return s || "?";
 }
 
 function formatDob(ymd: string | null | undefined): string {
@@ -304,8 +302,9 @@ export function PatientDetailView({
   const [editMode, setEditMode] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [pageTab, setPageTab] = useState<PageTab>("overview");
-  const [sectionTab, setSectionTab] = useState<SectionTab>("overview");
   const [piCasesEverOpened, setPiCasesEverOpened] = useState(false);
+  const [headerStats, setHeaderStats] = useState<PatientHeaderStats | null>(null);
+  const [headerStatsLoading, setHeaderStatsLoading] = useState(false);
 
   const [legalEdit, setLegalEdit] = useState(false);
   const [legalDraft, setLegalDraft] = useState({
@@ -490,7 +489,7 @@ export function PatientDetailView({
     setPatient(null);
     setDraft(null);
     setPageTab("overview");
-    setSectionTab("overview");
+    setHeaderStats(null);
     setPiCasesEverOpened(false);
     setPiRows([]);
     setPiError(null);
@@ -551,8 +550,34 @@ export function PatientDetailView({
     };
   }, [patientReady, patientId, clinicId, loadSecondaryResources]);
 
+  const loadHeaderStats = useCallback(async () => {
+    if (!patientId || !clinicId) return;
+    setHeaderStatsLoading(true);
+    try {
+      const h = await authHeaders();
+      const res = await fetch(
+        `${API_BASE}/api/patients/${encodeURIComponent(patientId)}/header-stats?clinic_id=${encodeURIComponent(clinicId)}`,
+        { headers: h },
+      );
+      if (!res.ok) {
+        setHeaderStats(null);
+        return;
+      }
+      setHeaderStats((await res.json()) as PatientHeaderStats);
+    } catch {
+      setHeaderStats(null);
+    } finally {
+      setHeaderStatsLoading(false);
+    }
+  }, [patientId, clinicId]);
+
   useEffect(() => {
-    if (pageTab !== "pi-cases" || !patientReady || piCasesEverOpened) return;
+    if (!patientReady || !patientId || !clinicId) return;
+    void loadHeaderStats();
+  }, [patientReady, patientId, clinicId, loadHeaderStats]);
+
+  useEffect(() => {
+    if (pageTab !== "legal" || !patientReady || piCasesEverOpened) return;
     setPiCasesEverOpened(true);
     void loadPiCases();
   }, [pageTab, patientReady, piCasesEverOpened, loadPiCases]);
@@ -583,9 +608,13 @@ export function PatientDetailView({
 
   const pageTabs: { id: PageTab; label: string }[] = [
     { id: "overview", label: "Overview" },
-    { id: "dme", label: "DME" },
-    { id: "pi-cases", label: "PI Cases" },
-    { id: "imaging-diagnostics", label: "Imaging & Diagnostics" },
+    { id: "appointments", label: "Appointments" },
+    { id: "clinical", label: "Clinical" },
+    { id: "billing", label: "Billing" },
+    { id: "documents", label: "Documents" },
+    { id: "notes", label: "Notes" },
+    { id: "legal", label: "Legal" },
+    { id: "memberships", label: "Memberships" },
   ];
 
   function setDraftField<K extends keyof PatientRecord>(
@@ -657,6 +686,7 @@ export function PatientDetailView({
       setPatient(patientFields as PatientRecord);
       setDraft({ ...(patientFields as PatientRecord) });
       void loadSecondaryResources(() => false);
+      void loadHeaderStats();
       setEditMode(false);
     } catch {
       setActionError("Save failed.");
@@ -789,13 +819,208 @@ export function PatientDetailView({
 
   const display = editMode ? draft : patient;
 
-  const sectionTabs: { id: SectionTab; label: string }[] = [
-    { id: "overview", label: "Overview" },
-    { id: "appointments", label: "Appointments" },
-    { id: "billing", label: "Billing" },
-    { id: "membership", label: "Memberships" },
-    { id: "benefits", label: "Benefits" },
-  ];
+  const patientDisplayId =
+    headerStats?.patient_display_id ??
+    `PT-${patientId.replace(/-/g, "").slice(-6).toUpperCase()}`;
+
+  function renderEditProfileForm() {
+    if (!draft) return null;
+    const d = draft;
+    return (
+      <div className="mb-6 grid gap-6 md:grid-cols-2">
+        <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
+          <h2 className="mb-4 text-sm font-semibold text-gray-900">Address</h2>
+          <div className="space-y-4">
+            <div>
+              <span className={LABEL_CLASS}>Line 1</span>
+              <input
+                className={FIELD_INPUT}
+                value={d.address_line1 ?? ""}
+                onChange={(e) => setDraftField("address_line1", e.target.value)}
+              />
+            </div>
+            <div>
+              <span className={LABEL_CLASS}>Line 2</span>
+              <input
+                className={FIELD_INPUT}
+                value={d.address_line2 ?? ""}
+                onChange={(e) => setDraftField("address_line2", e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <span className={LABEL_CLASS}>City</span>
+                <input
+                  className={FIELD_INPUT}
+                  value={d.city ?? ""}
+                  onChange={(e) => setDraftField("city", e.target.value)}
+                />
+              </div>
+              <div>
+                <span className={LABEL_CLASS}>State</span>
+                <input
+                  className={FIELD_INPUT}
+                  value={d.state ?? ""}
+                  onChange={(e) => setDraftField("state", e.target.value)}
+                />
+              </div>
+            </div>
+            <div>
+              <span className={LABEL_CLASS}>ZIP</span>
+              <input
+                className={FIELD_INPUT}
+                value={d.zip ?? ""}
+                onChange={(e) => setDraftField("zip", e.target.value)}
+              />
+            </div>
+          </div>
+          <h2 className={`${DS_SECTION_HEADER} mt-8`}>Emergency contact</h2>
+          <div className="space-y-4">
+            <div>
+              <span className={LABEL_CLASS}>Name</span>
+              <input
+                className={FIELD_INPUT}
+                value={d.emergency_contact_name ?? ""}
+                onChange={(e) =>
+                  setDraftField("emergency_contact_name", e.target.value)
+                }
+              />
+            </div>
+            <div>
+              <span className={LABEL_CLASS}>Phone</span>
+              <input
+                className={FIELD_INPUT}
+                value={d.emergency_contact_phone ?? ""}
+                onChange={(e) =>
+                  setDraftField("emergency_contact_phone", e.target.value)
+                }
+              />
+            </div>
+            <div>
+              <span className={LABEL_CLASS}>Relationship</span>
+              <input
+                className={FIELD_INPUT}
+                value={d.emergency_contact_relationship ?? ""}
+                onChange={(e) =>
+                  setDraftField("emergency_contact_relationship", e.target.value)
+                }
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className={DS_CARD}>
+          <h2 className={DS_SECTION_HEADER}>Personal &amp; Insurance</h2>
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <span className={LABEL_CLASS}>First name</span>
+                <input
+                  className={FIELD_INPUT}
+                  value={d.first_name ?? ""}
+                  onChange={(e) => setDraftField("first_name", e.target.value)}
+                />
+              </div>
+              <div>
+                <span className={LABEL_CLASS}>Last name</span>
+                <input
+                  className={FIELD_INPUT}
+                  value={d.last_name ?? ""}
+                  onChange={(e) => setDraftField("last_name", e.target.value)}
+                />
+              </div>
+            </div>
+            <div>
+              <span className={LABEL_CLASS}>Email</span>
+              <input
+                className={FIELD_INPUT}
+                value={d.email ?? ""}
+                onChange={(e) => setDraftField("email", e.target.value)}
+              />
+            </div>
+            <div>
+              <span className={LABEL_CLASS}>Phone</span>
+              <input
+                className={FIELD_INPUT}
+                value={d.phone ?? ""}
+                onChange={(e) => setDraftField("phone", e.target.value)}
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <span className={LABEL_CLASS}>Date of birth</span>
+                <input
+                  className={FIELD_INPUT}
+                  value={d.date_of_birth ?? ""}
+                  onChange={(e) => setDraftField("date_of_birth", e.target.value)}
+                />
+              </div>
+              <div>
+                <span className={LABEL_CLASS}>Gender</span>
+                <input
+                  className={FIELD_INPUT}
+                  value={d.gender ?? ""}
+                  onChange={(e) => setDraftField("gender", e.target.value)}
+                />
+              </div>
+            </div>
+            <div>
+              <span className={LABEL_CLASS}>Carrier</span>
+              <input
+                className={FIELD_INPUT}
+                value={d.insurance_carrier ?? ""}
+                onChange={(e) => setDraftField("insurance_carrier", e.target.value)}
+              />
+            </div>
+            <div>
+              <span className={LABEL_CLASS}>Policy number</span>
+              <input
+                className={FIELD_INPUT}
+                value={d.insurance_policy_number ?? ""}
+                onChange={(e) =>
+                  setDraftField("insurance_policy_number", e.target.value)
+                }
+              />
+            </div>
+            <div>
+              <span className={LABEL_CLASS}>Group number</span>
+              <input
+                className={FIELD_INPUT}
+                value={d.insurance_group_number ?? ""}
+                onChange={(e) =>
+                  setDraftField("insurance_group_number", e.target.value)
+                }
+              />
+            </div>
+            <div>
+              <span className={LABEL_CLASS}>Primary complaint</span>
+              <textarea
+                className={`${FIELD_INPUT} min-h-[72px]`}
+                value={d.primary_complaint ?? ""}
+                onChange={(e) => setDraftField("primary_complaint", e.target.value)}
+              />
+            </div>
+            <div>
+              <span className={LABEL_CLASS}>Referring provider</span>
+              <input
+                className={FIELD_INPUT}
+                value={d.referring_provider ?? ""}
+                onChange={(e) => setDraftField("referring_provider", e.target.value)}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  function renderComingSoon(label: string) {
+    return (
+      <div className={`${DS_CARD} py-16 text-center`}>
+        <p className="text-sm font-medium text-gray-500">{label} — Coming soon</p>
+      </div>
+    );
+  }
 
   return (
     <div className={rootClass}>
@@ -811,66 +1036,24 @@ export function PatientDetailView({
         </div>
       ) : null}
 
-      <div className="mb-6 overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
-        <div className="flex flex-col gap-6 px-6 py-6 md:flex-row md:items-start md:justify-between">
-          <div className="flex min-w-0 gap-4">
-            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-green-50 text-lg font-medium text-green-700">
-              {initials(patient)}
-            </div>
-            <div className="min-w-0">
-              <h1 className={DS_PAGE_TITLE}>
-                {patientDisplayName(patient)}
-              </h1>
-              <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-gray-500">
-                <span>{display.phone?.trim() || "—"}</span>
-                <span className="text-gray-300">|</span>
-                <span>{display.email?.trim() || "—"}</span>
-                <span className="text-gray-300">|</span>
-                <span>DOB {formatDob(display.date_of_birth ?? undefined)}</span>
-                <span className="text-gray-300">|</span>
-                <span>{display.gender?.trim() || "—"}</span>
-              </p>
-            </div>
-          </div>
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            {editMode ? (
-              <>
-                <button
-                  type="button"
-                  disabled={saveBusy}
-                  onClick={() => void saveEdit()}
-                  className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
-                >
-                  {saveBusy ? "Saving…" : "Save"}
-                </button>
-                <button
-                  type="button"
-                  disabled={saveBusy}
-                  onClick={cancelEdit}
-                  className={DS_SECONDARY_BTN}
-                >
-                  Cancel
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                onClick={beginEdit}
-                className={DS_PRIMARY_BTN}
-              >
-                Edit Profile
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
+      <PatientHeader
+        patient={display}
+        patientDisplayId={patientDisplayId}
+        onEditProfile={beginEdit}
+        editMode={editMode}
+        onSave={() => void saveEdit()}
+        onCancel={cancelEdit}
+        saveBusy={saveBusy}
+      />
+
+      <PatientQuickStats stats={headerStats} loading={headerStatsLoading} />
 
       {patientReady ? (
         <DiagnosticRedFlagBanner patientId={patientId} clinicId={clinicId} />
       ) : null}
 
       <div className="sticky top-0 z-20 -mx-1 mb-6 border-b border-gray-200 bg-[#f8fafc]/95 px-1 pb-0 backdrop-blur-sm">
-        <div className="flex gap-1" role="tablist" aria-label="Patient sections">
+        <div className="flex gap-1 overflow-x-auto" role="tablist" aria-label="Patient sections">
           {pageTabs.map((t) => (
             <button
               key={t.id}
@@ -896,502 +1079,29 @@ export function PatientDetailView({
         </div>
       </div>
 
-      {pageTab === "overview" ? (
-        <>
-      <div className="relative mb-6 rounded-lg border border-gray-100 bg-white p-6 shadow-sm">
-        <div className="mb-4 flex items-start justify-between gap-2">
-          <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">
-            Legal / PI Information
-          </h2>
-          {!legalEdit ? (
-            <button
-              type="button"
-              onClick={() => {
-                setLegalDraft({
-                  lawyer_name: patient.lawyer_name ?? "",
-                  law_firm: patient.law_firm ?? "",
-                  lawyer_phone: patient.lawyer_phone ?? "",
-                  lawyer_email: patient.lawyer_email ?? "",
-                });
-                setLegalEdit(true);
-              }}
-              className="rounded p-1 text-gray-500 hover:bg-gray-50 hover:text-gray-800"
-              aria-label="Edit legal information"
-            >
-              <Pencil className="h-4 w-4" />
-            </button>
-          ) : null}
-        </div>
-        {legalEdit ? (
-          <div className="space-y-4">
-            <div>
-              <span className={LABEL_CLASS}>Lawyer Name</span>
-              <input
-                className={FIELD_INPUT}
-                value={legalDraft.lawyer_name}
-                onChange={(e) =>
-                  setLegalDraft((d) => ({ ...d, lawyer_name: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <span className={LABEL_CLASS}>Law Firm</span>
-              <input
-                className={FIELD_INPUT}
-                value={legalDraft.law_firm}
-                onChange={(e) =>
-                  setLegalDraft((d) => ({ ...d, law_firm: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <span className={LABEL_CLASS}>Lawyer Phone</span>
-              <input
-                className={FIELD_INPUT}
-                value={legalDraft.lawyer_phone}
-                onChange={(e) =>
-                  setLegalDraft((d) => ({ ...d, lawyer_phone: e.target.value }))
-                }
-              />
-            </div>
-            <div>
-              <span className={LABEL_CLASS}>Lawyer Email</span>
-              <input
-                type="email"
-                className={FIELD_INPUT}
-                value={legalDraft.lawyer_email}
-                onChange={(e) =>
-                  setLegalDraft((d) => ({ ...d, lawyer_email: e.target.value }))
-                }
-              />
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={legalSaveBusy}
-                onClick={() => void saveLegal()}
-                className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
-              >
-                {legalSaveBusy ? "Saving…" : "Save"}
-              </button>
-              <button
-                type="button"
-                disabled={legalSaveBusy}
-                onClick={cancelLegal}
-                className={DS_SECONDARY_BTN}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        ) : hasLawyerInfo ? (
-          <dl className="space-y-3 text-sm">
-            <div>
-              <dt className={LABEL_CLASS}>Lawyer Name</dt>
-              <dd className="mt-1 font-semibold text-gray-900">
-                {(patient.lawyer_name ?? "").trim() || "—"}
-              </dd>
-            </div>
-            <div>
-              <dt className={LABEL_CLASS}>Law Firm</dt>
-              <dd className="mt-1 text-gray-800">
-                {(patient.law_firm ?? "").trim() || "—"}
-              </dd>
-            </div>
-            <div>
-              <dt className={LABEL_CLASS}>Lawyer Phone</dt>
-              <dd className="mt-1 text-gray-800">
-                {(patient.lawyer_phone ?? "").trim() || "—"}
-              </dd>
-            </div>
-            <div>
-              <dt className={LABEL_CLASS}>Lawyer Email</dt>
-              <dd className="mt-1 text-gray-800">
-                {(patient.lawyer_email ?? "").trim() || "—"}
-              </dd>
-            </div>
-          </dl>
-        ) : (
-          <button
-            type="button"
-            onClick={() => {
-              setLegalDraft({
-                lawyer_name: "",
-                law_firm: "",
-                lawyer_phone: "",
-                lawyer_email: "",
-              });
-              setLegalEdit(true);
-            }}
-            className="text-sm text-gray-500 hover:text-gray-800"
-          >
-            Assign lawyer
-          </button>
-        )}
-      </div>
-
       {actionError ? (
         <p className="mb-4 rounded-2xl border border-amber-100 bg-amber-50/80 px-4 py-3 text-sm text-amber-900">
           {actionError}
         </p>
       ) : null}
 
-      <div className="mb-6 flex flex-wrap gap-2 border-b border-gray-100 pb-1">
-        {sectionTabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            onClick={() => setSectionTab(t.id)}
-            className={[
-              "rounded-t-lg px-4 py-2 text-sm font-medium transition-colors",
-              sectionTab === t.id
-                ? "border-b-2 border-[#16A34A] text-[#16A34A]"
-                : "text-gray-500 hover:text-gray-800",
-            ].join(" ")}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      {pageTab === "overview" ? (
+        <>
+          {editMode ? (
+            renderEditProfileForm()
+          ) : headerStats ? (
+            <PatientOverviewTab
+              patient={patient}
+              stats={headerStats}
+              onEditProfile={beginEdit}
+            />
+          ) : headerStatsLoading ? (
+            <div className={`${DS_CARD} mb-6`}>
+              <CardSkeleton lines={12} />
+            </div>
+          ) : null}
 
-      {sectionTab === "overview" ? (
-        <div className="grid gap-6 md:grid-cols-2">
-          <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-            <h2 className="mb-4 text-sm font-semibold text-gray-900">Address</h2>
-            <div className="space-y-4">
-              <div>
-                <span className={LABEL_CLASS}>Line 1</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    value={draft.address_line1 ?? ""}
-                    onChange={(e) =>
-                      setDraftField("address_line1", e.target.value)
-                    }
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.address_line1?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-              <div>
-                <span className={LABEL_CLASS}>Line 2</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    value={draft.address_line2 ?? ""}
-                    onChange={(e) =>
-                      setDraftField("address_line2", e.target.value)
-                    }
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.address_line2?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <span className={LABEL_CLASS}>City</span>
-                  {editMode ? (
-                    <input
-                      className={FIELD_INPUT}
-                      value={draft.city ?? ""}
-                      onChange={(e) => setDraftField("city", e.target.value)}
-                    />
-                  ) : (
-                    <p className="mt-1 text-sm text-gray-800">
-                      {display.city?.trim() || "—"}
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <span className={LABEL_CLASS}>State</span>
-                  {editMode ? (
-                    <input
-                      className={FIELD_INPUT}
-                      value={draft.state ?? ""}
-                      onChange={(e) => setDraftField("state", e.target.value)}
-                    />
-                  ) : (
-                    <p className="mt-1 text-sm text-gray-800">
-                      {display.state?.trim() || "—"}
-                    </p>
-                  )}
-                </div>
-              </div>
-              <div>
-                <span className={LABEL_CLASS}>ZIP</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    value={draft.zip ?? ""}
-                    onChange={(e) => setDraftField("zip", e.target.value)}
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.zip?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-            </div>
-            <h2 className={`${DS_SECTION_HEADER} mt-8`}>
-              Emergency contact
-            </h2>
-            <div className="space-y-4">
-              <div>
-                <span className={LABEL_CLASS}>Name</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    value={draft.emergency_contact_name ?? ""}
-                    onChange={(e) =>
-                      setDraftField("emergency_contact_name", e.target.value)
-                    }
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.emergency_contact_name?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-              <div>
-                <span className={LABEL_CLASS}>Phone</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    value={draft.emergency_contact_phone ?? ""}
-                    onChange={(e) =>
-                      setDraftField("emergency_contact_phone", e.target.value)
-                    }
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.emergency_contact_phone?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-              <div>
-                <span className={LABEL_CLASS}>Relationship</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    value={draft.emergency_contact_relationship ?? ""}
-                    onChange={(e) =>
-                      setDraftField(
-                        "emergency_contact_relationship",
-                        e.target.value,
-                      )
-                    }
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.emergency_contact_relationship?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className={DS_CARD}>
-            <h2 className={DS_SECTION_HEADER}>Insurance</h2>
-            <div className="space-y-4">
-              <div>
-                <span className={LABEL_CLASS}>Carrier</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    value={draft.insurance_carrier ?? ""}
-                    onChange={(e) =>
-                      setDraftField("insurance_carrier", e.target.value)
-                    }
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.insurance_carrier?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-              <div>
-                <span className={LABEL_CLASS}>Policy number</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    value={draft.insurance_policy_number ?? ""}
-                    onChange={(e) =>
-                      setDraftField("insurance_policy_number", e.target.value)
-                    }
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.insurance_policy_number?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-              <div>
-                <span className={LABEL_CLASS}>Group number</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    value={draft.insurance_group_number ?? ""}
-                    onChange={(e) =>
-                      setDraftField("insurance_group_number", e.target.value)
-                    }
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.insurance_group_number?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-            </div>
-            <h2 className="mb-4 mt-8 text-sm font-semibold text-gray-900">Clinical</h2>
-            <div className="space-y-4">
-              <div>
-                <span className={LABEL_CLASS}>Primary complaint</span>
-                {editMode ? (
-                  <textarea
-                    className={`${FIELD_INPUT} min-h-[72px]`}
-                    value={draft.primary_complaint ?? ""}
-                    onChange={(e) =>
-                      setDraftField("primary_complaint", e.target.value)
-                    }
-                  />
-                ) : (
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
-                    {display.primary_complaint?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-              <div>
-                <span className={LABEL_CLASS}>Referring provider</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    value={draft.referring_provider ?? ""}
-                    onChange={(e) =>
-                      setDraftField("referring_provider", e.target.value)
-                    }
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.referring_provider?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-              <div>
-                <span className={LABEL_CLASS}>Notes</span>
-                {editMode ? (
-                  <textarea
-                    className={`${FIELD_INPUT} min-h-[96px]`}
-                    value={draft.notes ?? ""}
-                    onChange={(e) => setDraftField("notes", e.target.value)}
-                  />
-                ) : (
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-gray-800">
-                    {display.notes?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className={`md:col-span-2 ${DS_CARD}`}>
-            <h2 className={DS_SECTION_HEADER}>Profile</h2>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <div>
-                <span className={LABEL_CLASS}>First name</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    value={draft.first_name ?? ""}
-                    onChange={(e) => setDraftField("first_name", e.target.value)}
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.first_name ?? "—"}
-                  </p>
-                )}
-              </div>
-              <div>
-                <span className={LABEL_CLASS}>Last name</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    value={draft.last_name ?? ""}
-                    onChange={(e) => setDraftField("last_name", e.target.value)}
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.last_name ?? "—"}
-                  </p>
-                )}
-              </div>
-              <div>
-                <span className={LABEL_CLASS}>Phone</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    value={draft.phone ?? ""}
-                    onChange={(e) => setDraftField("phone", e.target.value)}
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.phone?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-              <div>
-                <span className={LABEL_CLASS}>Email</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    type="email"
-                    value={draft.email ?? ""}
-                    onChange={(e) => setDraftField("email", e.target.value)}
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.email?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-              <div>
-                <span className={LABEL_CLASS}>Date of birth</span>
-                {editMode ? (
-                  <input
-                    type="date"
-                    className={FIELD_INPUT}
-                    value={(draft.date_of_birth ?? "").slice(0, 10)}
-                    onChange={(e) =>
-                      setDraftField("date_of_birth", e.target.value || null)
-                    }
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {formatDob(display.date_of_birth ?? undefined)}
-                  </p>
-                )}
-              </div>
-              <div>
-                <span className={LABEL_CLASS}>Gender</span>
-                {editMode ? (
-                  <input
-                    className={FIELD_INPUT}
-                    value={draft.gender ?? ""}
-                    onChange={(e) => setDraftField("gender", e.target.value)}
-                  />
-                ) : (
-                  <p className="mt-1 text-sm text-gray-800">
-                    {display.gender?.trim() || "—"}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className={`md:col-span-2 ${DS_CARD}`}>
+          <div className={`mt-6 ${DS_CARD}`}>
             <h2 className={DS_SECTION_HEADER}>Visit Timeline</h2>
             <PatientVisitTimeline
               patientId={patientId}
@@ -1399,10 +1109,20 @@ export function PatientDetailView({
               patientDisplayName={patientDisplayName(patient)}
             />
           </div>
-        </div>
+          <OutcomeMeasuresSection
+            clinicId={clinicId}
+            patientId={patientId}
+            loadDelayMs={SECONDARY_STAGGER_MS}
+          />
+          <PatientGroupsSection
+            clinicId={clinicId}
+            patientId={patientId}
+            loadDelayMs={SECONDARY_STAGGER_MS * 2}
+          />
+        </>
       ) : null}
 
-      {sectionTab === "appointments" ? (
+      {pageTab === "appointments" ? (
         <div className={`${DS_TABLE_WRAP} mt-8`}>
           {appointmentsError ? (
             <div className="border-b border-gray-100 px-6 py-4">
@@ -1463,8 +1183,9 @@ export function PatientDetailView({
         </div>
       ) : null}
 
-      {sectionTab === "billing" ? (
-        <div className={`${DS_TABLE_WRAP} mt-8`}>
+      {pageTab === "billing" ? (
+        <div className="space-y-8">
+        <div className={DS_TABLE_WRAP}>
           {billingError ? (
             <div className="border-b border-gray-100 px-6 py-4">
               <InlineSectionError message={billingError} />
@@ -1518,13 +1239,11 @@ export function PatientDetailView({
             </table>
           </div>
         </div>
-      ) : null}
-
-      {sectionTab === "benefits" ? (
         <InsuranceBenefitsLedger patientId={patientId} clinicId={clinicId} />
+        </div>
       ) : null}
 
-      {sectionTab === "membership" ? (
+      {pageTab === "memberships" ? (
         <div className="mt-8 space-y-8">
           {membershipError ? (
             <InlineSectionError message={membershipError} />
@@ -1641,94 +1360,217 @@ export function PatientDetailView({
         </div>
       ) : null}
 
-      <OutcomeMeasuresSection
-        clinicId={clinicId}
-        patientId={patientId}
-        loadDelayMs={SECONDARY_STAGGER_MS}
-      />
-      <PatientGroupsSection
-        clinicId={clinicId}
-        patientId={patientId}
-        loadDelayMs={SECONDARY_STAGGER_MS * 2}
-      />
-        </>
-      ) : null}
-
-      {pageTab === "dme" ? (
-        <DmeSection clinicId={clinicId} patientId={patientId} />
-      ) : null}
-
-      {pageTab === "imaging-diagnostics" ? (
-        <DiagnosticsTab patientId={patientId} clinicId={clinicId} />
-      ) : null}
-
-      {pageTab === "pi-cases" ? (
-        <div className={DS_TABLE_WRAP}>
-          <div className="border-b border-gray-100 bg-gray-50 px-6 py-3">
-            <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-900">
-              PI cases
-            </h2>
-          </div>
-          {piError ? (
-            <div className="px-6 py-4">
-              <InlineSectionError message={piError} />
-            </div>
-          ) : null}
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-left text-sm">
-              <thead className={DS_TABLE_HEAD}>
-                <tr>
-                  <th className={DS_TH}>Case #</th>
-                  <th className={DS_TH}>Date of accident</th>
-                  <th className={DS_TH}>Attorney</th>
-                  <th className={DS_TH}>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {piLoading ? (
-                  <TableSkeleton cols={4} rows={4} />
-                ) : piRows.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={4}
-                      className="px-6 py-10 text-center text-gray-500"
-                    >
-                      No PI cases for this patient.
-                    </td>
-                  </tr>
-                ) : (
-                  piRows.map((row) => {
-                    const st = (row.status ?? "").toLowerCase();
-                    const caseNum = (row.claim_number ?? "").trim() || "—";
-                    return (
-                      <tr
-                        key={row.id ?? `${caseNum}-${row.date_of_accident}`}
-                        className={DS_TR}
-                      >
-                        <td className={`${DS_TD_PRIMARY} font-medium`}>
-                          {caseNum}
-                        </td>
-                        <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
-                          {row.date_of_accident
-                            ? formatDob(String(row.date_of_accident))
-                            : "—"}
-                        </td>
-                        <td className={DS_TD_PRIMARY}>
-                          {(row.attorney_name ?? "").trim() || "—"}
-                        </td>
-                        <td className={DS_TD_PRIMARY}>
-                          <span className={piCaseStatusBadgeClass(st)}>
-                            {row.status ?? "—"}
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+      {pageTab === "clinical" ? (
+        <div className="space-y-8">
+          <DmeSection clinicId={clinicId} patientId={patientId} />
+          <DiagnosticsTab patientId={patientId} clinicId={clinicId} />
         </div>
+      ) : null}
+
+      {pageTab === "documents" ? renderComingSoon("Documents") : null}
+
+      {pageTab === "notes" ? renderComingSoon("Notes") : null}
+
+      {pageTab === "legal" ? (
+        <>
+          <div className="relative mb-6 rounded-lg border border-gray-100 bg-white p-6 shadow-sm">
+            <div className="mb-4 flex items-start justify-between gap-2">
+              <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">
+                Legal / PI Information
+              </h2>
+              {!legalEdit ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLegalDraft({
+                      lawyer_name: patient.lawyer_name ?? "",
+                      law_firm: patient.law_firm ?? "",
+                      lawyer_phone: patient.lawyer_phone ?? "",
+                      lawyer_email: patient.lawyer_email ?? "",
+                    });
+                    setLegalEdit(true);
+                  }}
+                  className="rounded p-1 text-gray-500 hover:bg-gray-50 hover:text-gray-800"
+                  aria-label="Edit legal information"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+              ) : null}
+            </div>
+            {legalEdit ? (
+              <div className="space-y-4">
+                <div>
+                  <span className={LABEL_CLASS}>Lawyer Name</span>
+                  <input
+                    className={FIELD_INPUT}
+                    value={legalDraft.lawyer_name}
+                    onChange={(e) =>
+                      setLegalDraft((d) => ({ ...d, lawyer_name: e.target.value }))
+                    }
+                  />
+                </div>
+                <div>
+                  <span className={LABEL_CLASS}>Law Firm</span>
+                  <input
+                    className={FIELD_INPUT}
+                    value={legalDraft.law_firm}
+                    onChange={(e) =>
+                      setLegalDraft((d) => ({ ...d, law_firm: e.target.value }))
+                    }
+                  />
+                </div>
+                <div>
+                  <span className={LABEL_CLASS}>Lawyer Phone</span>
+                  <input
+                    className={FIELD_INPUT}
+                    value={legalDraft.lawyer_phone}
+                    onChange={(e) =>
+                      setLegalDraft((d) => ({ ...d, lawyer_phone: e.target.value }))
+                    }
+                  />
+                </div>
+                <div>
+                  <span className={LABEL_CLASS}>Lawyer Email</span>
+                  <input
+                    type="email"
+                    className={FIELD_INPUT}
+                    value={legalDraft.lawyer_email}
+                    onChange={(e) =>
+                      setLegalDraft((d) => ({ ...d, lawyer_email: e.target.value }))
+                    }
+                  />
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={legalSaveBusy}
+                    onClick={() => void saveLegal()}
+                    className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
+                  >
+                    {legalSaveBusy ? "Saving…" : "Save"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={legalSaveBusy}
+                    onClick={cancelLegal}
+                    className={DS_SECONDARY_BTN}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : hasLawyerInfo ? (
+              <dl className="space-y-3 text-sm">
+                <div>
+                  <dt className={LABEL_CLASS}>Lawyer Name</dt>
+                  <dd className="mt-1 font-semibold text-gray-900">
+                    {(patient.lawyer_name ?? "").trim() || "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className={LABEL_CLASS}>Law Firm</dt>
+                  <dd className="mt-1 text-gray-800">
+                    {(patient.law_firm ?? "").trim() || "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className={LABEL_CLASS}>Lawyer Phone</dt>
+                  <dd className="mt-1 text-gray-800">
+                    {(patient.lawyer_phone ?? "").trim() || "—"}
+                  </dd>
+                </div>
+                <div>
+                  <dt className={LABEL_CLASS}>Lawyer Email</dt>
+                  <dd className="mt-1 text-gray-800">
+                    {(patient.lawyer_email ?? "").trim() || "—"}
+                  </dd>
+                </div>
+              </dl>
+            ) : (
+              <button
+                type="button"
+                onClick={() => {
+                  setLegalDraft({
+                    lawyer_name: "",
+                    law_firm: "",
+                    lawyer_phone: "",
+                    lawyer_email: "",
+                  });
+                  setLegalEdit(true);
+                }}
+                className="text-sm text-gray-500 hover:text-gray-800"
+              >
+                Assign lawyer
+              </button>
+            )}
+          </div>
+          <div className={DS_TABLE_WRAP}>
+            <div className="border-b border-gray-100 bg-gray-50 px-6 py-3">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-900">
+                PI cases
+              </h2>
+            </div>
+            {piError ? (
+              <div className="px-6 py-4">
+                <InlineSectionError message={piError} />
+              </div>
+            ) : null}
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className={DS_TABLE_HEAD}>
+                  <tr>
+                    <th className={DS_TH}>Case #</th>
+                    <th className={DS_TH}>Date of accident</th>
+                    <th className={DS_TH}>Attorney</th>
+                    <th className={DS_TH}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {piLoading ? (
+                    <TableSkeleton cols={4} rows={4} />
+                  ) : piRows.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={4}
+                        className="px-6 py-10 text-center text-gray-500"
+                      >
+                        No PI cases for this patient.
+                      </td>
+                    </tr>
+                  ) : (
+                    piRows.map((row) => {
+                      const st = (row.status ?? "").toLowerCase();
+                      const caseNum = (row.claim_number ?? "").trim() || "—";
+                      return (
+                        <tr
+                          key={row.id ?? `${caseNum}-${row.date_of_accident}`}
+                          className={DS_TR}
+                        >
+                          <td className={`${DS_TD_PRIMARY} font-medium`}>
+                            {caseNum}
+                          </td>
+                          <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
+                            {row.date_of_accident
+                              ? formatDob(String(row.date_of_accident))
+                              : "—"}
+                          </td>
+                          <td className={DS_TD_PRIMARY}>
+                            {(row.attorney_name ?? "").trim() || "—"}
+                          </td>
+                          <td className={DS_TD_PRIMARY}>
+                            <span className={piCaseStatusBadgeClass(st)}>
+                              {row.status ?? "—"}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       ) : null}
     </div>
   );
