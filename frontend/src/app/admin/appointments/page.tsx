@@ -118,6 +118,7 @@ export default function AdminAppointmentsPage() {
   const [groupSessionCreatedMsg, setGroupSessionCreatedMsg] = useState<
     string | null
   >(null);
+  const [calendarRefreshNonce, setCalendarRefreshNonce] = useState(0);
 
   const weekMonday = useMemo(
     () => findMondayYmdOfWeekContaining(anchorYmd),
@@ -536,6 +537,7 @@ export default function AdminAppointmentsPage() {
             bookPrefill={bookPrefill}
             onBookPrefillConsumed={() => setBookPrefill(null)}
             onAppointmentBooked={handleAppointmentBooked}
+            refreshNonce={calendarRefreshNonce}
           />
         </div>
 
@@ -580,6 +582,7 @@ export default function AdminAppointmentsPage() {
         onClose={() => setGroupSessionModalOpen(false)}
         onCreated={() => {
           setGroupSessionCreatedMsg("Group session created");
+          setCalendarRefreshNonce((n) => n + 1);
           window.setTimeout(() => setGroupSessionCreatedMsg(null), 4000);
         }}
       />

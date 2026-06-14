@@ -28,6 +28,10 @@ import { useRouter } from "next/navigation";
 import AppointmentPopup, {
   type AppointmentPopupData,
 } from "@/components/calendar/AppointmentPopup";
+import GroupSessionDetailModal from "@/components/admin/appointments/GroupSessionDetailModal";
+import CalendarGroupSessionCard, {
+  type CalendarGroupSession,
+} from "@/components/scheduling/CalendarGroupSessionCard";
 import { MeasurementModule } from "@/components/clinical-notes/MeasurementModule";
 import VirtualVisitButton from "@/components/virtual-visit/VirtualVisitButton";
 
@@ -393,6 +397,8 @@ type CalendarViewProps = {
   onAppointmentBooked?: (info: {
     waitlistEntryId?: string;
   }) => void | Promise<void>;
+  /** Increment to re-run loadData (e.g. after group session create). */
+  refreshNonce?: number;
 };
 
 export default function CalendarView({
@@ -415,6 +421,7 @@ export default function CalendarView({
   bookPrefill = null,
   onBookPrefillConsumed,
   onAppointmentBooked,
+  refreshNonce = 0,
 }: CalendarViewProps) {
   const router = useRouter();
   const [internalView, setInternalView] = useState<ViewMode>("week");
@@ -459,6 +466,7 @@ export default function CalendarView({
   const [clinicians, setClinicians] = useState<ClinicianRow[]>([]);
   const [locations, setLocations] = useState<LocationRow[]>([]);
   const [appointments, setAppointments] = useState<CalendarAppointment[]>([]);
+  const [groupSessions, setGroupSessions] = useState<CalendarGroupSession[]>([]);
   const [blocked, setBlocked] = useState<BlockedRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [calendarError, setCalendarError] = useState<string | null>(null);
@@ -485,6 +493,10 @@ export default function CalendarView({
   const [detailAppt, setDetailAppt] = useState<CalendarAppointment | null>(null);
   const [popupAppt, setPopupAppt] = useState<CalendarAppointment | null>(null);
   const [popupAnchor, setPopupAnchor] = useState<DOMRect | null>(null);
+  const [selectedGroupSessionId, setSelectedGroupSessionId] = useState<string | null>(
+    null,
+  );
+  const [groupSessionDetailOpen, setGroupSessionDetailOpen] = useState(false);
   const [detailIntake, setDetailIntake] = useState<IntakeSummary | null>(null);
   const [detailIntakeLoading, setDetailIntakeLoading] = useState(false);
   const [detailIntakeError, setDetailIntakeError] = useState<string | null>(null);
@@ -527,6 +539,13 @@ export default function CalendarView({
     return list;
   }, [appointments, providerId, locationId]);
 
+  const filteredGroupSessions = useMemo(() => {
+    let list = groupSessions.filter((s) => s.status !== "cancelled");
+    if (providerId) list = list.filter((s) => s.clinician_id === providerId);
+    if (locationId) list = list.filter((s) => s.location_id === locationId);
+    return list;
+  }, [groupSessions, providerId, locationId]);
+
   const loadData = useCallback(async () => {
     setLoading(true);
     setCalendarError(null);
@@ -535,6 +554,7 @@ export default function CalendarView({
       if (!token) {
         setCalendarError("Sign in is required to load the calendar.");
         setAppointments([]);
+        setGroupSessions([]);
         setClinicians([]);
         setLocations([]);
         setBlocked([]);
@@ -546,8 +566,16 @@ export default function CalendarView({
       if (providerId) {
         calUrl += `&clinician_id=${encodeURIComponent(providerId)}`;
       }
-      const [calRes, clinRes, locRes] = await Promise.all([
+      let gsUrl = `${API_BASE}/api/group-sessions?clinic_id=${encodeURIComponent(clinicId)}&start_date=${encodeURIComponent(range.start)}&end_date=${encodeURIComponent(range.end)}`;
+      if (providerId) {
+        gsUrl += `&clinician_id=${encodeURIComponent(providerId)}`;
+      }
+      if (locationId) {
+        gsUrl += `&location_id=${encodeURIComponent(locationId)}`;
+      }
+      const [calRes, gsRes, clinRes, locRes] = await Promise.all([
         fetch(calUrl, { headers: h }),
+        fetch(gsUrl, { headers: h }),
         fetch(`${API_BASE}/clinicians?clinic_id=${encodeURIComponent(clinicId)}`, { headers: h }),
         supabase.from("locations").select("id,name").eq("clinic_id", clinicId).eq("is_active", true),
       ]);
@@ -563,6 +591,13 @@ export default function CalendarView({
       } else {
         const calJson = await calRes.json();
         setAppointments(Array.isArray(calJson.appointments) ? calJson.appointments : []);
+      }
+
+      if (gsRes.ok) {
+        const gsJson = await gsRes.json();
+        setGroupSessions(Array.isArray(gsJson) ? (gsJson as CalendarGroupSession[]) : []);
+      } else {
+        setGroupSessions([]);
       }
 
       const clinJson = clinRes.ok ? await clinRes.json() : [];
@@ -595,15 +630,21 @@ export default function CalendarView({
     } catch {
       setCalendarError("Something went wrong loading the calendar. Check your connection and try again.");
       setAppointments([]);
+      setGroupSessions([]);
       setBlocked([]);
     } finally {
       setLoading(false);
     }
-  }, [clinicId, range.start, range.end, view, anchorYmd, providerId]);
+  }, [clinicId, range.start, range.end, view, anchorYmd, providerId, locationId]);
 
   useEffect(() => {
     void loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (refreshNonce <= 0) return;
+    void loadData();
+  }, [refreshNonce, loadData]);
 
   useEffect(() => {
     if (!undo) return;
@@ -689,6 +730,16 @@ export default function CalendarView({
     },
     [],
   );
+
+  const handleGroupSessionClick = useCallback((session: CalendarGroupSession) => {
+    setSelectedGroupSessionId(session.id);
+    setGroupSessionDetailOpen(true);
+  }, []);
+
+  const closeGroupSessionDetail = useCallback(() => {
+    setGroupSessionDetailOpen(false);
+    setSelectedGroupSessionId(null);
+  }, []);
 
   async function patchAppointmentStatus(
     id: string,
@@ -1118,6 +1169,7 @@ export default function CalendarView({
           todayYmd={todayYmd}
           clinicians={activeClinicians}
           appointments={filteredAppointments}
+          groupSessions={filteredGroupSessions}
           blocked={blocked}
           onRefresh={() => void loadData()}
           onDragStart={handleDragStart}
@@ -1126,17 +1178,20 @@ export default function CalendarView({
           activeDrag={activeDrag}
           onSlotClick={setSlotAction}
           onApptClick={handleApptCardClick}
+          onGroupSessionClick={handleGroupSessionClick}
         />
       ) : view === "week" ? (
         <WeekGrid
           weekDays={weekDays}
           todayYmd={todayYmd}
           appointments={filteredAppointments}
+          groupSessions={filteredGroupSessions}
           onDayHeaderClick={(ymd) => {
             setAnchorYmd(ymd);
             setView("day");
           }}
           onCardClick={handleApptCardClick}
+          onGroupSessionClick={handleGroupSessionClick}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           sensors={sensors}
@@ -1240,6 +1295,13 @@ export default function CalendarView({
           onOpenChart={handlePopupOpenChart}
         />
       ) : null}
+
+      <GroupSessionDetailModal
+        sessionId={selectedGroupSessionId}
+        open={groupSessionDetailOpen}
+        onClose={closeGroupSessionDetail}
+        onUpdated={() => void loadData()}
+      />
 
       {bookModalOpen ? (
         <BookPatientModal
@@ -1617,6 +1679,7 @@ function DayGrid({
   todayYmd,
   clinicians,
   appointments,
+  groupSessions,
   blocked,
   onRefresh,
   onDragStart,
@@ -1625,11 +1688,13 @@ function DayGrid({
   activeDrag,
   onSlotClick,
   onApptClick,
+  onGroupSessionClick,
 }: {
   dayYmd: string;
   todayYmd: string;
   clinicians: ClinicianRow[];
   appointments: CalendarAppointment[];
+  groupSessions: CalendarGroupSession[];
   blocked: BlockedRow[];
   onRefresh: () => void;
   onDragStart: (e: DragStartEvent) => void;
@@ -1638,6 +1703,7 @@ function DayGrid({
   activeDrag: CalendarAppointment | null;
   onSlotClick: (ctx: SlotClickContext) => void;
   onApptClick: (appt: CalendarAppointment, anchorRect: DOMRect) => void;
+  onGroupSessionClick: (session: CalendarGroupSession) => void;
 }) {
   const gridHeight = NUM_SLOTS * ROW_H;
   const nowLinePx = useMemo(() => {
@@ -1730,6 +1796,21 @@ function DayGrid({
                         appt={a}
                         dayYmd={dayYmd}
                         onApptClick={onApptClick}
+                      />
+                    ))}
+                  {groupSessions
+                    .filter(
+                      (s) =>
+                        s.clinician_id === clin.id &&
+                        easternYmdOfIso(s.start_time) === dayYmd,
+                    )
+                    .map((s) => (
+                      <CalendarGroupSessionCard
+                        key={`gs-${s.id}`}
+                        session={s}
+                        variant="day"
+                        dayYmd={dayYmd}
+                        onClick={onGroupSessionClick}
                       />
                     ))}
                 </div>
@@ -2643,8 +2724,10 @@ function WeekGrid({
   weekDays,
   todayYmd,
   appointments,
+  groupSessions,
   onDayHeaderClick,
   onCardClick,
+  onGroupSessionClick,
   onDragStart,
   onDragEnd,
   sensors,
@@ -2653,8 +2736,10 @@ function WeekGrid({
   weekDays: string[];
   todayYmd: string;
   appointments: CalendarAppointment[];
+  groupSessions: CalendarGroupSession[];
   onDayHeaderClick: (ymd: string) => void;
   onCardClick: (a: CalendarAppointment, anchorRect: DOMRect) => void;
+  onGroupSessionClick: (session: CalendarGroupSession) => void;
   onDragStart: (e: DragStartEvent) => void;
   onDragEnd: (e: DragEndEvent) => void;
   sensors: ReturnType<typeof useSensors>;
@@ -2672,14 +2757,23 @@ function WeekGrid({
               const bt = safeDate(b.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
               return at - bt;
             });
+          const dayGroupSessions = groupSessions
+            .filter((s) => easternYmdOfIso(s.start_time) === ymd)
+            .sort((a, b) => {
+              const at = safeDate(a.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+              const bt = safeDate(b.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
+              return at - bt;
+            });
           return (
             <WeekDayColumn
               key={ymd}
               ymd={ymd}
               isToday={isToday}
               appointments={dayAppts}
+              groupSessions={dayGroupSessions}
               onHeaderClick={() => onDayHeaderClick(ymd)}
               onCardClick={onCardClick}
+              onGroupSessionClick={onGroupSessionClick}
             />
           );
         })}
@@ -2697,17 +2791,42 @@ function WeekDayColumn({
   ymd,
   isToday,
   appointments,
+  groupSessions,
   onHeaderClick,
   onCardClick,
+  onGroupSessionClick,
 }: {
   ymd: string;
   isToday: boolean;
   appointments: CalendarAppointment[];
+  groupSessions: CalendarGroupSession[];
   onHeaderClick: () => void;
   onCardClick: (a: CalendarAppointment, anchorRect: DOMRect) => void;
+  onGroupSessionClick: (session: CalendarGroupSession) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `weekday-${ymd}` });
   const label = formatInTimeZone(new Date(`${ymd}T12:00:00`), NY, "EEE d");
+
+  type WeekTimelineItem =
+    | { kind: "appointment"; startMs: number; appt: CalendarAppointment }
+    | { kind: "group"; startMs: number; session: CalendarGroupSession };
+
+  const timeline = useMemo(() => {
+    const items: WeekTimelineItem[] = [
+      ...appointments.map((appt) => ({
+        kind: "appointment" as const,
+        startMs: safeDate(appt.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER,
+        appt,
+      })),
+      ...groupSessions.map((session) => ({
+        kind: "group" as const,
+        startMs: safeDate(session.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER,
+        session,
+      })),
+    ];
+    return items.sort((a, b) => a.startMs - b.startMs);
+  }, [appointments, groupSessions]);
+
   return (
     <div
       ref={setNodeRef}
@@ -2723,9 +2842,22 @@ function WeekDayColumn({
         {label}
       </button>
       <div className="space-y-2">
-        {appointments.map((a) => (
-          <WeekDraggableCard key={a.id} appt={a} onCardClick={onCardClick} />
-        ))}
+        {timeline.map((item) =>
+          item.kind === "appointment" ? (
+            <WeekDraggableCard
+              key={item.appt.id}
+              appt={item.appt}
+              onCardClick={onCardClick}
+            />
+          ) : (
+            <CalendarGroupSessionCard
+              key={`gs-${item.session.id}`}
+              session={item.session}
+              variant="week"
+              onClick={onGroupSessionClick}
+            />
+          ),
+        )}
       </div>
     </div>
   );

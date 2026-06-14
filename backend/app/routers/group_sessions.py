@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import traceback
-from datetime import date, datetime, timezone
-from typing import Any, Optional
+from datetime import date, datetime, time, timedelta, timezone
+from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, HTTPException, Query
@@ -16,6 +16,7 @@ router = APIRouter()
 
 _CLINIC_TZ = ZoneInfo("America/New_York")
 _SESSION_STATUSES = frozenset({"scheduled", "completed", "cancelled"})
+_ATTENDEE_STATUSES = frozenset({"booked", "checked_in", "no_show", "cancelled"})
 
 _LIST_SELECT = (
     "id, clinic_id, clinician_id, location_id, treatment_type_id, "
@@ -82,6 +83,18 @@ def _day_bounds_iso(day_ymd: str) -> tuple[str, str]:
     return start, end
 
 
+def _range_bounds_utc_iso(start_ymd: str, end_ymd: str) -> tuple[str, str]:
+    """Inclusive calendar-date range in clinic TZ, query start_time in UTC."""
+    sd = date.fromisoformat(start_ymd.strip())
+    ed = date.fromisoformat(end_ymd.strip())
+    range_start_local = datetime.combine(sd, time(0, 0), tzinfo=_CLINIC_TZ)
+    range_end_exclusive = datetime.combine(ed + timedelta(days=1), time(0, 0), tzinfo=_CLINIC_TZ)
+    return (
+        range_start_local.astimezone(timezone.utc).isoformat(),
+        range_end_exclusive.astimezone(timezone.utc).isoformat(),
+    )
+
+
 class GroupSessionCreate(BaseModel):
     clinic_id: str
     clinician_id: str
@@ -111,10 +124,18 @@ class AddAttendeeBody(BaseModel):
     patient_id: str
 
 
+class UpdateAttendeeStatusBody(BaseModel):
+    status: Literal["booked", "checked_in", "no_show", "cancelled"]
+
+
 @router.get("/group-sessions")
 async def list_group_sessions(
     clinic_id: str = Query(...),
     date: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
+    start_date: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
+    end_date: Optional[str] = Query(default=None, description="YYYY-MM-DD"),
+    clinician_id: Optional[str] = Query(default=None),
+    location_id: Optional[str] = Query(default=None),
 ):
     try:
         query = (
@@ -122,9 +143,35 @@ async def list_group_sessions(
             .select(_LIST_SELECT)
             .eq("clinic_id", clinic_id.strip())
         )
+
+        range_start = (start_date or "").strip()
+        range_end = (end_date or "").strip()
         if date and date.strip():
-            start_of_day, end_of_day = _day_bounds_iso(date)
-            query = query.gte("start_time", start_of_day).lte("start_time", end_of_day)
+            range_start = date.strip()
+            range_end = date.strip()
+
+        if range_start and range_end:
+            try:
+                start_utc, end_exclusive_utc = _range_bounds_utc_iso(range_start, range_end)
+            except ValueError:
+                raise HTTPException(
+                    status_code=400,
+                    detail="date, start_date, and end_date must be YYYY-MM-DD",
+                ) from None
+            query = query.gte("start_time", start_utc).lt("start_time", end_exclusive_utc)
+        elif range_start or range_end:
+            raise HTTPException(
+                status_code=400,
+                detail="start_date and end_date must be provided together",
+            )
+
+        cid = (clinician_id or "").strip()
+        if cid:
+            query = query.eq("clinician_id", cid)
+        lid = (location_id or "").strip()
+        if lid:
+            query = query.eq("location_id", lid)
+
         res = query.order("start_time").execute()
         rows = res.data or []
         return [
@@ -132,6 +179,8 @@ async def list_group_sessions(
             for r in rows
             if isinstance(r, dict)
         ]
+    except HTTPException:
+        raise
     except Exception:
         traceback.print_exc()
         return []
@@ -268,6 +317,39 @@ async def add_attendee(session_id: str, body: AddAttendeeBody):
         rows = res.data or []
         if not rows:
             raise HTTPException(status_code=400, detail="Failed to add attendee.")
+        return rows[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@router.patch("/group-sessions/{session_id}/attendees/{patient_id}")
+async def update_attendee_status(
+    session_id: str,
+    patient_id: str,
+    body: UpdateAttendeeStatusBody,
+):
+    try:
+        sid = session_id.strip()
+        pid = patient_id.strip()
+        if not sid or not pid:
+            raise HTTPException(status_code=400, detail="Invalid session or patient id")
+        status = body.status
+        if status not in _ATTENDEE_STATUSES:
+            raise HTTPException(status_code=400, detail="Invalid attendee status")
+
+        res = (
+            supabase.table("group_session_attendees")
+            .update({"status": status})
+            .eq("group_session_id", sid)
+            .eq("patient_id", pid)
+            .execute()
+        )
+        rows = res.data or []
+        if not rows:
+            raise HTTPException(status_code=404, detail="Attendee not found.")
         return rows[0]
     except HTTPException:
         raise
