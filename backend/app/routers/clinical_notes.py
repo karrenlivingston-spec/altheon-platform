@@ -1071,6 +1071,284 @@ def get_note_special_tests(
     return {"results": results}
 
 
+_GOAL_TYPES = frozenset({"short_term", "long_term"})
+
+_SUGGEST_GOALS_SYSTEM = """You are a physical therapy documentation assistant. Based on the \
+assessment text, suggest 2-4 measurable therapy goals.
+
+Respond ONLY with a valid JSON array (no markdown):
+[
+  {"description": "goal text", "goal_type": "short_term" or "long_term", "target_weeks": number or null}
+]"""
+
+
+def _validate_percent_met(value: Any) -> int:
+    try:
+        n = int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="percent_met must be an integer") from exc
+    if n < 0 or n > 100 or n % 5 != 0:
+        raise HTTPException(
+            status_code=400,
+            detail="percent_met must be 0-100 in steps of 5",
+        )
+    return n
+
+
+def _shape_goal_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row.get("id") or ""),
+        "note_id": str(row.get("note_id") or ""),
+        "description": str(row.get("description") or ""),
+        "goal_type": str(row.get("goal_type") or "short_term"),
+        "target_weeks": row.get("target_weeks"),
+        "percent_met": int(row.get("percent_met") or 0),
+    }
+
+
+def _call_claude_suggest_goals(assessment_text: str) -> list[dict[str, Any]]:
+    api_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if not api_key:
+        return []
+
+    try:
+        import anthropic
+    except ImportError:
+        return []
+
+    text = (assessment_text or "").strip()
+    if not text:
+        return []
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model=_ANTHROPIC_MODEL,
+            max_tokens=2048,
+            system=_SUGGEST_GOALS_SYSTEM,
+            messages=[{"role": "user", "content": f"Assessment:\n{text}"}],
+        )
+        blocks = getattr(message, "content", None) or []
+        raw_parts: list[str] = []
+        for block in blocks:
+            if hasattr(block, "text"):
+                raw_parts.append(str(block.text))
+            elif isinstance(block, dict) and block.get("text"):
+                raw_parts.append(str(block["text"]))
+        raw = "".join(raw_parts).strip()
+        if not raw:
+            return []
+        fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw, re.IGNORECASE)
+        if fence:
+            raw = fence.group(1).strip()
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            brace = re.search(r"\[[\s\S]*\]", raw)
+            if not brace:
+                return []
+            data = json.loads(brace.group(0))
+        if isinstance(data, dict) and "goals" in data:
+            data = data["goals"]
+        if not isinstance(data, list):
+            return []
+        out: list[dict[str, Any]] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            desc = str(item.get("description") or "").strip()
+            if not desc:
+                continue
+            gt = str(item.get("goal_type") or "short_term").strip().lower()
+            if gt not in _GOAL_TYPES:
+                gt = "short_term"
+            tw = item.get("target_weeks")
+            target_weeks: Optional[int] = None
+            if tw is not None:
+                try:
+                    target_weeks = int(tw)
+                except (TypeError, ValueError):
+                    target_weeks = None
+            out.append(
+                {
+                    "description": desc,
+                    "goal_type": gt,
+                    "target_weeks": target_weeks,
+                }
+            )
+        return out[:4]
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        return []
+
+
+class CreateNoteGoalBody(BaseModel):
+    description: str = ""
+    goal_type: str = "short_term"
+    target_weeks: Optional[int] = None
+
+
+class PatchNoteGoalBody(BaseModel):
+    description: Optional[str] = None
+    goal_type: Optional[str] = None
+    target_weeks: Optional[int] = None
+    percent_met: Optional[int] = None
+
+
+class SuggestGoalsBody(BaseModel):
+    assessment_text: str = ""
+
+
+@router.get("/clinical-notes/{note_id}/goals")
+def list_note_goals(note_id: str):
+    try:
+        resp = (
+            supabase.table("note_goals")
+            .select("id,note_id,description,goal_type,target_weeks,percent_met")
+            .eq("note_id", note_id.strip())
+            .order("created_at")
+            .execute()
+        )
+        _handle_supabase_error(resp)
+        return [_shape_goal_row(r) for r in resp.data or [] if isinstance(r, dict)]
+    except HTTPException:
+        raise
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        return []
+
+
+@router.post("/clinical-notes/{note_id}/goals", status_code=201)
+def create_note_goal(note_id: str, body: CreateNoteGoalBody):
+    nid = note_id.strip()
+    gt = (body.goal_type or "short_term").strip().lower()
+    if gt not in _GOAL_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid goal_type")
+
+    try:
+        note_resp = (
+            supabase.table("clinical_notes")
+            .select("id")
+            .eq("id", nid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(note_resp)
+        if not (note_resp.data or []):
+            raise HTTPException(status_code=404, detail="Clinical note not found")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    row = {
+        "note_id": nid,
+        "description": (body.description or "").strip() or "New goal",
+        "goal_type": gt,
+        "target_weeks": body.target_weeks,
+        "percent_met": 0,
+        "updated_at": _now_iso(),
+    }
+    try:
+        ins = supabase.table("note_goals").insert(row).execute()
+        _handle_supabase_error(ins)
+        rows = ins.data or []
+        if not rows:
+            raise HTTPException(status_code=400, detail="Failed to create goal")
+        return _shape_goal_row(rows[0])
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.patch("/clinical-notes/{note_id}/goals/{goal_id}")
+def patch_note_goal(note_id: str, goal_id: str, body: PatchNoteGoalBody):
+    data = body.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    if "goal_type" in data:
+        gt = str(data["goal_type"] or "").strip().lower()
+        if gt not in _GOAL_TYPES:
+            raise HTTPException(status_code=400, detail="Invalid goal_type")
+        data["goal_type"] = gt
+    if "percent_met" in data and data["percent_met"] is not None:
+        data["percent_met"] = _validate_percent_met(data["percent_met"])
+    data["updated_at"] = _now_iso()
+
+    try:
+        upd = (
+            supabase.table("note_goals")
+            .update(data)
+            .eq("id", goal_id.strip())
+            .eq("note_id", note_id.strip())
+            .execute()
+        )
+        _handle_supabase_error(upd)
+        rows = upd.data or []
+        if not rows:
+            raise HTTPException(status_code=404, detail="Goal not found")
+        return _shape_goal_row(rows[0])
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.delete("/clinical-notes/{note_id}/goals/{goal_id}")
+def delete_note_goal(note_id: str, goal_id: str):
+    try:
+        dele = (
+            supabase.table("note_goals")
+            .delete()
+            .eq("id", goal_id.strip())
+            .eq("note_id", note_id.strip())
+            .execute()
+        )
+        _handle_supabase_error(dele)
+        return {"deleted": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/clinical-notes/{note_id}/suggest-goals")
+def suggest_note_goals(note_id: str, body: SuggestGoalsBody):
+    nid = note_id.strip()
+    try:
+        note_resp = (
+            supabase.table("clinical_notes")
+            .select("id")
+            .eq("id", nid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(note_resp)
+        if not (note_resp.data or []):
+            raise HTTPException(status_code=404, detail="Clinical note not found")
+    except HTTPException:
+        raise
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        return []
+
+    try:
+        suggestions = _call_claude_suggest_goals(body.assessment_text)
+        return suggestions
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        return []
+
+
 @router.get("/clinical-notes/{note_id}")
 def get_clinical_note(note_id: str):
     nid = note_id.strip()

@@ -31,6 +31,7 @@ import ClinicalNotesFilterTabs from "@/components/admin/clinical-notes/ClinicalN
 import ClinicalNotesSidebar from "@/components/admin/clinical-notes/ClinicalNotesSidebar";
 import ClinicalNotesTable from "@/components/admin/clinical-notes/ClinicalNotesTable";
 import ClinicalNotesInsights from "@/components/admin/clinical-notes/ClinicalNotesInsights";
+import ClinicalNoteGoalsSection from "@/components/admin/clinical-notes/ClinicalNoteGoalsSection";
 import {
   ClinicalNoteListItem,
   ClinicalNotesStats,
@@ -135,6 +136,22 @@ const NOTE_TYPE_OPTIONS = [
   { value: "discharge_note", label: "Discharge Note" },
 ] as const;
 
+const EDITOR_TABS = [
+  { id: 1, label: "Capture" },
+  { id: 2, label: "SOAP Review" },
+  { id: 3, label: "Special Tests" },
+  { id: 4, label: "Billing" },
+  { id: 5, label: "AI Review" },
+  { id: 6, label: "Sign & Submit" },
+] as const;
+
+function truncateSummary(text: string, max = 120): string {
+  const t = text.trim();
+  if (!t) return "—";
+  if (t.length <= max) return t;
+  return `${t.slice(0, max)}…`;
+}
+
 function showSpecialTestsForNoteType(noteType: string | null | undefined): boolean {
   return (noteType ?? "").trim().toLowerCase() !== "daily_note";
 }
@@ -238,6 +255,9 @@ export default function AdminClinicalNotesPage() {
   const [draftPlan, setDraftPlan] = useState("");
   const [draftCptCodes, setDraftCptCodes] = useState<CptCode[] | null>(null);
   const [editorBusy, setEditorBusy] = useState(false);
+  const [editorTab, setEditorTab] = useState(1);
+  const [draftNoteStatus, setDraftNoteStatus] = useState("draft");
+  const [draftAiFeedback, setDraftAiFeedback] = useState("");
 
   const [viewNote, setViewNote] = useState<ClinicalNote | null>(null);
   const [pocNote, setPocNote] = useState<ClinicalNote | null>(null);
@@ -566,6 +586,9 @@ export default function AdminClinicalNotesPage() {
     setDraftAssessment("");
     setDraftPlan("");
     setDraftCptCodes(null);
+    setEditorTab(1);
+    setDraftNoteStatus("draft");
+    setDraftAiFeedback("");
     setPatientInputValue("");
     setPatientPickerOpen(false);
     setScribeBannerVisible(false);
@@ -576,6 +599,7 @@ export default function AdminClinicalNotesPage() {
 
   function openNewNote() {
     resetEditor();
+    setEditorTab(1);
     setScribePanelOpen(true);
     setEditorOpen(true);
   }
@@ -610,6 +634,9 @@ export default function AdminClinicalNotesPage() {
           ? (row.cpt_codes_detected as CptCode[])
           : null,
       );
+      setDraftNoteStatus((row.status ?? "draft").toLowerCase());
+      setDraftAiFeedback(row.ai_feedback ?? "");
+      setEditorTab(1);
       const picked = patients.find((x) => x.id === row.patient_id);
       setPatientInputValue(
         picked
@@ -739,6 +766,9 @@ export default function AdminClinicalNotesPage() {
         setError(await res.text().catch(() => res.statusText));
         return;
       }
+      const updated = (await res.json()) as ClinicalNote;
+      setDraftNoteStatus((updated.status ?? "draft").toLowerCase());
+      setDraftAiFeedback(updated.ai_feedback ?? "");
       setEditorOpen(false);
       resetEditor();
       await refreshDashboard();
@@ -823,6 +853,39 @@ export default function AdminClinicalNotesPage() {
       setError(e instanceof Error ? e.message : "Sign failed");
     } finally {
       setReviewBusy(false);
+    }
+  }
+
+  async function signAnywayFromEditor() {
+    if (!editingId) return;
+    const confirmed = window.confirm(
+      "This note was flagged by AI review. Sign anyway? This will be recorded on the note for audit purposes.",
+    );
+    if (!confirmed) return;
+
+    setSignAnywayBusy(true);
+    setError(null);
+    try {
+      const res = await fetch(
+        `${API_BASE}/api/clinical-notes/${encodeURIComponent(editingId)}/sign`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ signed_by: signedByCandidate }),
+        },
+      );
+      if (!res.ok) {
+        setError(await res.text().catch(() => res.statusText));
+        return;
+      }
+      setToast("Note signed successfully");
+      setEditorOpen(false);
+      resetEditor();
+      await refreshDashboard();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Sign failed");
+    } finally {
+      setSignAnywayBusy(false);
     }
   }
 
@@ -1110,284 +1173,460 @@ export default function AdminClinicalNotesPage() {
 
       <ClinicalNotesInsights stats={stats} onNewNote={openNewNote} />
 
-      {/* Note editor */}
+      {/* Note editor — 6-tab workflow */}
       {editorOpen ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <div
-            className={`max-h-[95vh] w-full max-w-2xl overflow-y-auto ${DS_CARD}`}
+            className={`flex max-h-[95vh] w-full max-w-2xl flex-col overflow-hidden ${DS_CARD}`}
             role="dialog"
             aria-modal
             aria-labelledby="cn-editor-title"
           >
-            <h2
-              id="cn-editor-title"
-              className="border-b border-gray-100 pb-4 text-lg font-semibold text-gray-900"
-            >
-              {editingId ? "Edit clinical note" : "New clinical note"}
-            </h2>
-
-            <div className="mt-4 rounded-xl border border-gray-200">
-              <button
-                type="button"
-                onClick={() => setScribePanelOpen((v) => !v)}
-                className="flex w-full items-center gap-2 rounded-xl px-4 py-3 text-left hover:bg-gray-50"
-                aria-expanded={scribePanelOpen}
+            <div className="shrink-0 border-b border-gray-100 pb-4">
+              <h2
+                id="cn-editor-title"
+                className="text-lg font-semibold text-gray-900"
               >
-                {scribePanelOpen ? (
-                  <ChevronDown className="h-4 w-4 text-gray-400" />
-                ) : (
-                  <ChevronRight className="h-4 w-4 text-gray-400" />
-                )}
-                <Mic className="h-4 w-4 text-gray-500" />
-                <span className="text-sm font-medium text-gray-700">
-                  AI Scribe
-                </span>
-              </button>
-              {scribePanelOpen ? (
-                <div className="border-t border-gray-100 p-4">
-                  <AmbientScribe
-                    clinicId={clinicId}
-                    patientId={draftPatientId || undefined}
-                    noteId={editingId ?? undefined}
-                    onSoapGenerated={handleSoapFromScribe}
+                {editingId ? "Edit clinical note" : "New clinical note"}
+              </h2>
+              <nav
+                className="mt-4 flex flex-wrap gap-1"
+                aria-label="Editor steps"
+              >
+                {EDITOR_TABS.map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setEditorTab(tab.id)}
+                    className={`rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+                      editorTab === tab.id
+                        ? "bg-[var(--color-primary,#16A34A)] text-white"
+                        : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </nav>
+            </div>
+
+            <div className="min-h-0 flex-1 overflow-y-auto pt-4">
+              {editorTab === 1 ? (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-gray-200">
+                    <button
+                      type="button"
+                      onClick={() => setScribePanelOpen((v) => !v)}
+                      className="flex w-full items-center gap-2 rounded-xl px-4 py-3 text-left hover:bg-gray-50"
+                      aria-expanded={scribePanelOpen}
+                    >
+                      {scribePanelOpen ? (
+                        <ChevronDown className="h-4 w-4 text-gray-400" />
+                      ) : (
+                        <ChevronRight className="h-4 w-4 text-gray-400" />
+                      )}
+                      <Mic className="h-4 w-4 text-gray-500" />
+                      <span className="text-sm font-medium text-gray-700">
+                        AI Scribe
+                      </span>
+                    </button>
+                    {scribePanelOpen ? (
+                      <div className="border-t border-gray-100 p-4">
+                        <AmbientScribe
+                          clinicId={clinicId}
+                          patientId={draftPatientId || undefined}
+                          noteId={editingId ?? undefined}
+                          onSoapGenerated={handleSoapFromScribe}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-4 py-3 text-sm text-gray-600">
+                    <p className="font-medium text-gray-800">Manual documentation</p>
+                    <p className="mt-1 text-xs">
+                      Skip AI Scribe and go to{" "}
+                      <button
+                        type="button"
+                        onClick={() => setEditorTab(2)}
+                        className="font-medium text-teal-700 underline hover:text-teal-800"
+                      >
+                        SOAP Review
+                      </button>{" "}
+                      to type Subjective, Objective, Assessment, and Plan by hand.
+                    </p>
+                  </div>
+
+                  {scribeBannerVisible ? (
+                    <div
+                      className="relative rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 pr-12 text-sm text-sky-950"
+                      role="status"
+                    >
+                      <p>
+                        Note generated from session recording. Please review on
+                        SOAP Review before submitting.
+                      </p>
+                      <button
+                        type="button"
+                        className="absolute right-1 top-1 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-sky-800 hover:bg-sky-100"
+                        aria-label="Dismiss"
+                        onClick={() => setScribeBannerVisible(false)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : null}
+                  {diagnosticPrefillBannerVisible ? (
+                    <div
+                      className="relative rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 pr-12 text-sm text-teal-950"
+                      role="status"
+                    >
+                      <p>
+                        SOAP fields pre-filled from diagnostic analysis — review on
+                        SOAP Review before saving.
+                      </p>
+                      <button
+                        type="button"
+                        className="absolute right-1 top-1 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-teal-800 hover:bg-teal-100"
+                        aria-label="Dismiss"
+                        onClick={() => setDiagnosticPrefillBannerVisible(false)}
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ) : null}
+
+                  <div className="relative" ref={patientPickerRef}>
+                    <label className="block text-sm font-medium text-gray-700">
+                      Patient
+                    </label>
+                    <input
+                      type="text"
+                      autoComplete="off"
+                      value={patientInputValue}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setPatientInputValue(v);
+                        setDraftPatientId("");
+                        setDraftAppointmentId("");
+                        setPatientPickerOpen(true);
+                      }}
+                      onFocus={() => {
+                        if (!editingId) setPatientPickerOpen(true);
+                      }}
+                      placeholder="Search and select a patient…"
+                      className={`mt-1 h-9 ${DS_INPUT}`}
+                      disabled={Boolean(editingId)}
+                    />
+                    {!editingId && patientPickerOpen ? (
+                      <div
+                        className="absolute left-0 right-0 z-20 mt-1 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg"
+                        style={{ minHeight: 200, maxHeight: 300 }}
+                      >
+                        {filteredPatients.length === 0 ? (
+                          <div className="px-3 py-4 text-sm text-gray-500">
+                            No matching patients.
+                          </div>
+                        ) : (
+                          <ul className="py-1">
+                            {filteredPatients.map((p) => (
+                              <li key={p.id}>
+                                <button
+                                  type="button"
+                                  className="w-full px-3 py-2.5 text-left text-sm text-gray-900 hover:bg-gray-50"
+                                  onMouseDown={(e) => {
+                                    e.preventDefault();
+                                    setDraftPatientId(p.id);
+                                    setPatientInputValue(patientDisplayName(p));
+                                    setPatientPickerOpen(false);
+                                  }}
+                                >
+                                  {patientDisplayName(p)}
+                                </button>
+                              </li>
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    ) : null}
+                    {!editingId ? (
+                      <p className="mt-1 text-xs text-gray-500">
+                        Type to filter, then click a name to select.
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-sm text-gray-600">
+                        Patient cannot be changed for an existing note.
+                      </p>
+                    )}
+                  </div>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Note type
+                    <select
+                      value={draftNoteType}
+                      onChange={(e) => setDraftNoteType(e.target.value)}
+                      className={`mt-1 h-9 ${DS_INPUT}`}
+                    >
+                      {NOTE_TYPE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Supervising PT (UUID)
+                    <input
+                      type="text"
+                      value={draftSupervisingPtId}
+                      onChange={(e) => setDraftSupervisingPtId(e.target.value)}
+                      placeholder="Optional — clinician id"
+                      className={`mt-1 ${DS_INPUT}`}
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Appointment ID
+                    <input
+                      type="text"
+                      value={draftAppointmentId}
+                      onChange={(e) => setDraftAppointmentId(e.target.value)}
+                      placeholder="Optional — links measurements when set"
+                      className={`mt-1 ${DS_INPUT}`}
+                    />
+                  </label>
+
+                  {sessionTranscript ? (
+                    <div className="border-t border-gray-100 pt-4">
+                      <button
+                        type="button"
+                        className="flex min-h-[44px] w-full items-center justify-between rounded-lg px-2 text-left text-sm font-medium text-gray-800 hover:bg-gray-50"
+                        onClick={() => setTranscriptPanelOpen((o) => !o)}
+                        aria-expanded={transcriptPanelOpen}
+                      >
+                        <span>View Transcript</span>
+                        <span className="text-gray-500" aria-hidden>
+                          {transcriptPanelOpen ? "▲" : "▼"}
+                        </span>
+                      </button>
+                      {transcriptPanelOpen ? (
+                        <pre className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs leading-relaxed whitespace-pre-wrap text-gray-800 sm:text-sm">
+                          {sessionTranscript}
+                        </pre>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {editorTab === 2 ? (
+                <div className="space-y-4">
+                  <label className="block text-sm font-medium text-gray-700">
+                    Subjective — what the patient reports
+                    <textarea
+                      value={draftSubjective}
+                      onChange={(e) => setDraftSubjective(e.target.value)}
+                      rows={5}
+                      className={`mt-1 min-h-[120px] ${DS_INPUT}`}
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Objective — measurable findings
+                    <textarea
+                      value={draftObjective}
+                      onChange={(e) => setDraftObjective(e.target.value)}
+                      rows={5}
+                      className={`mt-1 min-h-[120px] ${DS_INPUT}`}
+                    />
+                  </label>
+                  {draftAppointmentId.trim() ? (
+                    <MeasurementModule
+                      appointmentId={draftAppointmentId.trim()}
+                      clinicId={MEASUREMENT_CLINIC_ID}
+                    />
+                  ) : null}
+                  <label className="block text-sm font-medium text-gray-700">
+                    Assessment — clinical reasoning
+                    <textarea
+                      value={draftAssessment}
+                      onChange={(e) => setDraftAssessment(e.target.value)}
+                      rows={5}
+                      className={`mt-1 min-h-[120px] ${DS_INPUT}`}
+                    />
+                  </label>
+                  <label className="block text-sm font-medium text-gray-700">
+                    Plan — specific interventions
+                    <textarea
+                      value={draftPlan}
+                      onChange={(e) => setDraftPlan(e.target.value)}
+                      rows={5}
+                      className={`mt-1 min-h-[120px] ${DS_INPUT}`}
+                    />
+                  </label>
+                  <ClinicalNoteGoalsSection
+                    noteId={editingId}
+                    assessmentText={draftAssessment}
+                    onError={setError}
                   />
                 </div>
               ) : null}
-            </div>
 
-            {scribeBannerVisible ? (
-              <div
-                className="relative mt-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 pr-12 text-sm text-sky-950"
-                role="status"
-              >
-                <p>
-                  Note generated from session recording. Please review before
-                  submitting.
-                </p>
-                <button
-                  type="button"
-                  className="absolute right-1 top-1 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-sky-800 hover:bg-sky-100"
-                  aria-label="Dismiss"
-                  onClick={() => setScribeBannerVisible(false)}
-                >
-                  ✕
-                </button>
-              </div>
-            ) : null}
-            {diagnosticPrefillBannerVisible ? (
-              <div
-                className="relative mt-4 rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 pr-12 text-sm text-teal-950"
-                role="status"
-              >
-                <p>
-                  SOAP fields pre-filled from diagnostic analysis — review before
-                  saving.
-                </p>
-                <button
-                  type="button"
-                  className="absolute right-1 top-1 flex min-h-[44px] min-w-[44px] items-center justify-center rounded-lg text-teal-800 hover:bg-teal-100"
-                  aria-label="Dismiss"
-                  onClick={() => setDiagnosticPrefillBannerVisible(false)}
-                >
-                  ✕
-                </button>
-              </div>
-            ) : null}
-            <div className="space-y-4 pt-5">
-              <div className="relative" ref={patientPickerRef}>
-                <label className="block text-sm font-medium text-gray-700">
-                  Patient
-                </label>
-                <input
-                  type="text"
-                  autoComplete="off"
-                  value={patientInputValue}
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setPatientInputValue(v);
-                    setDraftPatientId("");
-                    setDraftAppointmentId("");
-                    setPatientPickerOpen(true);
-                  }}
-                  onFocus={() => {
-                    if (!editingId) setPatientPickerOpen(true);
-                  }}
-                  placeholder="Search and select a patient…"
-                  className={`mt-1 h-9 ${DS_INPUT}`}
-                  disabled={Boolean(editingId)}
-                />
-                {!editingId && patientPickerOpen ? (
-                  <div
-                    className="absolute left-0 right-0 z-20 mt-1 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg"
-                    style={{ minHeight: 200, maxHeight: 300 }}
-                  >
-                    {filteredPatients.length === 0 ? (
-                      <div className="px-3 py-4 text-sm text-gray-500">
-                        No matching patients.
-                      </div>
-                    ) : (
-                      <ul className="py-1">
-                        {filteredPatients.map((p) => (
-                          <li key={p.id}>
-                            <button
-                              type="button"
-                              className="w-full px-3 py-2.5 text-left text-sm text-gray-900 hover:bg-gray-50"
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                setDraftPatientId(p.id);
-                                setPatientInputValue(patientDisplayName(p));
-                                setPatientPickerOpen(false);
-                              }}
-                            >
-                              {patientDisplayName(p)}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
+              {editorTab === 3 ? (
+                <div>
+                  {showSpecialTestsForNoteType(draftNoteType) ? (
+                    <SpecialTestsSection
+                      noteId={editingId}
+                      clinicId={clinicId}
+                      onSaved={(m) => setToast(m)}
+                    />
+                  ) : (
+                    <p className="text-sm text-gray-500">
+                      Special tests are not used for daily notes. Change note type
+                      on Capture if needed.
+                    </p>
+                  )}
+                </div>
+              ) : null}
+
+              {editorTab === 4 ? (
+                <div className="space-y-4">
+                  <CptDetectionPanel
+                    noteId={editingId ?? ""}
+                    clinicId={clinicId}
+                    initialCodes={draftCptCodes ?? []}
+                    onCodesDetected={setDraftCptCodes}
+                  />
+                  <div className="rounded-xl border border-gray-200 bg-gray-50/50 p-4">
+                    <h3 className="text-sm font-semibold text-gray-900">
+                      Plan of Care
+                    </h3>
+                    {/* TODO: PlanOfCareModal is only reachable from the signed-note View modal today — add editor access when POC draft flow exists */}
+                    <p className="mt-2 text-xs text-gray-500">
+                      Plan of Care is available after the note is signed (from the
+                      note detail view).
+                    </p>
                   </div>
-                ) : null}
-                {!editingId ? (
-                  <p className="mt-1 text-xs text-gray-500">
-                    Type to filter, then click a name to select.
-                  </p>
-                ) : (
-                  <p className="mt-2 text-sm text-gray-600">
-                    Patient cannot be changed for an existing note.
-                  </p>
-                )}
-              </div>
-              <label className="block text-sm font-medium text-gray-700">
-                Note type
-                <select
-                  value={draftNoteType}
-                  onChange={(e) => setDraftNoteType(e.target.value)}
-                  className={`mt-1 h-9 ${DS_INPUT}`}
-                >
-                  {NOTE_TYPE_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="block text-sm font-medium text-gray-700">
-                Supervising PT (UUID)
-                <input
-                  type="text"
-                  value={draftSupervisingPtId}
-                  onChange={(e) => setDraftSupervisingPtId(e.target.value)}
-                  placeholder="Optional — clinician id"
-                  className={`mt-1 ${DS_INPUT}`}
-                />
-              </label>
-              <label className="block text-sm font-medium text-gray-700">
-                Subjective — what the patient reports
-                <textarea
-                  value={draftSubjective}
-                  onChange={(e) => setDraftSubjective(e.target.value)}
-                  rows={5}
-                  className={`mt-1 min-h-[120px] ${DS_INPUT}`}
-                />
-              </label>
-              <label className="block text-sm font-medium text-gray-700">
-                Objective — measurable findings
-                <textarea
-                  value={draftObjective}
-                  onChange={(e) => setDraftObjective(e.target.value)}
-                  rows={5}
-                  className={`mt-1 min-h-[120px] ${DS_INPUT}`}
-                />
-              </label>
-              {draftAppointmentId.trim() ? (
-                <MeasurementModule
-                  appointmentId={draftAppointmentId.trim()}
-                  clinicId={MEASUREMENT_CLINIC_ID}
-                />
+                </div>
               ) : null}
-              {showSpecialTestsForNoteType(draftNoteType) ? (
-                <SpecialTestsSection
-                  noteId={editingId}
-                  clinicId={clinicId}
-                  onSaved={(m) => setToast(m)}
-                />
-              ) : null}
-              <CptDetectionPanel
-                noteId={editingId ?? ""}
-                clinicId={clinicId}
-                initialCodes={draftCptCodes ?? []}
-                onCodesDetected={setDraftCptCodes}
-              />
-              <label className="block text-sm font-medium text-gray-700">
-                Assessment — clinical reasoning
-                <textarea
-                  value={draftAssessment}
-                  onChange={(e) => setDraftAssessment(e.target.value)}
-                  rows={5}
-                  className={`mt-1 min-h-[120px] ${DS_INPUT}`}
-                />
-              </label>
-              <label className="block text-sm font-medium text-gray-700">
-                Plan — specific interventions
-                <textarea
-                  value={draftPlan}
-                  onChange={(e) => setDraftPlan(e.target.value)}
-                  rows={5}
-                  className={`mt-1 min-h-[120px] ${DS_INPUT}`}
-                />
-              </label>
-            </div>
-            <div className="mt-6 flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-5">
-              <button
-                type="button"
-                onClick={() => {
-                  setEditorOpen(false);
-                  resetEditor();
-                }}
-                className={`${DS_SECONDARY_BTN} min-h-[44px] px-4 py-2.5`}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={editorBusy}
-                onClick={() => void saveDraft()}
-                className={`${DS_SECONDARY_BTN} min-h-[44px] px-4 py-2.5 disabled:opacity-60`}
-              >
-                {editorBusy ? "Saving…" : "Save Draft"}
-              </button>
-              <button
-                type="button"
-                disabled={editorBusy}
-                onClick={() => void submitForAiReview()}
-                className={`${DS_PRIMARY_BTN} min-h-[44px] px-4 py-2.5 disabled:opacity-60`}
-              >
-                {editorBusy ? "Working…" : "Submit for AI Review"}
-              </button>
-            </div>
 
-            {sessionTranscript ? (
-              <div className="mt-6 border-t border-gray-100 pt-4">
-                <button
-                  type="button"
-                  className="flex min-h-[44px] w-full items-center justify-between rounded-lg px-2 text-left text-sm font-medium text-gray-800 hover:bg-gray-50 sm:text-base"
-                  onClick={() => setTranscriptPanelOpen((o) => !o)}
-                  aria-expanded={transcriptPanelOpen}
-                >
-                  <span>View Transcript</span>
-                  <span className="text-gray-500" aria-hidden>
-                    {transcriptPanelOpen ? "▲" : "▼"}
-                  </span>
-                </button>
-                {transcriptPanelOpen ? (
-                  <pre
-                    className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-gray-100 bg-gray-50 p-3 text-xs leading-relaxed text-gray-800 whitespace-pre-wrap sm:text-sm"
-                  >
-                    {sessionTranscript}
-                  </pre>
-                ) : null}
-              </div>
-            ) : null}
+              {editorTab === 5 ? (
+                <div className="space-y-4">
+                  {draftNoteStatus === "ai_flagged" ? (
+                    <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+                      <p className="font-medium">AI feedback</p>
+                      <p className="mt-1 whitespace-pre-wrap">
+                        {draftAiFeedback.trim() || "—"}
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setEditorTab(2)}
+                          className={DS_SECONDARY_BTN}
+                        >
+                          Edit Note
+                        </button>
+                        <button
+                          type="button"
+                          disabled={signAnywayBusy || !editingId}
+                          onClick={() => void signAnywayFromEditor()}
+                          className="rounded-lg border border-red-300 bg-white px-4 py-2 text-sm font-medium text-red-700 transition-colors hover:bg-red-50 disabled:opacity-60"
+                        >
+                          {signAnywayBusy ? "Signing…" : "Sign Anyway"}
+                        </button>
+                      </div>
+                      <p className="mt-2 text-xs text-red-700">
+                        Signing anyway overrides the AI flag and will be recorded
+                        on the note for review.
+                      </p>
+                    </div>
+                  ) : (
+                    <>
+                      <p className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-6 text-center text-sm text-gray-600">
+                        No AI review issues for this draft.
+                      </p>
+                      <div className="flex justify-end">
+                        <button
+                          type="button"
+                          disabled={editorBusy}
+                          onClick={() => void submitForAiReview()}
+                          className={`${DS_PRIMARY_BTN} min-h-[44px] disabled:opacity-60`}
+                        >
+                          {editorBusy ? "Working…" : "Submit for AI Review"}
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
+              ) : null}
+
+              {editorTab === 6 ? (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 text-sm">
+                    <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
+                      Summary
+                    </h3>
+                    <dl className="space-y-2">
+                      <div>
+                        <dt className="text-xs font-medium text-gray-500">
+                          Subjective
+                        </dt>
+                        <dd className="text-gray-800">
+                          {truncateSummary(draftSubjective)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs font-medium text-gray-500">
+                          Objective
+                        </dt>
+                        <dd className="text-gray-800">
+                          {truncateSummary(draftObjective)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs font-medium text-gray-500">
+                          Assessment
+                        </dt>
+                        <dd className="text-gray-800">
+                          {truncateSummary(draftAssessment)}
+                        </dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs font-medium text-gray-500">Plan</dt>
+                        <dd className="text-gray-800">
+                          {truncateSummary(draftPlan)}
+                        </dd>
+                      </div>
+                    </dl>
+                  </div>
+                  <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditorOpen(false);
+                        resetEditor();
+                      }}
+                      className={`${DS_SECONDARY_BTN} min-h-[44px] px-4 py-2.5`}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={editorBusy}
+                      onClick={() => void saveDraft()}
+                      className={`${DS_SECONDARY_BTN} min-h-[44px] px-4 py-2.5 disabled:opacity-60`}
+                    >
+                      {editorBusy ? "Saving…" : "Save Draft"}
+                    </button>
+                    <button
+                      type="button"
+                      disabled={editorBusy}
+                      onClick={() => void submitForAiReview()}
+                      className={`${DS_PRIMARY_BTN} min-h-[44px] px-4 py-2.5 disabled:opacity-60`}
+                    >
+                      {editorBusy ? "Working…" : "Submit for AI Review"}
+                    </button>
+                  </div>
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
       ) : null}

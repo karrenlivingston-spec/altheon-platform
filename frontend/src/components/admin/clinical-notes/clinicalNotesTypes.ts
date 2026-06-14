@@ -34,6 +34,21 @@ export type ClinicalNotesStats = {
   };
 };
 
+export type NoteGoal = {
+  id: string;
+  note_id: string;
+  description: string;
+  goal_type: "short_term" | "long_term";
+  target_weeks: number | null;
+  percent_met: number;
+};
+
+export type GoalSuggestion = {
+  description: string;
+  goal_type: "short_term" | "long_term";
+  target_weeks: number | null;
+};
+
 export type ClinicalNoteListItem = {
   id: string;
   patient_id: string;
