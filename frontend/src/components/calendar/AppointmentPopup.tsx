@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { formatInTimeZone } from "date-fns-tz";
+import { formatInTimeZone, toDate } from "date-fns-tz";
 
 import { supabase } from "@/lib/supabase";
 
@@ -30,7 +30,8 @@ type Props = {
   onClose: () => void;
   onCheckIn: (id: string) => void;
   onCheckOut: (id: string) => void;
-  onReschedule: (appointment: AppointmentPopupData) => void;
+  onRescheduleConfirm: (id: string, startTimeIso: string) => Promise<void>;
+  onCancelAppointment: (id: string) => Promise<void>;
   onScheduleFollowUp: (patient_id: string, patient_name: string) => void;
   onOpenChart: (patient_id: string) => void;
 };
@@ -43,6 +44,27 @@ async function authHeaders(): Promise<Record<string, string>> {
   const h: Record<string, string> = { "Content-Type": "application/json" };
   if (token) h.Authorization = `Bearer ${token}`;
   return h;
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function easternYmdOfIso(iso: string): string {
+  return formatInTimeZone(new Date(iso), NY, "yyyy-MM-dd");
+}
+
+function easternHmOfIso(iso: string): string {
+  return formatInTimeZone(new Date(iso), NY, "HH:mm");
+}
+
+function easternLocalToUtcIso(ymd: string, hm: string): string {
+  const [h, m] = hm.split(":").map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) {
+    throw new Error("Invalid time");
+  }
+  const s = `${ymd}T${pad2(h)}:${pad2(m)}:00`;
+  return toDate(s, { timeZone: NY }).toISOString();
 }
 
 function formatDob(value: string | null | undefined): string {
@@ -69,6 +91,17 @@ function formatAppointmentWhen(startIso: string, typeLabel: string): string {
   }
 }
 
+function formatCancelWhen(startIso: string): string {
+  try {
+    const d = new Date(startIso);
+    const datePart = formatInTimeZone(d, NY, "EEE, MMM d");
+    const timePart = formatInTimeZone(d, NY, "h:mm a");
+    return `${datePart} at ${timePart}`;
+  } catch {
+    return "this time";
+  }
+}
+
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -84,16 +117,25 @@ function ActionButton({
   icon,
   label,
   onClick,
+  disabled,
+  variant = "default",
 }: {
   icon: string;
   label: string;
   onClick: () => void;
+  disabled?: boolean;
+  variant?: "default" | "danger";
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm text-gray-800 hover:bg-gray-50"
+      disabled={disabled}
+      className={`flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm disabled:opacity-50 ${
+        variant === "danger"
+          ? "text-red-700 hover:bg-red-50"
+          : "text-gray-800 hover:bg-gray-50"
+      }`}
     >
       <span aria-hidden>{icon}</span>
       <span>{label}</span>
@@ -108,7 +150,8 @@ export default function AppointmentPopup({
   onClose,
   onCheckIn,
   onCheckOut,
-  onReschedule,
+  onRescheduleConfirm,
+  onCancelAppointment,
   onScheduleFollowUp,
   onOpenChart,
 }: Props) {
@@ -124,10 +167,28 @@ export default function AppointmentPopup({
     appointment.diagnosis_code?.trim() || "",
   );
   const [dob, setDob] = useState("");
+  const [rescheduleMode, setRescheduleMode] = useState(false);
+  const [rescheduleDate, setRescheduleDate] = useState(() =>
+    easternYmdOfIso(appointment.start_time),
+  );
+  const [rescheduleTime, setRescheduleTime] = useState(() =>
+    easternHmOfIso(appointment.start_time),
+  );
+  const [rescheduleBusy, setRescheduleBusy] = useState(false);
+  const [cancelConfirmMode, setCancelConfirmMode] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
 
   const status = (appointment.status || "").toLowerCase();
   const showCheckIn = status !== "checked_in" && status !== "completed";
   const showCheckOut = status === "checked_in";
+  const showCancel = status !== "cancelled" && status !== "completed";
+
+  useEffect(() => {
+    setRescheduleDate(easternYmdOfIso(appointment.start_time));
+    setRescheduleTime(easternHmOfIso(appointment.start_time));
+    setRescheduleMode(false);
+    setCancelConfirmMode(false);
+  }, [appointment.id, appointment.start_time]);
 
   useEffect(() => {
     let cancelled = false;
@@ -179,11 +240,20 @@ export default function AppointmentPopup({
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (e.key === "Escape") onClose();
+      if (e.key !== "Escape") return;
+      if (cancelConfirmMode) {
+        setCancelConfirmMode(false);
+        return;
+      }
+      if (rescheduleMode) {
+        setRescheduleMode(false);
+        return;
+      }
+      onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, cancelConfirmMode, rescheduleMode]);
 
   const computePosition = useCallback(() => {
     const el = cardRef.current;
@@ -207,7 +277,7 @@ export default function AppointmentPopup({
 
   useLayoutEffect(() => {
     computePosition();
-  }, [computePosition]);
+  }, [computePosition, rescheduleMode, cancelConfirmMode]);
 
   useEffect(() => {
     window.addEventListener("resize", computePosition);
@@ -222,6 +292,31 @@ export default function AppointmentPopup({
     appointment.start_time,
     appointment.appointment_type,
   );
+  const cancelWhen = formatCancelWhen(appointment.start_time);
+
+  async function handleRescheduleSubmit() {
+    if (!rescheduleDate || !rescheduleTime) return;
+    setRescheduleBusy(true);
+    try {
+      const startIso = easternLocalToUtcIso(rescheduleDate, rescheduleTime);
+      await onRescheduleConfirm(appointment.id, startIso);
+    } catch {
+      /* parent shows error toast; keep popup open */
+    } finally {
+      setRescheduleBusy(false);
+    }
+  }
+
+  async function handleCancelConfirm() {
+    setCancelBusy(true);
+    try {
+      await onCancelAppointment(appointment.id);
+    } catch {
+      /* parent shows error toast; keep popup open */
+    } finally {
+      setCancelBusy(false);
+    }
+  }
 
   return (
     <>
@@ -263,39 +358,124 @@ export default function AppointmentPopup({
           <InfoRow label="Diagnosis" value={diagnosis || "—"} />
         </div>
 
-        <div className="border-t border-gray-100 px-2 py-2">
-          {showCheckIn ? (
+        {rescheduleMode ? (
+          <div className="border-t border-gray-100 px-4 py-3">
+            <p className="text-sm font-semibold text-gray-900">
+              Reschedule appointment
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              Same patient and provider — pick a new date and time.
+            </p>
+            <div className="mt-3 space-y-2">
+              <label className="block text-xs font-medium text-gray-500">
+                Date
+                <input
+                  type="date"
+                  value={rescheduleDate}
+                  onChange={(e) => setRescheduleDate(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                />
+              </label>
+              <label className="block text-xs font-medium text-gray-500">
+                Time
+                <input
+                  type="time"
+                  value={rescheduleTime}
+                  onChange={(e) => setRescheduleTime(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                />
+              </label>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                onClick={() => setRescheduleMode(false)}
+                disabled={rescheduleBusy}
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                className="flex-1 rounded-lg bg-[#16A34A] px-3 py-2 text-sm font-medium text-white hover:bg-[#15803D] disabled:opacity-50"
+                onClick={() => void handleRescheduleSubmit()}
+                disabled={rescheduleBusy}
+              >
+                {rescheduleBusy ? "Saving…" : "Confirm"}
+              </button>
+            </div>
+          </div>
+        ) : cancelConfirmMode ? (
+          <div className="border-t border-gray-100 px-4 py-3">
+            <p className="text-sm font-medium text-gray-900">
+              Cancel this appointment for {appointment.patient_name} on{" "}
+              {cancelWhen}?
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                onClick={() => setCancelConfirmMode(false)}
+                disabled={cancelBusy}
+              >
+                Keep appointment
+              </button>
+              <button
+                type="button"
+                className="flex-1 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                onClick={() => void handleCancelConfirm()}
+                disabled={cancelBusy}
+              >
+                {cancelBusy ? "Cancelling…" : "Cancel appointment"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="border-t border-gray-100 px-2 py-2">
+            {showCheckIn ? (
+              <ActionButton
+                icon="✅"
+                label="Check In"
+                onClick={() => onCheckIn(appointment.id)}
+              />
+            ) : null}
+            {showCheckOut ? (
+              <ActionButton
+                icon="🏁"
+                label="Check Out"
+                onClick={() => onCheckOut(appointment.id)}
+              />
+            ) : null}
             <ActionButton
-              icon="✅"
-              label="Check In"
-              onClick={() => onCheckIn(appointment.id)}
+              icon="📅"
+              label="Reschedule"
+              onClick={() => setRescheduleMode(true)}
             />
-          ) : null}
-          {showCheckOut ? (
+            {showCancel ? (
+              <ActionButton
+                icon="✕"
+                label="Cancel Appointment"
+                variant="danger"
+                onClick={() => setCancelConfirmMode(true)}
+              />
+            ) : null}
             <ActionButton
-              icon="🏁"
-              label="Check Out"
-              onClick={() => onCheckOut(appointment.id)}
+              icon="➕"
+              label="Schedule Follow-Up"
+              onClick={() =>
+                onScheduleFollowUp(
+                  appointment.patient_id,
+                  appointment.patient_name,
+                )
+              }
             />
-          ) : null}
-          <ActionButton
-            icon="📅"
-            label="Reschedule"
-            onClick={() => onReschedule(appointment)}
-          />
-          <ActionButton
-            icon="➕"
-            label="Schedule Follow-Up"
-            onClick={() =>
-              onScheduleFollowUp(appointment.patient_id, appointment.patient_name)
-            }
-          />
-          <ActionButton
-            icon="📋"
-            label="Open Chart"
-            onClick={() => onOpenChart(appointment.patient_id)}
-          />
-        </div>
+            <ActionButton
+              icon="📋"
+              label="Open Chart"
+              onClick={() => onOpenChart(appointment.patient_id)}
+            />
+          </div>
+        )}
       </div>
     </>
   );

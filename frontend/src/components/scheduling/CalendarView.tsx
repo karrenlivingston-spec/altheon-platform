@@ -714,7 +714,10 @@ export default function CalendarView({
       headers: h,
       body: JSON.stringify({ start_time: startIso }),
     });
-    if (!res.ok) throw new Error(String(res.status));
+    if (!res.ok) {
+      const err = (await res.json().catch(() => ({}))) as { detail?: string };
+      throw new Error(err.detail || "Failed to update appointment time");
+    }
     await loadData();
   }
 
@@ -743,7 +746,7 @@ export default function CalendarView({
 
   async function patchAppointmentStatus(
     id: string,
-    status: "checked_in" | "completed",
+    status: "checked_in" | "completed" | "cancelled",
   ) {
     const h = await authHeaders();
     const res = await fetch(
@@ -794,26 +797,40 @@ export default function CalendarView({
     [closeAppointmentPopup, loadData],
   );
 
-  const handlePopupReschedule = useCallback(
-    (apptData: AppointmentPopupData) => {
-      const calAppt = appointments.find((a) => a.id === apptData.id);
-      closeAppointmentPopup();
-      if (!calAppt) return;
-      const timeHm = formatInTimeZone(new Date(calAppt.start_time), NY, "HH:mm");
-      setBookingPrefill({
-        date: easternYmdOfIso(calAppt.start_time),
-        time: timeHm,
-        clinicianId: calAppt.clinician.id,
-        patient: {
-          id: calAppt.patient.id,
-          first_name: calAppt.patient.first_name,
-          last_name: calAppt.patient.last_name,
-          phone: calAppt.patient.phone,
-        },
-      });
-      setBookModalOpen(true);
+  const handlePopupRescheduleConfirm = useCallback(
+    async (id: string, startTimeIso: string) => {
+      try {
+        await patchAppointmentTime(id, startTimeIso);
+        closeAppointmentPopup();
+        await loadData();
+        setToast({ kind: "success", message: "Appointment rescheduled" });
+      } catch (e) {
+        setToast({
+          kind: "error",
+          message: e instanceof Error ? e.message : "Reschedule failed",
+        });
+        throw e;
+      }
     },
-    [appointments, closeAppointmentPopup],
+    [closeAppointmentPopup, loadData],
+  );
+
+  const handlePopupCancel = useCallback(
+    async (id: string) => {
+      try {
+        await patchAppointmentStatus(id, "cancelled");
+        closeAppointmentPopup();
+        await loadData();
+        setToast({ kind: "success", message: "Appointment cancelled" });
+      } catch (e) {
+        setToast({
+          kind: "error",
+          message: e instanceof Error ? e.message : "Cancel failed",
+        });
+        throw e;
+      }
+    },
+    [closeAppointmentPopup, loadData],
   );
 
   const handlePopupScheduleFollowUp = useCallback(
@@ -1290,7 +1307,8 @@ export default function CalendarView({
           onClose={closeAppointmentPopup}
           onCheckIn={(id) => void handlePopupCheckIn(id)}
           onCheckOut={(id) => void handlePopupCheckOut(id)}
-          onReschedule={handlePopupReschedule}
+          onRescheduleConfirm={handlePopupRescheduleConfirm}
+          onCancelAppointment={handlePopupCancel}
           onScheduleFollowUp={handlePopupScheduleFollowUp}
           onOpenChart={handlePopupOpenChart}
         />
