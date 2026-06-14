@@ -132,24 +132,6 @@ def _patient_display_name(row: dict[str, Any]) -> str:
     return f"{fn} {ln}".strip() or "—"
 
 
-def _clinic_user_display_name(row: Optional[dict[str, Any]]) -> str:
-    """Derive a display label from clinic_users row without assuming column names exist."""
-    if not row:
-        return "—"
-    fn = str(row.get("first_name") or "").strip()
-    ln = str(row.get("last_name") or "").strip()
-    combined = f"{fn} {ln}".strip()
-    if combined:
-        return combined
-    single = str(row.get("name") or "").strip()
-    if single:
-        return single
-    email = str(row.get("email") or "").strip()
-    if email:
-        return email
-    return "Unknown"
-
-
 def _clinician_display_name(row: Optional[dict[str, Any]]) -> str:
     """clinicians.first_name + " " + last_name, or "Unknown" when unmatched."""
     if not row:
@@ -159,17 +141,42 @@ def _clinician_display_name(row: Optional[dict[str, Any]]) -> str:
     return f"{fn} {ln}".strip() or "Unknown"
 
 
-def _load_clinicians_map(author_ids: list[str]) -> dict[str, dict[str, Any]]:
-    """clinicians rows keyed by id (LEFT JOIN clinicians c ON c.id = cn.author_id)."""
+def _load_clinic_users_map(user_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """clinic_users rows keyed by id (clinical_notes.author_id / supervising_pt_id)."""
     by_id: dict[str, dict[str, Any]] = {}
-    if not author_ids:
+    if not user_ids:
+        return by_id
+
+    try:
+        resp = (
+            supabase.table("clinic_users")
+            .select("*")
+            .in_("id", user_ids)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+        for row in resp.data or []:
+            if isinstance(row, dict) and row.get("id"):
+                by_id[str(row["id"])] = row
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return by_id
+
+
+def _load_clinicians_map(clinician_ids: list[str]) -> dict[str, dict[str, Any]]:
+    """clinicians rows keyed by id (fallback via clinic_users.clinician_id when present)."""
+    by_id: dict[str, dict[str, Any]] = {}
+    if not clinician_ids:
         return by_id
 
     try:
         resp = (
             supabase.table("clinicians")
             .select("id,first_name,last_name")
-            .in_("id", author_ids)
+            .in_("id", clinician_ids)
             .execute()
         )
         _handle_supabase_error(resp)
@@ -185,6 +192,32 @@ def _load_clinicians_map(author_ids: list[str]) -> dict[str, dict[str, Any]]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return by_id
+
+
+def _resolve_clinic_user_name(
+    row: Optional[dict[str, Any]],
+    clinicians_by_id: dict[str, dict[str, Any]],
+) -> str:
+    """Display label for a clinic_users.id; Unknown only when the row is missing."""
+    if not row:
+        return "Unknown"
+    fn = str(row.get("first_name") or "").strip()
+    ln = str(row.get("last_name") or "").strip()
+    combined = f"{fn} {ln}".strip()
+    if combined:
+        return combined
+    single = str(row.get("name") or "").strip()
+    if single:
+        return single
+    email = str(row.get("email") or "").strip()
+    if email:
+        return email
+    clinician_id = str(row.get("clinician_id") or "").strip()
+    if clinician_id:
+        clinician_name = _clinician_display_name(clinicians_by_id.get(clinician_id))
+        if clinician_name != "Unknown":
+            return clinician_name
+    return "—"
 
 
 def _enrich_notes_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -221,25 +254,16 @@ def _enrich_notes_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    clinicians_by_id = _load_clinicians_map(author_ids)
-
-    supervising_by_id: dict[str, dict[str, Any]] = {}
-    try:
-        if supervising_ids:
-            sresp = (
-                supabase.table("clinic_users")
-                .select("*")
-                .in_("id", supervising_ids)
-                .execute()
-            )
-            _handle_supabase_error(sresp)
-            for srow in sresp.data or []:
-                if isinstance(srow, dict) and srow.get("id"):
-                    supervising_by_id[str(srow["id"])] = srow
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    clinic_user_ids = list({*author_ids, *supervising_ids})
+    clinic_users_by_id = _load_clinic_users_map(clinic_user_ids)
+    linked_clinician_ids = list(
+        {
+            str(cu.get("clinician_id") or "").strip()
+            for cu in clinic_users_by_id.values()
+            if str(cu.get("clinician_id") or "").strip()
+        }
+    )
+    clinicians_by_id = _load_clinicians_map(linked_clinician_ids)
 
     out: list[dict[str, Any]] = []
     for r in rows:
@@ -249,10 +273,12 @@ def _enrich_notes_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         spid = str(r.get("supervising_pt_id") or "").strip()
         pt = patients_map.get(pid)
         item["patient_name"] = _patient_display_name(pt) if pt else "—"
-        item["author_name"] = _clinician_display_name(clinicians_by_id.get(aid))
+        item["author_name"] = _resolve_clinic_user_name(
+            clinic_users_by_id.get(aid), clinicians_by_id
+        )
         if spid:
-            item["supervising_pt_name"] = _clinic_user_display_name(
-                supervising_by_id.get(spid)
+            item["supervising_pt_name"] = _resolve_clinic_user_name(
+                clinic_users_by_id.get(spid), clinicians_by_id
             )
         out.append(item)
     return out

@@ -1596,6 +1596,27 @@ export default function AdminClinicalNotesPage() {
                       </div>
                     </dl>
                   </div>
+
+                  {draftNoteStatus === "draft" ||
+                  draftNoteStatus === "needs_correction" ? (
+                    <p className="rounded-lg border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                      Submit this note for AI Review from the AI Review tab
+                      before signing.
+                    </p>
+                  ) : null}
+
+                  {draftNoteStatus === "ready_for_review" ? (
+                    <div className="rounded-lg border border-green-100 bg-green-50 px-4 py-3 text-sm text-green-900">
+                      {/* TODO: Wire Sign Note from the editor for ready_for_review notes.
+                          Signing is currently only available via the PT Review modal (reviewNote),
+                          not from the editor workflow. */}
+                      <p>
+                        This note passed AI review and is ready for PT signature.
+                        Use the Review Queue to sign.
+                      </p>
+                    </div>
+                  ) : null}
+
                   <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-4">
                     <button
                       type="button"
@@ -1607,22 +1628,16 @@ export default function AdminClinicalNotesPage() {
                     >
                       Cancel
                     </button>
-                    <button
-                      type="button"
-                      disabled={editorBusy}
-                      onClick={() => void saveDraft()}
-                      className={`${DS_SECONDARY_BTN} min-h-[44px] px-4 py-2.5 disabled:opacity-60`}
-                    >
-                      {editorBusy ? "Saving…" : "Save Draft"}
-                    </button>
-                    <button
-                      type="button"
-                      disabled={editorBusy}
-                      onClick={() => void submitForAiReview()}
-                      className={`${DS_PRIMARY_BTN} min-h-[44px] px-4 py-2.5 disabled:opacity-60`}
-                    >
-                      {editorBusy ? "Working…" : "Submit for AI Review"}
-                    </button>
+                    {canEditNote(draftNoteStatus) ? (
+                      <button
+                        type="button"
+                        disabled={editorBusy}
+                        onClick={() => void saveDraft()}
+                        className={`${DS_SECONDARY_BTN} min-h-[44px] px-4 py-2.5 disabled:opacity-60`}
+                      >
+                        {editorBusy ? "Saving…" : "Save Draft"}
+                      </button>
+                    ) : null}
                   </div>
                 </div>
               ) : null}
