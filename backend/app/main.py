@@ -35,6 +35,7 @@ from app.routers import (
     memberships_dashboard as memberships_dashboard_router,
     groups_dashboard as groups_dashboard_router,
     waitlist as waitlist_router,
+    group_sessions as group_sessions_router,
     note_pdf as note_pdf_router,
     records_router,
     cpt_detection as cpt_detection_router,
@@ -107,6 +108,11 @@ app.include_router(
     waitlist_router.router,
     prefix="/api",
     tags=["Waitlist"],
+)
+app.include_router(
+    group_sessions_router.router,
+    prefix="/api",
+    tags=["Group Sessions"],
 )
 app.include_router(appointments.router, prefix="/appointments", tags=["appointments"])
 app.include_router(availability.router, tags=["availability"])
