@@ -16,6 +16,7 @@ from app.google_calendar import (
     update_calendar_event,
 )
 from app.routers.intake import send_booking_intake_sms
+from app.services.waitlist import run_waitlist_notify_for_freed_slot
 from app.sms import send_sms
 
 router = APIRouter()
@@ -487,6 +488,24 @@ def get_appointment(
     }
 
 
+def _maybe_notify_waitlist_for_freed_slot(
+    clinic_id: str,
+    clinician_id: str,
+    start_time: str,
+    end_time: str,
+) -> None:
+    """Best-effort waitlist SMS; never affects the caller's HTTP response."""
+    if not clinic_id or not clinician_id or not start_time or not end_time:
+        return
+    run_waitlist_notify_for_freed_slot(
+        supabase,
+        clinic_id,
+        clinician_id,
+        start_time,
+        end_time,
+    )
+
+
 @router.patch("/{appointment_id}/time")
 def update_appointment_time(
     appointment_id: str,
@@ -519,6 +538,11 @@ def update_appointment_time(
         raise HTTPException(status_code=500, detail="Appointment has no clinic_id")
     _assert_user_has_clinic_access(user_id, clinic_id)
 
+    old_start_time = str(row.get("start_time") or "")
+    old_end_time = str(row.get("end_time") or "")
+    old_clinician_id = str(row.get("clinician_id") or "").strip()
+    old_status = str(row.get("status") or "").strip().lower()
+
     dur = _duration_minutes_from_appt_row(row)
     new_start = _parse_iso_utc(body.start_time)
     new_end = new_start + timedelta(minutes=dur)
@@ -541,6 +565,20 @@ def update_appointment_time(
         raise
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    new_start_iso = new_start.isoformat()
+    if (
+        old_status in {"scheduled", "confirmed"}
+        and old_start_time
+        and old_end_time
+        and old_start_time != new_start_iso
+    ):
+        _maybe_notify_waitlist_for_freed_slot(
+            clinic_id,
+            old_clinician_id,
+            old_start_time,
+            old_end_time,
+        )
 
     clinic_tz = ZoneInfo("America/New_York")
     try:
@@ -738,7 +776,9 @@ def update_appointment_status(
     try:
         appt = (
             supabase.table("appointments")
-            .select("id,clinic_id,google_event_id")
+            .select(
+                "id, clinic_id, google_event_id, clinician_id, start_time, end_time, status"
+            )
             .eq("id", appointment_id)
             .limit(1)
             .execute()
@@ -751,8 +791,13 @@ def update_appointment_status(
     rows = appt.data or []
     if not rows:
         raise HTTPException(status_code=404, detail="Appointment not found")
-    clinic_id = str(rows[0].get("clinic_id") or "").strip()
-    google_event_id = str(rows[0].get("google_event_id") or "").strip()
+    appt_row = rows[0]
+    clinic_id = str(appt_row.get("clinic_id") or "").strip()
+    google_event_id = str(appt_row.get("google_event_id") or "").strip()
+    freed_clinician_id = str(appt_row.get("clinician_id") or "").strip()
+    freed_start_time = str(appt_row.get("start_time") or "")
+    freed_end_time = str(appt_row.get("end_time") or "")
+    prior_status = str(appt_row.get("status") or "").strip().lower()
     if not clinic_id:
         raise HTTPException(status_code=500, detail="Appointment has no clinic_id")
     _assert_user_has_clinic_access(user_id, clinic_id)
@@ -796,6 +841,18 @@ def update_appointment_status(
                     appointment_id,
                     google_event_id,
                 )
+        if (
+            status == "cancelled"
+            and prior_status not in {"cancelled"}
+            and freed_start_time
+            and freed_end_time
+        ):
+            _maybe_notify_waitlist_for_freed_slot(
+                clinic_id,
+                freed_clinician_id,
+                freed_start_time,
+                freed_end_time,
+            )
         return result.data[0]
     except HTTPException:
         raise
@@ -1159,6 +1216,9 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
             detail="Existing appointment is missing required booking fields",
         )
 
+    old_start_time = str(row.get("start_time") or "")
+    old_end_time = str(row.get("end_time") or "")
+
     eastern = pytz.timezone("America/New_York")
     naive_dt = datetime.strptime(
         f"{payload.new_date} {payload.new_time}", "%Y-%m-%d %H:%M"
@@ -1197,6 +1257,13 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     print(f"Old appointment cancelled: {cancel_result.data}")
+
+    _maybe_notify_waitlist_for_freed_slot(
+        clinic_id,
+        clinician_id,
+        old_start_time,
+        old_end_time,
+    )
 
     cancel_rows = cancel_result.data or []
     if not cancel_rows:
