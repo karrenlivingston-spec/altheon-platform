@@ -8,6 +8,27 @@ from app.db import supabase
 
 router = APIRouter()
 
+# Sun=0 .. Sat=6 — matches availability_rules.day_of_week and isoweekday() % 7
+_WEEKDAY_TO_ISO: dict[str, int] = {
+    "sunday": 0,
+    "monday": 1,
+    "tuesday": 2,
+    "wednesday": 3,
+    "thursday": 4,
+    "friday": 5,
+    "saturday": 6,
+}
+_MIN_WEEKDAY_SCAN_DAYS = 8
+
+
+def _parse_weekday_filter(weekday: Optional[str]) -> Optional[int]:
+    if not weekday:
+        return None
+    try:
+        return _WEEKDAY_TO_ISO.get(weekday.strip().lower())
+    except (AttributeError, TypeError):
+        return None
+
 
 def _blocked_windows_for_date(clinician_id: str, target_date: date):
     start_iso = f"{target_date.isoformat()}T00:00:00"
@@ -163,26 +184,55 @@ def get_next_available(
     limit: int = Query(default=8),
     days_ahead: int = Query(default=14),
     after_date: Optional[str] = Query(default=None),
+    start_date: Optional[str] = Query(default=None),
+    weekday: Optional[str] = Query(default=None),
 ):
     """
-    Returns slots for the next single available day.
-    Starts from today, scans up to `days_ahead` days, and returns up to `limit` slots
-    from the first day that has any availability.
-    The agent never needs to ask the patient for a date — it just reads what this returns.
+    Returns upcoming open appointment slots.
+
+    Default (no weekday): slots from the first day with availability, up to `limit`.
+    With weekday: up to `limit` slots on matching weekdays across the scan window.
+
+    Scan anchor: max(Eastern today, start_date if provided, day after after_date if provided).
     """
     eastern = pytz.timezone("America/New_York")
     now_eastern = datetime.now(eastern)
     today = now_eastern.date()
     scan_start = today
 
+    if start_date:
+        try:
+            parsed_start_date = datetime.strptime(start_date, "%Y-%m-%d").date()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="start_date must be in YYYY-MM-DD format") from exc
+        scan_start = max(today, parsed_start_date)
+
     if after_date:
         try:
             parsed_after_date = datetime.strptime(after_date, "%Y-%m-%d").date()
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="after_date must be in YYYY-MM-DD format") from exc
-        scan_start = max(today, parsed_after_date + timedelta(days=1))
+        scan_start = max(scan_start, parsed_after_date + timedelta(days=1))
 
-    for offset in range(days_ahead):
+    weekday_filter = _parse_weekday_filter(weekday)
+    scan_days = max(days_ahead, _MIN_WEEKDAY_SCAN_DAYS) if weekday_filter is not None else days_ahead
+
+    if weekday_filter is not None:
+        collected: list[dict] = []
+        for offset in range(scan_days):
+            target_date = scan_start + timedelta(days=offset)
+            if target_date.isoweekday() % 7 != weekday_filter:
+                continue
+            day_slots = get_slots_for_date(clinic_id, clinician_id, target_date, duration_minutes)
+            if not day_slots:
+                continue
+            remaining = limit - len(collected)
+            collected.extend(day_slots[:remaining])
+            if len(collected) >= limit:
+                break
+        return collected
+
+    for offset in range(scan_days):
         target_date = scan_start + timedelta(days=offset)
         day_slots = get_slots_for_date(clinic_id, clinician_id, target_date, duration_minutes)
         if day_slots:
