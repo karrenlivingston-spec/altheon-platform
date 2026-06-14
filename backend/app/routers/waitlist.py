@@ -7,13 +7,13 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.db import supabase
 
 router = APIRouter()
 
-_WAITLIST_STATUSES = frozenset({"waiting", "contacted", "booked", "cancelled"})
+_WAITLIST_STATUSES = frozenset({"waiting", "contacted", "booked", "cancelled", "notified"})
 
 
 def _now_iso() -> str:
@@ -24,6 +24,27 @@ def _nested_patient(value: Any) -> dict[str, Any]:
     if isinstance(value, list):
         value = value[0] if value else None
     return value if isinstance(value, dict) else {}
+
+
+def _resolve_provider_id(
+    provider_id: Optional[str] = None,
+    clinician_id: Optional[str] = None,
+) -> Optional[str]:
+    """Accept provider_id or clinician_id from API clients; DB column is provider_id."""
+    value = (provider_id or clinician_id or "").strip()
+    return value or None
+
+
+def _shape_waitlist_row(row: dict[str, Any]) -> dict[str, Any]:
+    shaped = dict(row)
+    patient = _nested_patient(shaped.pop("patients", None))
+    shaped["patient_first_name"] = patient.get("first_name")
+    shaped["patient_last_name"] = patient.get("last_name")
+    shaped["patient_phone"] = patient.get("phone")
+    # Backward compat for clients that still read clinician_id
+    if "provider_id" in shaped:
+        shaped["clinician_id"] = shaped.get("provider_id")
+    return shaped
 
 
 class WaitlistCreate(BaseModel):
@@ -57,7 +78,7 @@ async def list_waitlist(
             supabase.table("appointment_waitlist")
             .select(
                 "id, clinic_id, patient_id, requested_date, requested_time, "
-                "clinician_id, reason, notes, status, created_at, updated_at, "
+                "provider_id, reason, notes, status, created_at, updated_at, "
                 "patients(first_name, last_name, phone)"
             )
             .eq("clinic_id", clinic_id.strip())
@@ -70,12 +91,7 @@ async def list_waitlist(
         for row in rows:
             if not isinstance(row, dict):
                 continue
-            shaped = dict(row)
-            patient = _nested_patient(shaped.pop("patients", None))
-            shaped["patient_first_name"] = patient.get("first_name")
-            shaped["patient_last_name"] = patient.get("last_name")
-            shaped["patient_phone"] = patient.get("phone")
-            out.append(shaped)
+            out.append(_shape_waitlist_row(row))
         return out
     except Exception:
         traceback.print_exc()
@@ -85,13 +101,13 @@ async def list_waitlist(
 @router.post("/waitlist", status_code=201)
 async def create_waitlist_entry(body: WaitlistCreate):
     try:
-        clinician_id = (body.clinician_id or body.provider_id or "").strip() or None
+        provider_id = _resolve_provider_id(body.provider_id, body.clinician_id)
         payload: dict[str, Any] = {
             "clinic_id": body.clinic_id.strip(),
             "patient_id": body.patient_id.strip(),
             "requested_date": body.requested_date.strip(),
             "requested_time": (body.requested_time or "").strip() or None,
-            "clinician_id": clinician_id,
+            "provider_id": provider_id,
             "reason": (body.reason or "").strip() or None,
             "notes": (body.notes or "").strip() or None,
             "status": "waiting",
@@ -100,7 +116,11 @@ async def create_waitlist_entry(body: WaitlistCreate):
         rows = res.data or []
         if not rows:
             raise HTTPException(status_code=400, detail="Failed to create waitlist entry.")
-        return rows[0]
+        row = rows[0]
+        if isinstance(row, dict):
+            row = dict(row)
+            row["clinician_id"] = row.get("provider_id")
+        return row
     except HTTPException:
         raise
     except Exception as e:
@@ -112,8 +132,11 @@ async def create_waitlist_entry(body: WaitlistCreate):
 async def update_waitlist_entry(entry_id: str, body: WaitlistUpdate):
     try:
         data = body.model_dump(exclude_unset=True)
-        if "provider_id" in data:
-            data["clinician_id"] = data.pop("provider_id")
+        if "clinician_id" in data:
+            if "provider_id" not in data:
+                data["provider_id"] = data.pop("clinician_id")
+            else:
+                data.pop("clinician_id")
         if "status" in data and data["status"] not in _WAITLIST_STATUSES:
             raise HTTPException(status_code=400, detail="Invalid status")
         if not data:
@@ -128,7 +151,11 @@ async def update_waitlist_entry(entry_id: str, body: WaitlistUpdate):
         rows = res.data or []
         if not rows:
             raise HTTPException(status_code=404, detail="Waitlist entry not found.")
-        return rows[0]
+        row = rows[0]
+        if isinstance(row, dict):
+            row = dict(row)
+            row["clinician_id"] = row.get("provider_id")
+        return row
     except HTTPException:
         raise
     except Exception as e:

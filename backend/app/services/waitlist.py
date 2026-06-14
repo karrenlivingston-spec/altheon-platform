@@ -90,8 +90,8 @@ def _row_matches_freed_slot(
     window_start: time,
     window_end: time,
 ) -> bool:
-    row_clinician = str(row.get("clinician_id") or "").strip() or None
-    if row_clinician and row_clinician != clinician_id.strip():
+    row_provider = str(row.get("provider_id") or "").strip() or None
+    if row_provider and row_provider != clinician_id.strip():
         return False
     requested = _parse_time_value(row.get("requested_time"))
     if requested is None:
@@ -121,7 +121,7 @@ async def check_waitlist_matches(
         resp = (
             supabase.table("appointment_waitlist")
             .select(
-                "id, patient_id, requested_time, clinician_id, notes, created_at"
+                "id, patient_id, requested_time, provider_id, notes, created_at"
             )
             .eq("clinic_id", clinic_id.strip())
             .eq("status", "waiting")
@@ -141,7 +141,7 @@ async def check_waitlist_matches(
                     "id": row.get("id"),
                     "patient_id": row.get("patient_id"),
                     "requested_time": row.get("requested_time"),
-                    "provider_id": row.get("clinician_id"),
+                    "provider_id": row.get("provider_id"),
                     "notes": row.get("notes"),
                 }
             )
