@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef, useState } from "react";
 import { Eye, MoreHorizontal } from "lucide-react";
 
 import {
@@ -13,6 +14,7 @@ import {
 } from "@/app/admin/designSystem";
 import {
   BillingClaimRow,
+  CLAIM_STATUS_OPTIONS,
   claimStatusBadgeClass,
   claimStatusLabel,
   formatUsdFromCentsPrecise,
@@ -35,6 +37,10 @@ type ClaimsListProps = {
   onDateTo: (value: string) => void;
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: number) => void;
+  onView: (claim: BillingClaimRow) => void;
+  onEdit: (claim: BillingClaimRow) => void;
+  onDelete: (claim: BillingClaimRow) => void;
+  onStatusChange: (claim: BillingClaimRow, status: string) => void;
 };
 
 const TABS: { key: ClaimsFilter; label: string; countKey: string }[] = [
@@ -70,8 +76,25 @@ export default function ClaimsList({
   onDateTo,
   onPageChange,
   onPageSizeChange,
+  onView,
+  onEdit,
+  onDelete,
+  onStatusChange,
 }: ClaimsListProps) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const [menuId, setMenuId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!menuId) return;
+    function onDocMouseDown(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuId(null);
+      }
+    }
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [menuId]);
 
   return (
     <div className={DS_CARD}>
@@ -143,51 +166,111 @@ export default function ClaimsList({
                 </td>
               </tr>
             ) : (
-              claims.map((claim) => (
-                <tr key={claim.id} className={DS_TR}>
-                  <td className={`${DS_TD_PRIMARY} font-mono text-xs`}>
-                    {claim.claim_number}
-                  </td>
-                  <td className={DS_TD_PRIMARY}>{claim.patient_name}</td>
-                  <td className={DS_TD_PRIMARY}>{claim.insurance_carrier}</td>
-                  <td className={DS_TD_PRIMARY}>{formatDate(claim.date_of_service)}</td>
-                  <td className={DS_TD_PRIMARY}>
-                    {formatUsdFromCentsPrecise(claim.total_billed_cents)}
-                  </td>
-                  <td className={DS_TD_PRIMARY}>
-                    <span className={claimStatusBadgeClass(claim.status)}>
-                      {claimStatusLabel(claim.status)}
-                    </span>
-                  </td>
-                  <td className={DS_TD_PRIMARY}>
-                    {formatSubmitted(claim.created_at)}
-                  </td>
-                  <td className={DS_TD_PRIMARY}>
-                    {formatUsdFromCentsPrecise(claim.amount_paid_cents)}
-                  </td>
-                  <td className={DS_TD_PRIMARY}>
-                    {formatUsdFromCentsPrecise(claim.amount_remaining_cents)}
-                  </td>
-                  <td className={DS_TD_PRIMARY}>
-                    <div className="flex items-center gap-1">
-                      <button
-                        type="button"
-                        className="rounded p-1 text-gray-500 hover:bg-gray-100"
-                        aria-label="View claim"
-                      >
-                        <Eye className="h-4 w-4" />
-                      </button>
-                      <button
-                        type="button"
-                        className="rounded p-1 text-gray-500 hover:bg-gray-100"
-                        aria-label="More actions"
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              ))
+              claims.map((claim) => {
+                const isDraft =
+                  String(claim.status ?? "").toLowerCase() === "draft";
+                const currentStatus = String(claim.status ?? "").toLowerCase();
+
+                return (
+                  <tr key={claim.id} className={DS_TR}>
+                    <td className={`${DS_TD_PRIMARY} font-mono text-xs`}>
+                      {claim.claim_number}
+                    </td>
+                    <td className={DS_TD_PRIMARY}>{claim.patient_name}</td>
+                    <td className={DS_TD_PRIMARY}>{claim.insurance_carrier}</td>
+                    <td className={DS_TD_PRIMARY}>
+                      {formatDate(claim.date_of_service)}
+                    </td>
+                    <td className={DS_TD_PRIMARY}>
+                      {formatUsdFromCentsPrecise(claim.total_billed_cents)}
+                    </td>
+                    <td className={DS_TD_PRIMARY}>
+                      <span className={claimStatusBadgeClass(claim.status)}>
+                        {claimStatusLabel(claim.status)}
+                      </span>
+                    </td>
+                    <td className={DS_TD_PRIMARY}>
+                      {formatSubmitted(claim.created_at)}
+                    </td>
+                    <td className={DS_TD_PRIMARY}>
+                      {formatUsdFromCentsPrecise(claim.amount_paid_cents)}
+                    </td>
+                    <td className={DS_TD_PRIMARY}>
+                      {formatUsdFromCentsPrecise(claim.amount_remaining_cents)}
+                    </td>
+                    <td className={`${DS_TD_PRIMARY} relative`}>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => onView(claim)}
+                          className="rounded p-1 text-gray-500 hover:bg-gray-100"
+                          aria-label="View claim"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setMenuId(menuId === claim.id ? null : claim.id)
+                          }
+                          className="rounded p-1 text-gray-500 hover:bg-gray-100"
+                          aria-label="More actions"
+                        >
+                          <MoreHorizontal className="h-4 w-4" />
+                        </button>
+                      </div>
+                      {menuId === claim.id ? (
+                        <div
+                          ref={menuRef}
+                          className="absolute right-0 top-8 z-20 min-w-[180px] rounded-lg border border-gray-200 bg-white py-1 text-left shadow-lg"
+                        >
+                          <button
+                            type="button"
+                            className="block w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-gray-50"
+                            onClick={() => {
+                              setMenuId(null);
+                              onEdit(claim);
+                            }}
+                          >
+                            Edit
+                          </button>
+                          {isDraft ? (
+                            <button
+                              type="button"
+                              className="block w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
+                              onClick={() => {
+                                setMenuId(null);
+                                onDelete(claim);
+                              }}
+                            >
+                              Delete
+                            </button>
+                          ) : null}
+                          <div className="my-1 border-t border-gray-100" />
+                          <p className="px-3 py-1 text-xs font-medium text-gray-400">
+                            Change status
+                          </p>
+                          {CLAIM_STATUS_OPTIONS.filter(
+                            (s) => s !== currentStatus,
+                          ).map((status) => (
+                            <button
+                              key={status}
+                              type="button"
+                              className="block w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-gray-50"
+                              onClick={() => {
+                                setMenuId(null);
+                                onStatusChange(claim, status);
+                              }}
+                            >
+                              {claimStatusLabel(status)}
+                            </button>
+                          ))}
+                        </div>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>

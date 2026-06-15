@@ -16,6 +16,31 @@ export type BillingClaimRow = {
   created_at?: string | null;
 };
 
+/** Full insurance claim from GET /billing/claims/{id} */
+export type InsuranceClaimDetail = {
+  id: string;
+  clinic_id?: string;
+  patient_id: string;
+  clinician_id?: string | null;
+  appointment_id?: string | null;
+  first_treatment_date?: string | null;
+  payer_name?: string | null;
+  payer_id?: string | null;
+  policy_number?: string | null;
+  member_id?: string | null;
+  total_amount?: number | null;
+  diagnosis_codes?: string[] | null;
+  cpt_codes?: string[] | null;
+  notes?: string | null;
+  status?: string | null;
+  claim_number?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  filing_deadline?: string | null;
+  days_remaining?: number | null;
+  audit_log?: unknown[];
+};
+
 export type RecentPaymentRow = {
   amount_cents: number;
   payment_date: string;
@@ -111,4 +136,63 @@ export function currentMonthRange(): { from: string; to: string } {
     from: `${y}-${m}-01`,
     to: `${y}-${m}-${String(lastDay).padStart(2, "0")}`,
   };
+}
+
+export const CLAIM_STATUS_OPTIONS = [
+  "draft",
+  "submitted",
+  "pending",
+  "denied",
+  "paid",
+] as const;
+
+export function exportClaimsCsv(
+  claims: InsuranceClaimDetail[],
+  filename: string,
+  patientNameById?: Record<string, string>,
+) {
+  const headers = [
+    "Patient Name",
+    "Payer Name",
+    "Policy Number",
+    "Member ID",
+    "Total Amount",
+    "Status",
+    "Date of Service",
+    "CPT Codes",
+    "Diagnosis Codes",
+  ];
+  const escape = (v: string) => {
+    if (v.includes(",") || v.includes('"') || v.includes("\n")) {
+      return `"${v.replace(/"/g, '""')}"`;
+    }
+    return v;
+  };
+  const rows = claims.map((c) => {
+    const dx = Array.isArray(c.diagnosis_codes) ? c.diagnosis_codes.join("; ") : "";
+    const cpt = Array.isArray(c.cpt_codes) ? c.cpt_codes.join("; ") : "";
+    const patientName =
+      (c.patient_id && patientNameById?.[c.patient_id]) || c.patient_id || "";
+    return [
+      patientName,
+      c.payer_name ?? "",
+      c.policy_number ?? "",
+      c.member_id ?? "",
+      c.total_amount != null ? String(c.total_amount) : "",
+      c.status ?? "",
+      c.first_treatment_date ?? "",
+      cpt,
+      dx,
+    ]
+      .map((cell) => escape(String(cell)))
+      .join(",");
+  });
+  const csv = [headers.join(","), ...rows].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
 }
