@@ -20,7 +20,13 @@ import {
   formatUsdFromCentsPrecise,
 } from "@/components/admin/billing/billingTypes";
 
-export type ClaimsFilter = "all" | "submitted" | "pending" | "denied" | "paid";
+export type ClaimsFilter =
+  | "all"
+  | "draft"
+  | "submitted"
+  | "pending"
+  | "denied"
+  | "paid";
 
 type ClaimsListProps = {
   claims: BillingClaimRow[];

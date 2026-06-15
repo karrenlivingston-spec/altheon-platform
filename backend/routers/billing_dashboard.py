@@ -73,13 +73,58 @@ def _patient_name(row: dict[str, Any]) -> str:
 
 
 def _dos_date(row: dict[str, Any]) -> Optional[date]:
-    raw = str(row.get("date_of_service") or "")[:10]
+    raw = str(
+        row.get("date_of_service") or row.get("first_treatment_date") or ""
+    )[:10]
     if not raw:
         return None
     try:
         return date.fromisoformat(raw)
     except ValueError:
         return None
+
+
+def _amount_dollars_to_cents(value: Any) -> int:
+    try:
+        return round(float(value or 0) * 100)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _normalize_insurance_claim(row: dict[str, Any]) -> dict[str, Any]:
+    """Map insurance_claims row to the dashboard record shape."""
+    status = str(row.get("status") or "draft").strip().lower()
+    total_billed = _amount_dollars_to_cents(row.get("total_amount"))
+    if status == "paid":
+        paid = total_billed
+        remaining = 0
+    else:
+        paid = 0
+        remaining = total_billed
+    dos = str(row.get("first_treatment_date") or "")[:10] or None
+    return {
+        "id": row.get("id"),
+        "clinic_id": row.get("clinic_id"),
+        "patient_id": row.get("patient_id"),
+        "appointment_id": row.get("appointment_id"),
+        "claim_number": row.get("claim_number"),
+        "insurance_carrier": str(row.get("payer_name") or "").strip() or None,
+        "date_of_service": dos,
+        "status": status,
+        "total_billed_cents": total_billed,
+        "amount_paid_cents": paid,
+        "amount_remaining_cents": remaining,
+        "total_paid_cents": paid,
+        "created_at": row.get("created_at"),
+        "updated_at": row.get("updated_at"),
+        "patients": row.get("patients"),
+    }
+
+
+def _claim_dos(row: dict[str, Any]) -> str:
+    return str(row.get("date_of_service") or row.get("first_treatment_date") or "")[
+        :10
+    ]
 
 
 def _shape_claim_row(row: dict[str, Any], *, index: int) -> dict[str, Any]:
@@ -121,23 +166,26 @@ def billing_dashboard(
             lm_start, lm_end = _month_bounds(today.year, today.month - 1)
 
         records_resp = (
-            supabase.table("billing_records")
+            supabase.table("insurance_claims")
             .select(
-                "id, clinic_id, patient_id, appointment_id, claim_number, "
-                "insurance_carrier, date_of_service, status, total_billed_cents, "
-                "amount_paid_cents, amount_remaining_cents, total_paid_cents, "
+                "id, clinic_id, patient_id, appointment_id, "
+                "payer_name, first_treatment_date, status, total_amount, "
                 "created_at, updated_at, "
-                "patients(first_name, last_name, insurance_carrier)"
+                "patients(first_name, last_name)"
             )
             .eq("clinic_id", cid)
-            .order("date_of_service", desc=True)
+            .order("first_treatment_date", desc=True)
             .execute()
         )
         _handle_supabase_error(records_resp)
-        all_records = records_resp.data or []
+        all_records = [
+            _normalize_insurance_claim(r)
+            for r in (records_resp.data or [])
+            if isinstance(r, dict)
+        ]
 
         def in_month(row: dict[str, Any], start: str, end: str) -> bool:
-            dos = str(row.get("date_of_service") or "")[:10]
+            dos = _claim_dos(row)
             return bool(dos and start <= dos <= end)
 
         mtd_records = [r for r in all_records if in_month(r, month_start, month_end)]
@@ -258,8 +306,7 @@ def billing_dashboard(
         filtered = [
             r
             for r in all_records
-            if str(r.get("date_of_service") or "")[:10]
-            and df <= str(r.get("date_of_service") or "")[:10] <= dt
+            if _claim_dos(r) and df <= _claim_dos(r) <= dt
         ]
         if status and status.lower() != "all":
             st = status.lower()
@@ -284,8 +331,7 @@ def billing_dashboard(
                 [
                     r
                     for r in all_records
-                    if str(r.get("date_of_service") or "")[:10]
-                    and df <= str(r.get("date_of_service") or "")[:10] <= dt
+                    if _claim_dos(r) and df <= _claim_dos(r) <= dt
                 ]
             ),
             "submitted": 0,
@@ -295,7 +341,7 @@ def billing_dashboard(
             "draft": 0,
         }
         for r in all_records:
-            dos = str(r.get("date_of_service") or "")[:10]
+            dos = _claim_dos(r)
             if not dos or not (df <= dos <= dt):
                 continue
             st = str(r.get("status") or "draft").lower()

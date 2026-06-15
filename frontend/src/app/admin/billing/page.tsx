@@ -141,11 +141,11 @@ export default function AdminBillingPage() {
   function handleStatusFilter(status: string) {
     const map: Record<string, ClaimsFilter> = {
       all: "all",
+      draft: "draft",
       submitted: "submitted",
       pending: "pending",
       denied: "denied",
       paid: "paid",
-      draft: "all",
     };
     setStatusFilter(map[status] ?? "all");
     setPage(0);
