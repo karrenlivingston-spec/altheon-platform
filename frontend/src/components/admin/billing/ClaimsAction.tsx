@@ -1,6 +1,7 @@
 "use client";
 
 import { ChevronRight } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import { DS_CARD } from "@/app/admin/designSystem";
 import {
@@ -21,6 +22,7 @@ const ROWS = [
     sub: "Action needed to resubmit",
     showAmount: true,
     filter: "denied",
+    href: null,
   },
   {
     key: "pending" as const,
@@ -29,6 +31,7 @@ const ROWS = [
     sub: "Awaiting payer response",
     showAmount: true,
     filter: "pending",
+    href: null,
   },
   {
     key: "ready_to_send" as const,
@@ -37,6 +40,7 @@ const ROWS = [
     sub: "Created but not yet submitted",
     showAmount: true,
     filter: "draft",
+    href: null,
   },
   {
     key: "unbilled" as const,
@@ -44,11 +48,14 @@ const ROWS = [
     label: "Unbilled Appointments",
     sub: "Missing charges",
     showAmount: false,
-    filter: "all",
+    filter: null,
+    href: "/admin/billing/unbilled-appointments",
   },
 ];
 
 export default function ClaimsAction({ action, onFilter }: ClaimsActionProps) {
+  const router = useRouter();
+
   return (
     <div className={DS_CARD}>
       <div className="mb-4 flex items-center justify-between">
@@ -70,7 +77,13 @@ export default function ClaimsAction({ action, onFilter }: ClaimsActionProps) {
             <li key={row.key}>
               <button
                 type="button"
-                onClick={() => onFilter?.(row.filter)}
+                onClick={() => {
+                  if (row.href) {
+                    router.push(row.href);
+                    return;
+                  }
+                  if (row.filter) onFilter?.(row.filter);
+                }}
                 className="flex w-full items-center gap-3 py-3 text-left text-sm hover:bg-gray-50"
               >
                 <span className="text-lg" aria-hidden>

@@ -30,12 +30,24 @@ type AppointmentOption = {
   status?: string;
 };
 
+export type NewClaimPrefill = {
+  patient_id: string;
+  patient_first_name?: string | null;
+  patient_last_name?: string | null;
+  clinician_id?: string | null;
+  appointment_id: string;
+  first_treatment_date: string;
+  cpt_codes?: string[];
+  total_amount?: number | null;
+};
+
 export type NewClaimModalProps = {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
   onError?: (message: string) => void;
   existingClaim?: InsuranceClaimDetail | { id: string } | null;
+  prefill?: NewClaimPrefill | null;
 };
 
 type FieldErrors = {
@@ -140,6 +152,7 @@ export default function NewClaimModal({
   onSuccess,
   onError,
   existingClaim,
+  prefill,
 }: NewClaimModalProps) {
   const { clinicId } = useClinic();
   const isEdit = Boolean(existingClaim?.id);
@@ -281,6 +294,27 @@ export default function NewClaimModal({
       cancelled = true;
     };
   }, [isOpen, existingClaim?.id, clinicId, prefillFromClaim, onError]);
+
+  useEffect(() => {
+    if (!isOpen || !prefill || existingClaim?.id) return;
+
+    const patient: WaitlistPatientOption = {
+      id: prefill.patient_id,
+      first_name: prefill.patient_first_name ?? null,
+      last_name: prefill.patient_last_name ?? null,
+    };
+    setSelectedPatient(patient);
+    setPatientQuery(patientLabel(patient));
+    setClinicianId(prefill.clinician_id ?? "");
+    setAppointmentId(prefill.appointment_id);
+    setFirstTreatmentDate(prefill.first_treatment_date.slice(0, 10));
+    if (prefill.cpt_codes?.length) {
+      setCptCodes(normalizeCodes(prefill.cpt_codes));
+    }
+    if (prefill.total_amount != null && prefill.total_amount > 0) {
+      setTotalAmount(String(prefill.total_amount));
+    }
+  }, [isOpen, prefill, existingClaim?.id]);
 
   useEffect(() => {
     if (!isOpen || !clinicId) return;

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import traceback
 from calendar import monthrange
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -229,13 +229,21 @@ def billing_dashboard(
         }
         unbilled_count = 0
         try:
-            now_utc = datetime.now(timezone.utc)
+            end_of_today = datetime.combine(
+                today, time(23, 59, 59), tzinfo=NY
+            ).astimezone(timezone.utc)
+            lookback_start = datetime.combine(
+                today - timedelta(days=90),
+                time.min,
+                tzinfo=NY,
+            ).astimezone(timezone.utc)
             appt_resp = (
                 supabase.table("appointments")
                 .select("id")
                 .eq("clinic_id", cid)
                 .eq("status", "completed")
-                .gte("start_time", (now_utc - timedelta(days=90)).isoformat())
+                .gte("start_time", lookback_start.isoformat())
+                .lte("start_time", end_of_today.isoformat())
                 .execute()
             )
             _handle_supabase_error(appt_resp)

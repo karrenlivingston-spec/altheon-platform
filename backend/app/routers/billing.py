@@ -5,8 +5,9 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import APIRouter, HTTPException, Query, Response
@@ -741,3 +742,183 @@ def delete_claim(claim_id: str):
         logger.exception("delete_claim failed claim_id=%s", claim_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     return Response(status_code=204)
+
+
+NY = ZoneInfo("America/New_York")
+_UNBILLED_LOOKBACK_DAYS = 365
+
+
+def _nested_name(row: Any, *keys: str) -> str:
+    cur = row
+    for key in keys:
+        if cur is None:
+            return ""
+        if isinstance(cur, list):
+            cur = cur[0] if cur else {}
+        elif isinstance(cur, dict):
+            cur = cur.get(key)
+        else:
+            return ""
+    if isinstance(cur, dict):
+        fn = str(cur.get("first_name") or "").strip()
+        ln = str(cur.get("last_name") or "").strip()
+        title = str(cur.get("title") or "").strip()
+        name = f"{fn} {ln}".strip()
+        if title and name:
+            return f"{name}, {title}"
+        return name or ""
+    return str(cur or "").strip()
+
+
+def _treatment_type_name(row: dict[str, Any]) -> str:
+    tt = row.get("treatment_types")
+    if isinstance(tt, list):
+        tt = tt[0] if tt else {}
+    if isinstance(tt, dict):
+        return str(tt.get("name") or "").strip()
+    return ""
+
+
+def _suggest_cpt_codes(treatment_name: str, fee_codes: set[str]) -> list[str]:
+    if not treatment_name:
+        return []
+    n = treatment_name.lower()
+    candidates: list[str] = []
+    if "dry needling" in n or "dry needle" in n or "needling" in n:
+        candidates = ["20560", "20561"]
+    elif "re-eval" in n or "reeval" in n or "re-evaluation" in n:
+        candidates = ["97164"]
+    elif "evaluation" in n or n.startswith("eval") or " initial" in n:
+        candidates = ["97161", "97162", "97163"]
+    elif "manual" in n:
+        candidates = ["97140"]
+    elif "exercise" in n or "therapeutic ex" in n:
+        candidates = ["97110"]
+    elif "activities" in n:
+        candidates = ["97530"]
+    elif "neuromuscular" in n:
+        candidates = ["97112"]
+
+    if fee_codes:
+        matched = [c for c in candidates if c in fee_codes]
+        return matched[:3]
+    return candidates[:1] if candidates else []
+
+
+def _shape_unbilled_appointment(
+    row: dict[str, Any],
+    *,
+    fee_by_code: dict[str, float],
+) -> dict[str, Any]:
+    start_raw = str(row.get("start_time") or "")
+    dos = start_raw[:10] if start_raw else None
+    treatment_name = _treatment_type_name(row)
+    fee_codes = set(fee_by_code.keys())
+    suggested_cpt = _suggest_cpt_codes(treatment_name, fee_codes)
+    suggested_total = round(
+        sum(float(fee_by_code.get(c, 0) or 0) for c in suggested_cpt),
+        2,
+    )
+    if suggested_total <= 0:
+        suggested_total = None
+
+    patient_name = _nested_name(row, "patients") or "—"
+    name_parts = patient_name.split(" ", 1) if patient_name != "—" else ["", ""]
+
+    return {
+        "appointment_id": str(row.get("id") or ""),
+        "patient_id": str(row.get("patient_id") or ""),
+        "patient_name": patient_name,
+        "patient_first_name": name_parts[0] or None,
+        "patient_last_name": name_parts[1] if len(name_parts) > 1 else None,
+        "clinician_id": str(row.get("clinician_id") or "") or None,
+        "clinician_name": _nested_name(row, "clinicians") or "—",
+        "date_of_service": dos,
+        "appointment_type": treatment_name or None,
+        "suggested_cpt_codes": suggested_cpt,
+        "suggested_total_amount": suggested_total,
+    }
+
+
+@router.get("/unbilled-appointments")
+def list_unbilled_appointments(clinic_id: str = Query(...)):
+    cid = clinic_id.strip()
+    if not cid:
+        raise HTTPException(status_code=400, detail="clinic_id is required")
+
+    today = datetime.now(NY).date()
+    end_of_today = datetime.combine(today, time(23, 59, 59), tzinfo=NY).astimezone(
+        timezone.utc
+    )
+    lookback_start = datetime.combine(
+        today - timedelta(days=_UNBILLED_LOOKBACK_DAYS),
+        time.min,
+        tzinfo=NY,
+    ).astimezone(timezone.utc)
+
+    try:
+        claims_resp = (
+            supabase.table("insurance_claims")
+            .select("appointment_id")
+            .eq("clinic_id", cid)
+            .execute()
+        )
+        _handle_supabase_error(claims_resp)
+        claimed_appt_ids = {
+            str(r.get("appointment_id") or "")
+            for r in (claims_resp.data or [])
+            if r.get("appointment_id")
+        }
+
+        fee_resp = (
+            supabase.table("clinic_fee_schedules")
+            .select("cpt_code, charge")
+            .eq("clinic_id", cid)
+            .eq("is_active", True)
+            .execute()
+        )
+        _handle_supabase_error(fee_resp)
+        fee_by_code: dict[str, float] = {}
+        for row in fee_resp.data or []:
+            code = str(row.get("cpt_code") or "").strip().upper()
+            if not code:
+                continue
+            try:
+                fee_by_code[code] = float(row.get("charge") or 0)
+            except (TypeError, ValueError):
+                fee_by_code[code] = 0.0
+
+        appt_resp = (
+            supabase.table("appointments")
+            .select(
+                "id, patient_id, clinician_id, start_time, status, "
+                "patients(first_name, last_name), "
+                "clinicians(first_name, last_name, title), "
+                "treatment_types(name)"
+            )
+            .eq("clinic_id", cid)
+            .eq("status", "completed")
+            .gte("start_time", lookback_start.isoformat())
+            .lte("start_time", end_of_today.isoformat())
+            .order("start_time", desc=True)
+            .execute()
+        )
+        _handle_supabase_error(appt_resp)
+
+        unbilled: list[dict[str, Any]] = []
+        for row in appt_resp.data or []:
+            if not isinstance(row, dict):
+                continue
+            aid = str(row.get("id") or "")
+            if not aid or aid in claimed_appt_ids:
+                continue
+            unbilled.append(
+                _shape_unbilled_appointment(row, fee_by_code=fee_by_code)
+            )
+
+        return {"total": len(unbilled), "appointments": unbilled}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("list_unbilled_appointments failed clinic_id=%s", cid)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
