@@ -5,6 +5,10 @@ from datetime import date, datetime, timedelta
 import pytz
 
 from app.db import supabase
+from app.slot_blocked_time import (
+    blocked_windows_for_clinician_date,
+    slot_overlaps_blocked_window,
+)
 
 router = APIRouter()
 
@@ -30,31 +34,12 @@ def _parse_weekday_filter(weekday: Optional[str]) -> Optional[int]:
         return None
 
 
-def _blocked_windows_for_date(clinician_id: str, target_date: date):
-    start_iso = f"{target_date.isoformat()}T00:00:00"
-    end_iso = f"{target_date.isoformat()}T23:59:59"
-    resp = (
-        supabase.table("blocked_time")
-        .select("start_time,end_time")
-        .eq("clinician_id", clinician_id)
-        .lte("start_time", end_iso)
-        .gte("end_time", start_iso)
-        .order("start_time")
-        .execute()
-    )
-    windows = []
-    for row in resp.data or []:
-        s = row.get("start_time")
-        e = row.get("end_time")
-        if not s or not e:
-            continue
-        try:
-            sdt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
-            edt = datetime.fromisoformat(str(e).replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        windows.append((sdt, edt))
-    return windows
+def _blocked_windows_for_date(
+    clinician_id: str,
+    target_date: date,
+    clinic_tz: pytz.BaseTzInfo,
+):
+    return blocked_windows_for_clinician_date(clinician_id, target_date, clinic_tz)
 
 
 def get_slots_for_date(
@@ -116,7 +101,9 @@ def get_slots_for_date(
     for rule in rules_resp.data:
         cid = str(rule.get("clinician_id") or "").strip()
         if cid and cid not in blocked_by_clinician:
-            blocked_by_clinician[cid] = _blocked_windows_for_date(cid, target_date)
+            blocked_by_clinician[cid] = _blocked_windows_for_date(
+                cid, target_date, clinic_tz
+            )
 
     slots = []
     for rule in rules_resp.data:
@@ -144,10 +131,10 @@ def get_slots_for_date(
             overlap = False
             cid = str(rule.get("clinician_id") or "").strip()
             blocked_windows = blocked_by_clinician.get(cid, [])
-            for bs, be in blocked_windows:
-                if slot_start_utc < be and slot_end_utc > bs:
-                    overlap = True
-                    break
+            if slot_overlaps_blocked_window(
+                slot_start_utc, slot_end_utc, blocked_windows
+            ):
+                overlap = True
             if overlap:
                 current += timedelta(minutes=step)
                 continue

@@ -5,6 +5,10 @@ from fastapi import APIRouter, HTTPException, Query
 import pytz
 
 from app.db import supabase
+from app.slot_blocked_time import (
+    blocked_windows_for_clinician_date,
+    slot_overlaps_blocked_window,
+)
 
 router = APIRouter()
 
@@ -116,6 +120,10 @@ def get_slots(
         end_dt = datetime.fromisoformat(end_raw.replace("Z", "+00:00"))
         booked_ranges.append((start_dt, end_dt))
 
+    blocked_windows = blocked_windows_for_clinician_date(
+        clinician_id, target_date, clinic_timezone
+    )
+
     available_slots = []
     for rule in rules:
         start_raw = rule.get("start_time")
@@ -149,6 +157,10 @@ def get_slots(
                 current_start_utc < booked_end and current_end_utc > booked_start
                 for booked_start, booked_end in booked_ranges
             )
+            if not overlaps and slot_overlaps_blocked_window(
+                current_start_utc, current_end_utc, blocked_windows
+            ):
+                overlaps = True
             if not overlaps:
                 available_slots.append(
                     {
