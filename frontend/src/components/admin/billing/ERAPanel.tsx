@@ -16,7 +16,7 @@ type ERAPanelProps = {
 const TOOL_LINKS = [
   { label: "Create Superbill", href: "/admin/clinical-notes" },
   { label: "Insurance Verification", href: "/admin/patients" },
-  { label: "Fee Schedule", href: "/admin/settings" },
+  { label: "Fee Schedule", href: "/admin/billing/fee-schedule" },
   { label: "Patient Statements", href: "/admin/billing" },
 ];
 

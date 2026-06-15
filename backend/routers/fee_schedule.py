@@ -176,16 +176,63 @@ def _fetch_fee_schedule_by_id(
     return rows[0]
 
 
+def _ensure_cpt_code(code: str, description: Optional[str] = None) -> dict[str, Any]:
+    """Return CPT library row, creating or updating description when needed."""
+    c = (code or "").strip().upper()
+    if not c:
+        raise HTTPException(status_code=400, detail="CPT code is required")
+
+    existing = _fetch_cpt_code_row(c)
+    desc = (description or "").strip()
+
+    if existing:
+        if desc and desc != str(existing.get("description") or "").strip():
+            def _update_desc():
+                return (
+                    supabase.table("cpt_codes")
+                    .update({"description": desc, "updated_at": _now_iso()})
+                    .eq("code", c)
+                    .execute()
+                )
+
+            _supabase_execute(_update_desc, table="cpt_codes")
+            existing["description"] = desc
+        return existing
+
+    if not desc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown CPT code: {c}. Provide a description to add it.",
+        )
+
+    payload = {
+        "code": c,
+        "description": desc,
+        "category": "Custom",
+        "default_units": 1,
+        "created_at": _now_iso(),
+        "updated_at": _now_iso(),
+    }
+
+    def _insert():
+        return supabase.table("cpt_codes").insert(payload).execute()
+
+    ins = _supabase_execute(_insert, table="cpt_codes")
+    if not ins.data:
+        raise HTTPException(status_code=500, detail="Failed to create CPT code")
+    return ins.data[0]
+
+
 def _upsert_fee_schedule(
     *,
     clinic_id: str,
     cpt_code: str,
     charge: float,
     modifiers: list[str],
+    description: Optional[str] = None,
 ) -> dict[str, Any]:
     code = cpt_code.strip().upper()
-    if not _fetch_cpt_code_row(code):
-        raise HTTPException(status_code=400, detail=f"Unknown CPT code: {code}")
+    cpt = _ensure_cpt_code(code, description)
 
     payload = {
         "clinic_id": clinic_id,
@@ -242,6 +289,7 @@ def _upsert_fee_schedule(
 class FeeScheduleUpsertBody(BaseModel):
     cpt_code: str = Field(min_length=1, max_length=10)
     charge: float = Field(gt=0)
+    description: Optional[str] = None
     modifiers: list[str] = Field(default_factory=list)
 
 
@@ -257,6 +305,7 @@ class FeeScheduleBulkBody(BaseModel):
 
 class FeeSchedulePatchBody(BaseModel):
     charge: Optional[float] = Field(default=None, gt=0)
+    description: Optional[str] = None
     modifiers: Optional[list[str]] = None
     is_active: Optional[bool] = None
 
@@ -311,12 +360,7 @@ def list_clinic_fee_schedule(clinic: ClinicUserDep):
     rows = resp.data or []
     cpt_map = _load_cpt_map([str(r.get("cpt_code") or "") for r in rows])
     shaped = [_shape_fee_schedule_row(r, cpt_map.get(str(r.get("cpt_code") or ""))) for r in rows]
-    shaped.sort(
-        key=lambda x: (
-            str(x.get("category") or ""),
-            str(x.get("cpt_code") or ""),
-        )
-    )
+    shaped.sort(key=lambda x: str(x.get("cpt_code") or ""))
     return shaped
 
 
@@ -327,6 +371,7 @@ def upsert_fee_schedule(body: FeeScheduleUpsertBody, clinic: ClinicUserDep):
         cpt_code=body.cpt_code,
         charge=body.charge,
         modifiers=body.modifiers,
+        description=body.description,
     )
 
 
@@ -358,6 +403,11 @@ def patch_fee_schedule(
     clinic: ClinicUserDep,
 ):
     existing = _fetch_fee_schedule_by_id(schedule_id, clinic.clinic_id)
+    cpt_code = str(existing.get("cpt_code") or "")
+
+    if body.description is not None:
+        _ensure_cpt_code(cpt_code, body.description)
+
     update_data: dict[str, Any] = {"updated_at": _now_iso()}
     if body.charge is not None:
         update_data["charge"] = body.charge
@@ -367,7 +417,7 @@ def patch_fee_schedule(
         update_data["is_active"] = body.is_active
 
     if len(update_data) == 1:
-        cpt = _fetch_cpt_code_row(str(existing.get("cpt_code") or ""))
+        cpt = _fetch_cpt_code_row(cpt_code)
         return _shape_fee_schedule_row(existing, cpt)
 
     def _run():

@@ -160,6 +160,7 @@ app.include_router(
     cpt_detection_router.router, prefix="/api", tags=["CPT Detection"]
 )
 app.include_router(fee_schedule_router, prefix="/api", tags=["Fee Schedule"])
+app.include_router(fee_schedule_router, prefix="/billing", tags=["Billing"])
 app.include_router(retell_webhook_router.router, prefix="/api", tags=["retell"])
 app.include_router(diagnostic_router, tags=["Diagnostics"])
 app.include_router(
