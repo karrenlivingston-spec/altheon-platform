@@ -399,7 +399,14 @@ class SuperbillPdfBuilder:
             )
         self.y += 8
 
-    def footer_block(self, clinic_name: str, phone: str, address: str) -> None:
+    def footer_block(
+        self,
+        clinic_name: str,
+        phone: str,
+        address: str,
+        *,
+        disclaimer: Optional[str] = None,
+    ) -> None:
         self.y += 10
         self.page.draw_line(
             fitz.Point(MARGIN, self.y),
@@ -416,12 +423,12 @@ class SuperbillPdfBuilder:
             color=DARK,
         )
         self.y += 18
-        disclaimer = (
+        disclaimer_text = disclaimer or (
             "This superbill is provided for insurance reimbursement purposes."
         )
         self.page.insert_text(
             (MARGIN, self.y),
-            disclaimer,
+            disclaimer_text,
             fontsize=8,
             fontname=FONT,
             color=GRAY,

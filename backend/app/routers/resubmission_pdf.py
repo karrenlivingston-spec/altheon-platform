@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -61,6 +62,11 @@ def clean_cover_letter_body(
     }
     for placeholder, value in replacements.items():
         out = out.replace(placeholder, value)
+
+    out = re.sub(r"^#{1,6}\s+.*$", "", out, flags=re.MULTILINE)
+    out = re.sub(r"\*\*(.*?)\*\*", r"\1", out)
+    out = re.sub(r"\*(.*?)\*", r"\1", out)
+    out = out.lstrip("\n")
 
     lines: list[str] = []
     for line in out.splitlines():
@@ -333,7 +339,15 @@ def build_resubmission_pdf(
     builder.section_header("Clinical Notes Summary")
     builder.body_text(_soap_summary(clinical_note), fontsize=9.5)
 
-    builder.footer_block(clinic_name, clinic_phone_raw, clinic_address)
+    builder.footer_block(
+        clinic_name,
+        clinic_phone_raw,
+        clinic_address,
+        disclaimer=(
+            "This resubmission package is prepared for insurance appeal and "
+            "resubmission purposes."
+        ),
+    )
     pdf_bytes = builder.finish()
 
     safe_patient = "".join(
