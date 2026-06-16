@@ -57,6 +57,33 @@ export type PayerSummaryRow = {
   collection_rate: number;
 };
 
+export type PayerSummaryDetailRow = {
+  payer_name: string;
+  total_billed: number;
+  total_collected: number;
+  total_outstanding: number;
+  claim_count: number;
+  paid_count: number;
+  denied_count: number;
+  collection_rate: number;
+};
+
+export type PayerSummaryReportData = {
+  summary: {
+    total_payers: number;
+    total_billed_all: number;
+    total_collected_all: number;
+    overall_collection_rate: number;
+  };
+  payers: PayerSummaryDetailRow[];
+};
+
+export function collectionRateBarColor(rate: number): string {
+  if (rate >= 80) return "bg-green-500";
+  if (rate >= 50) return "bg-yellow-500";
+  return "bg-red-500";
+}
+
 export type AgingBucketKey = "0_30" | "31_60" | "61_90" | "90_plus";
 
 export type AgingBucketFilter = "all" | AgingBucketKey;

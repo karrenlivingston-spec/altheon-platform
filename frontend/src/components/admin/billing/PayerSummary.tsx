@@ -1,6 +1,9 @@
 "use client";
 
+import Link from "next/link";
+
 import { DS_CARD } from "@/app/admin/designSystem";
+import CollectionRateBar from "@/components/admin/billing/CollectionRateBar";
 import {
   PayerSummaryRow,
   formatUsdFromCents,
@@ -8,16 +11,28 @@ import {
 
 type PayerSummaryProps = {
   rows: PayerSummaryRow[];
+  reportHref?: string;
 };
 
-export default function PayerSummary({ rows }: PayerSummaryProps) {
+export default function PayerSummary({ rows, reportHref }: PayerSummaryProps) {
+  const reportLink = reportHref ? (
+    <Link
+      href={reportHref}
+      className="text-xs font-medium text-teal-600 hover:text-teal-700"
+    >
+      View All →
+    </Link>
+  ) : (
+    <span className="text-xs font-medium text-teal-600">View All →</span>
+  );
+
   return (
     <div className={DS_CARD}>
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-base font-semibold text-gray-900">
           Payer Summary (Top 5)
         </h2>
-        <span className="text-xs font-medium text-teal-600">View All →</span>
+        {reportLink}
       </div>
 
       {rows.length === 0 ? (
@@ -46,19 +61,7 @@ export default function PayerSummary({ rows }: PayerSummaryProps) {
                     {formatUsdFromCents(row.collected_cents)}
                   </td>
                   <td className="py-3">
-                    <div className="flex flex-col gap-1">
-                      <span className="font-medium text-gray-900">
-                        {row.collection_rate}%
-                      </span>
-                      <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
-                        <div
-                          className="h-full rounded-full bg-green-500"
-                          style={{
-                            width: `${Math.min(100, row.collection_rate)}%`,
-                          }}
-                        />
-                      </div>
-                    </div>
+                    <CollectionRateBar rate={row.collection_rate} />
                   </td>
                 </tr>
               ))}

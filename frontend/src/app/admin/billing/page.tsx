@@ -364,7 +364,10 @@ export default function AdminBillingPage() {
 
         <div className="xl:col-span-3">
           {data ? (
-            <PayerSummary rows={data.payer_summary} />
+            <PayerSummary
+              rows={data.payer_summary}
+              reportHref="/admin/billing/payer-summary"
+            />
           ) : (
             <div className="h-80 animate-pulse rounded-xl border border-gray-200 bg-white" />
           )}

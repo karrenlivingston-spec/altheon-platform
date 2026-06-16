@@ -1077,3 +1077,96 @@ def aging_report(clinic_id: str = Query(...)):
     except Exception as exc:
         logger.exception("aging_report failed clinic_id=%s", cid)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/payer-summary")
+def payer_summary_report(clinic_id: str = Query(...)):
+    cid = clinic_id.strip()
+    if not cid:
+        raise HTTPException(status_code=400, detail="clinic_id is required")
+
+    try:
+        resp = (
+            supabase.table("insurance_claims")
+            .select("payer_name, total_amount, status")
+            .eq("clinic_id", cid)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+
+        payer_map: dict[str, dict[str, Any]] = {}
+        for row in resp.data or []:
+            if not isinstance(row, dict):
+                continue
+            payer = str(row.get("payer_name") or "").strip() or "Unknown"
+            status = str(row.get("status") or "").strip().lower()
+            try:
+                amount = float(row.get("total_amount") or 0)
+            except (TypeError, ValueError):
+                amount = 0.0
+
+            entry = payer_map.setdefault(
+                payer,
+                {
+                    "payer_name": payer,
+                    "total_billed": 0.0,
+                    "total_collected": 0.0,
+                    "claim_count": 0,
+                    "paid_count": 0,
+                    "denied_count": 0,
+                },
+            )
+            entry["total_billed"] += amount
+            entry["claim_count"] += 1
+            if status == "paid":
+                entry["total_collected"] += amount
+                entry["paid_count"] += 1
+            elif status == "denied":
+                entry["denied_count"] += 1
+
+        payers: list[dict[str, Any]] = []
+        total_billed_all = 0.0
+        total_collected_all = 0.0
+
+        for entry in payer_map.values():
+            billed = round(float(entry["total_billed"]), 2)
+            collected = round(float(entry["total_collected"]), 2)
+            outstanding = round(max(0.0, billed - collected), 2)
+            rate = round(collected / billed * 100) if billed > 0 else 0
+            payers.append(
+                {
+                    "payer_name": entry["payer_name"],
+                    "total_billed": billed,
+                    "total_collected": collected,
+                    "total_outstanding": outstanding,
+                    "claim_count": entry["claim_count"],
+                    "paid_count": entry["paid_count"],
+                    "denied_count": entry["denied_count"],
+                    "collection_rate": rate,
+                }
+            )
+            total_billed_all += billed
+            total_collected_all += collected
+
+        payers.sort(key=lambda x: x["total_billed"], reverse=True)
+
+        overall_rate = (
+            round(total_collected_all / total_billed_all * 100)
+            if total_billed_all > 0
+            else 0
+        )
+
+        return {
+            "summary": {
+                "total_payers": len(payers),
+                "total_billed_all": round(total_billed_all, 2),
+                "total_collected_all": round(total_collected_all, 2),
+                "overall_collection_rate": overall_rate,
+            },
+            "payers": payers,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("payer_summary_report failed clinic_id=%s", cid)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
