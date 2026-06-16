@@ -155,7 +155,7 @@ export default function ClaimsList({
               <th className={DS_TH}>Submitted</th>
               <th className={DS_TH}>Paid/Adjusted</th>
               <th className={DS_TH}>Balance</th>
-              <th className={DS_TH}>Action</th>
+              <th className={DS_TH}>Actions</th>
             </tr>
           </thead>
           <tbody>

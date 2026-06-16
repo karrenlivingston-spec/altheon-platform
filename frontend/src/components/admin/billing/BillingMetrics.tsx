@@ -99,7 +99,7 @@ export default function BillingMetrics({ metrics, loading }: BillingMetricsProps
       <MetricCard
         icon={FileText}
         value={String(metrics.claims_submitted)}
-        label="Claims Submitted"
+        label="Claims This Month"
       />
       <MetricCard
         icon={AlertTriangle}

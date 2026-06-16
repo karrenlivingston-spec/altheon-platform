@@ -422,7 +422,12 @@ export default function AdminBillingPage() {
         </div>
 
         <div className="xl:col-span-3">
-          <ERAPanel payments={data?.recent_payments ?? []} />
+          <ERAPanel
+            payments={data?.recent_payments ?? []}
+            onComingSoon={(message) =>
+              setToast({ kind: "success", message })
+            }
+          />
         </div>
       </div>
 

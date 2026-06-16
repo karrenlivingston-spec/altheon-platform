@@ -11,14 +11,31 @@ import {
 
 type ERAPanelProps = {
   payments: RecentPaymentRow[];
+  onComingSoon?: (message: string) => void;
 };
 
 const TOOL_LINKS = [
-  { label: "Create Superbill", href: "/admin/clinical-notes" },
-  { label: "Insurance Verification", href: "/admin/patients" },
-  { label: "Fee Schedule", href: "/admin/billing/fee-schedule" },
-  { label: "Patient Statements", href: "/admin/billing" },
-];
+  {
+    label: "Create Superbill",
+    href: null,
+    comingSoon: true,
+  },
+  {
+    label: "Insurance Verification",
+    href: null,
+    comingSoon: true,
+  },
+  {
+    label: "Fee Schedule",
+    href: "/admin/billing/fee-schedule",
+    comingSoon: false,
+  },
+  {
+    label: "Patient Statements",
+    href: null,
+    comingSoon: true,
+  },
+] as const;
 
 function formatPaymentDate(value: string): string {
   if (!value) return "—";
@@ -32,7 +49,7 @@ function formatPaymentDate(value: string): string {
   }
 }
 
-export default function ERAPanel({ payments }: ERAPanelProps) {
+export default function ERAPanel({ payments, onComingSoon }: ERAPanelProps) {
   return (
     <div className="space-y-6">
       <div className={DS_CARD}>
@@ -40,7 +57,12 @@ export default function ERAPanel({ payments }: ERAPanelProps) {
           <h2 className="text-base font-semibold text-gray-900">
             Electronic Remittance (ERA)
           </h2>
-          <span className="text-xs font-medium text-teal-600">View All →</span>
+          <span
+            className="text-xs text-gray-400"
+            title="ERA integration coming soon"
+          >
+            ERA integration coming soon
+          </span>
         </div>
 
         {payments.length === 0 ? (
@@ -80,12 +102,28 @@ export default function ERAPanel({ payments }: ERAPanelProps) {
         <ul className="space-y-2">
           {TOOL_LINKS.map((link) => (
             <li key={link.label}>
-              <Link
-                href={link.href}
-                className="block rounded-lg px-3 py-2 text-sm font-medium text-teal-700 hover:bg-teal-50"
-              >
-                {link.label}
-              </Link>
+              {link.comingSoon ? (
+                <button
+                  type="button"
+                  onClick={() =>
+                    onComingSoon?.(`${link.label} — coming soon`)
+                  }
+                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-50"
+                  title="Coming soon"
+                >
+                  <span>{link.label}</span>
+                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">
+                    Coming Soon
+                  </span>
+                </button>
+              ) : (
+                <Link
+                  href={link.href!}
+                  className="block rounded-lg px-3 py-2 text-sm font-medium text-teal-700 hover:bg-teal-50"
+                >
+                  {link.label}
+                </Link>
+              )}
             </li>
           ))}
         </ul>
