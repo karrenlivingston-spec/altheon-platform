@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.routers.superbill_pdf import build_superbill_pdf
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -558,7 +559,10 @@ def _fetch_patient_for_claim(patient_id: Any) -> Optional[dict[str, Any]]:
     try:
         resp = (
             supabase.table("patients")
-            .select("first_name,last_name,date_of_birth,gender")
+            .select(
+                "first_name,last_name,date_of_birth,gender,"
+                "address_line1,address_line2,city,state,zip,insurance_group_number"
+            )
             .eq("id", str(patient_id))
             .limit(1)
             .execute()
@@ -596,6 +600,11 @@ class InsuranceVerificationBody(BaseModel):
     first_name: str
     last_name: str
     date_of_service: Optional[date] = None
+
+
+class SuperbillBody(BaseModel):
+    clinic_id: str
+    claim_id: str
 
 
 class PatchClaimBody(BaseModel):
@@ -1540,3 +1549,156 @@ def insurance_verification_history(
             }
         )
     return rows
+
+
+def _nested_patient(row: dict[str, Any]) -> dict[str, Any]:
+    patients = row.get("patients")
+    if isinstance(patients, list):
+        patients = patients[0] if patients else {}
+    if isinstance(patients, dict):
+        return patients
+    return {}
+
+
+@router.post("/superbill")
+def generate_superbill(body: SuperbillBody):
+    cid = body.clinic_id.strip()
+    claim_id = body.claim_id.strip()
+    if not cid or not claim_id:
+        raise HTTPException(
+            status_code=400, detail="clinic_id and claim_id are required"
+        )
+
+    try:
+        claim_resp = (
+            supabase.table("insurance_claims")
+            .select(
+                "*, patients(first_name, last_name, date_of_birth, "
+                "address_line1, address_line2, city, state, zip, "
+                "insurance_group_number)"
+            )
+            .eq("id", claim_id)
+            .eq("clinic_id", cid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(claim_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("superbill fetch claim failed claim_id=%s", claim_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    claim_rows = claim_resp.data or []
+    if not claim_rows:
+        raise HTTPException(status_code=404, detail="Claim not found")
+
+    claim = claim_rows[0]
+    patient = _nested_patient(claim)
+    if not patient:
+        patient = _fetch_patient_for_claim(claim.get("patient_id")) or {}
+
+    try:
+        clinic_resp = (
+            supabase.table("clinics")
+            .select("name, address, phone")
+            .eq("id", cid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(clinic_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("superbill fetch clinic failed clinic_id=%s", cid)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    clinic_rows = clinic_resp.data or []
+    clinic = clinic_rows[0] if clinic_rows else {}
+
+    clinician: Optional[dict[str, Any]] = None
+    clinician_id = str(claim.get("clinician_id") or "").strip()
+    if clinician_id:
+        try:
+            clin_resp = (
+                supabase.table("clinicians")
+                .select("first_name, last_name, title")
+                .eq("id", clinician_id)
+                .limit(1)
+                .execute()
+            )
+            _handle_supabase_error(clin_resp)
+            clin_rows = clin_resp.data or []
+            clinician = clin_rows[0] if clin_rows else None
+        except Exception:
+            logger.exception("superbill fetch clinician failed id=%s", clinician_id)
+
+    cpt_codes = [
+        str(c).strip().upper()
+        for c in (claim.get("cpt_codes") or [])
+        if str(c).strip()
+    ]
+    if not cpt_codes:
+        cpt_codes = ["99213"]
+
+    cpt_descriptions: dict[str, str] = {}
+    try:
+        cpt_resp = (
+            supabase.table("cpt_codes")
+            .select("code, description")
+            .in_("code", cpt_codes)
+            .execute()
+        )
+        _handle_supabase_error(cpt_resp)
+        for row in cpt_resp.data or []:
+            if isinstance(row, dict) and row.get("code"):
+                cpt_descriptions[str(row["code"]).strip().upper()] = str(
+                    row.get("description") or ""
+                ).strip()
+    except Exception:
+        logger.exception("superbill fetch cpt codes failed claim_id=%s", claim_id)
+
+    fee_by_code: dict[str, float] = {}
+    try:
+        fee_resp = (
+            supabase.table("clinic_fee_schedules")
+            .select("cpt_code, charge")
+            .eq("clinic_id", cid)
+            .in_("cpt_code", cpt_codes)
+            .eq("is_active", True)
+            .execute()
+        )
+        _handle_supabase_error(fee_resp)
+        for row in fee_resp.data or []:
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get("cpt_code") or "").strip().upper()
+            try:
+                fee_by_code[code] = float(row.get("charge") or 0)
+            except (TypeError, ValueError):
+                continue
+    except Exception:
+        logger.exception("superbill fetch fee schedule failed clinic_id=%s", cid)
+
+    try:
+        pdf_bytes, filename = build_superbill_pdf(
+            clinic=clinic,
+            patient=patient,
+            claim=claim,
+            clinician=clinician,
+            cpt_descriptions=cpt_descriptions,
+            fee_by_code=fee_by_code,
+            npi=BILLING_PROVIDER_NPI,
+            tax_id=BILLING_PROVIDER_TAX_ID,
+        )
+    except Exception as exc:
+        logger.exception("superbill pdf generation failed claim_id=%s", claim_id)
+        raise HTTPException(
+            status_code=500, detail=f"Superbill PDF generation failed: {exc}"
+        ) from exc
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

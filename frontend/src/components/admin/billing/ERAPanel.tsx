@@ -12,28 +12,29 @@ import {
 type ERAPanelProps = {
   payments: RecentPaymentRow[];
   onComingSoon?: (message: string) => void;
+  onCreateSuperbill?: () => void;
 };
 
 const TOOL_LINKS = [
   {
     label: "Create Superbill",
-    href: null,
-    comingSoon: true,
+    kind: "action" as const,
+    action: "superbill" as const,
   },
   {
     label: "Insurance Verification",
+    kind: "link" as const,
     href: "/admin/billing/insurance-verification",
-    comingSoon: false,
   },
   {
     label: "Fee Schedule",
+    kind: "link" as const,
     href: "/admin/billing/fee-schedule",
-    comingSoon: false,
   },
   {
     label: "Patient Statements",
-    href: null,
-    comingSoon: true,
+    kind: "action" as const,
+    action: "coming_soon" as const,
   },
 ] as const;
 
@@ -49,7 +50,11 @@ function formatPaymentDate(value: string): string {
   }
 }
 
-export default function ERAPanel({ payments, onComingSoon }: ERAPanelProps) {
+export default function ERAPanel({
+  payments,
+  onComingSoon,
+  onCreateSuperbill,
+}: ERAPanelProps) {
   return (
     <div className="space-y-6">
       <div className={DS_CARD}>
@@ -102,7 +107,22 @@ export default function ERAPanel({ payments, onComingSoon }: ERAPanelProps) {
         <ul className="space-y-2">
           {TOOL_LINKS.map((link) => (
             <li key={link.label}>
-              {link.comingSoon ? (
+              {link.kind === "link" ? (
+                <Link
+                  href={link.href}
+                  className="block rounded-lg px-3 py-2 text-sm font-medium text-teal-700 hover:bg-teal-50"
+                >
+                  {link.label}
+                </Link>
+              ) : link.action === "superbill" ? (
+                <button
+                  type="button"
+                  onClick={() => onCreateSuperbill?.()}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-teal-700 hover:bg-teal-50"
+                >
+                  {link.label}
+                </button>
+              ) : (
                 <button
                   type="button"
                   onClick={() =>
@@ -116,13 +136,6 @@ export default function ERAPanel({ payments, onComingSoon }: ERAPanelProps) {
                     Coming Soon
                   </span>
                 </button>
-              ) : (
-                <Link
-                  href={link.href!}
-                  className="block rounded-lg px-3 py-2 text-sm font-medium text-teal-700 hover:bg-teal-50"
-                >
-                  {link.label}
-                </Link>
               )}
             </li>
           ))}
