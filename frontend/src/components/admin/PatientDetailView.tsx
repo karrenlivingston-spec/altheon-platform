@@ -29,6 +29,7 @@ import { OutcomeMeasuresSection } from "@/components/admin/OutcomeMeasuresSectio
 import { DmeSection } from "@/components/dme/DmeSection";
 import { DiagnosticRedFlagBanner } from "@/components/admin/DiagnosticRedFlagBanner";
 import { DiagnosticsTab } from "@/components/admin/DiagnosticsTab";
+import { PatientDocumentsTab } from "@/components/admin/PatientDocumentsTab";
 import PatientHeader from "@/components/admin/patients/PatientHeader";
 import PatientQuickStats from "@/components/admin/patients/PatientQuickStats";
 import PatientOverviewTab from "@/components/admin/patients/PatientOverviewTab";
@@ -309,6 +310,7 @@ export function PatientDetailView({
   const [editMode, setEditMode] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
   const [pageTab, setPageTab] = useState<PageTab>("overview");
+  const [eobHighlightDocId, setEobHighlightDocId] = useState<string | null>(null);
   const [piCasesEverOpened, setPiCasesEverOpened] = useState(false);
   const [headerStats, setHeaderStats] = useState<PatientHeaderStats | null>(null);
   const [headerStatsLoading, setHeaderStatsLoading] = useState(false);
@@ -1419,11 +1421,24 @@ export function PatientDetailView({
       {pageTab === "clinical" ? (
         <div className="space-y-8">
           <DmeSection clinicId={clinicId} patientId={patientId} />
-          <DiagnosticsTab patientId={patientId} clinicId={clinicId} />
+          <DiagnosticsTab
+            patientId={patientId}
+            clinicId={clinicId}
+            highlightDocumentId={eobHighlightDocId}
+          />
         </div>
       ) : null}
 
-      {pageTab === "documents" ? renderComingSoon("Documents") : null}
+      {pageTab === "documents" ? (
+        <PatientDocumentsTab
+          patientId={patientId}
+          clinicId={clinicId}
+          onViewEobAnalysis={(documentId) => {
+            setEobHighlightDocId(documentId);
+            setPageTab("clinical");
+          }}
+        />
+      ) : null}
 
       {pageTab === "notes" ? renderComingSoon("Notes") : null}
 

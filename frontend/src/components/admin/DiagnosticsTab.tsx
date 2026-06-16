@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -27,11 +28,15 @@ const DOC_TYPES = [
   { value: "xray", label: "X-ray" },
   { value: "pdf_report", label: "PDF Report" },
   { value: "photo", label: "Photo" },
+  { value: "eob", label: "EOB (Explanation of Benefits)" },
+  { value: "reduction_letter", label: "Reduction Letter" },
   { value: "prescription", label: "Prescription" },
   { value: "insurance_card", label: "Insurance Card" },
   { value: "id_document", label: "ID Document" },
   { value: "other", label: "Other" },
 ] as const;
+
+const EOB_DOC_TYPES = new Set(["eob", "reduction_letter"]);
 
 const ACCEPT = ".pdf,.jpg,.jpeg,.png,.heic,.heif,.webp";
 
@@ -66,6 +71,44 @@ type TimelineRow = {
     body_part?: string | null;
   } | null;
 };
+
+type EobCptLine = {
+  code?: string;
+  description?: string;
+  billed?: number;
+  allowed?: number;
+  paid?: number;
+  adjustment?: number;
+  patient_responsibility?: number;
+};
+
+type EobExtractionRow = {
+  id: string;
+  document_id?: string | null;
+  claim_id?: string | null;
+  task_id?: string | null;
+  insurance_company?: string | null;
+  date_of_service?: string | null;
+  total_billed?: number | null;
+  total_allowed?: number | null;
+  total_paid?: number | null;
+  total_adjustment?: number | null;
+  total_patient_responsibility?: number | null;
+  denial_reasons?: string[] | null;
+  denial_codes?: string[] | null;
+  needs_resubmission?: boolean | null;
+  missing_information?: string[] | null;
+  raw_extraction?: { cpt_codes?: EobCptLine[] } | null;
+  created_at?: string | null;
+  patient_documents?: { file_name?: string; document_type?: string } | null;
+};
+
+function formatUsd(amount: number | null | undefined): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(Number(amount) || 0);
+}
 
 async function authHeaders(
   json = false,
@@ -139,14 +182,180 @@ function uploadWithProgress(
 type Props = {
   patientId: string;
   clinicId: string;
+  highlightDocumentId?: string | null;
 };
 
-export function DiagnosticsTab({ patientId, clinicId }: Props) {
+function EobSummaryPanel({ row }: { row: EobExtractionRow }) {
+  const needsResub = Boolean(row.needs_resubmission);
+  const denialReasons = Array.isArray(row.denial_reasons) ? row.denial_reasons : [];
+  const denialCodes = Array.isArray(row.denial_codes) ? row.denial_codes : [];
+  const missingInfo = Array.isArray(row.missing_information)
+    ? row.missing_information
+    : [];
+  const cptLines = Array.isArray(row.raw_extraction?.cpt_codes)
+    ? row.raw_extraction!.cpt_codes!
+    : [];
+  const docLabel =
+    row.patient_documents?.document_type === "reduction_letter"
+      ? "Reduction Letter"
+      : "EOB";
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-700">
+          {docLabel}
+        </span>
+        {row.insurance_company ? (
+          <span className="text-sm font-medium text-gray-800">
+            {row.insurance_company}
+          </span>
+        ) : null}
+        {row.date_of_service ? (
+          <span className="text-sm text-gray-500">{row.date_of_service}</span>
+        ) : null}
+        <span
+          className={`ml-auto rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+            needsResub
+              ? "bg-red-100 text-red-800"
+              : "bg-emerald-100 text-emerald-800"
+          }`}
+        >
+          {needsResub ? "Denied" : "Eligible / Paid"}
+        </span>
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        {(
+          [
+            ["Total Billed", row.total_billed],
+            ["Total Allowed", row.total_allowed],
+            ["Total Paid", row.total_paid],
+            ["Patient Responsibility", row.total_patient_responsibility],
+          ] as const
+        ).map(([label, value]) => (
+          <div
+            key={label}
+            className="rounded-lg border border-gray-100 bg-gray-50/80 px-3 py-2"
+          >
+            <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
+              {label}
+            </p>
+            <p className="mt-1 text-lg font-semibold tabular-nums text-gray-900">
+              {formatUsd(value)}
+            </p>
+          </div>
+        ))}
+      </div>
+
+      {cptLines.length > 0 ? (
+        <div className="overflow-x-auto rounded-lg border border-gray-100">
+          <table className="min-w-full text-left text-xs">
+            <thead className="bg-gray-50 text-gray-600">
+              <tr>
+                <th className="px-3 py-2 font-semibold">CPT Code</th>
+                <th className="px-3 py-2 font-semibold">Description</th>
+                <th className="px-3 py-2 font-semibold">Billed</th>
+                <th className="px-3 py-2 font-semibold">Allowed</th>
+                <th className="px-3 py-2 font-semibold">Paid</th>
+                <th className="px-3 py-2 font-semibold">Adjustment</th>
+                <th className="px-3 py-2 font-semibold">Patient Resp</th>
+              </tr>
+            </thead>
+            <tbody>
+              {cptLines.map((line, idx) => (
+                <tr key={`${line.code ?? idx}`} className="border-t border-gray-100">
+                  <td className="px-3 py-2 font-medium">{line.code ?? "—"}</td>
+                  <td className="max-w-[180px] px-3 py-2">{line.description ?? "—"}</td>
+                  <td className="px-3 py-2 tabular-nums">{formatUsd(line.billed)}</td>
+                  <td className="px-3 py-2 tabular-nums">{formatUsd(line.allowed)}</td>
+                  <td className="px-3 py-2 tabular-nums">{formatUsd(line.paid)}</td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {formatUsd(line.adjustment)}
+                  </td>
+                  <td className="px-3 py-2 tabular-nums">
+                    {formatUsd(line.patient_responsibility)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : null}
+
+      {needsResub ? (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-800">
+          Resubmission Required
+        </div>
+      ) : null}
+
+      {denialReasons.length > 0 ||
+      denialCodes.length > 0 ||
+      missingInfo.length > 0 ? (
+        <div className="space-y-3 rounded-lg border border-amber-100 bg-amber-50/50 px-4 py-3 text-sm">
+          {denialReasons.length > 0 ? (
+            <div>
+              <p className="mb-1 font-semibold text-gray-800">Denial reasons</p>
+              <ul className="list-inside list-disc text-gray-700">
+                {denialReasons.map((r) => (
+                  <li key={r}>{r}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {denialCodes.length > 0 ? (
+            <div>
+              <p className="mb-1 font-semibold text-gray-800">Denial codes</p>
+              <ul className="list-inside list-disc text-gray-700">
+                {denialCodes.map((c) => (
+                  <li key={c}>{c}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {missingInfo.length > 0 ? (
+            <div>
+              <p className="mb-1 font-semibold text-gray-800">Missing information</p>
+              <ul className="list-inside list-disc text-gray-700">
+                {missingInfo.map((m) => (
+                  <li key={m}>{m}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-center gap-3">
+        {row.claim_id ? (
+          <Link
+            href={`/admin/billing?claim_id=${encodeURIComponent(row.claim_id)}`}
+            className="text-sm font-medium text-teal-700 hover:underline"
+          >
+            View Claim →
+          </Link>
+        ) : null}
+        {row.task_id ? (
+          <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-medium text-amber-900">
+            Task Created
+          </span>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+export function DiagnosticsTab({
+  patientId,
+  clinicId,
+  highlightDocumentId,
+}: Props) {
   const [documentType, setDocumentType] = useState<string>("mri_report");
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [analyses, setAnalyses] = useState<DiagnosticRow[]>([]);
+  const [eobExtractions, setEobExtractions] = useState<EobExtractionRow[]>([]);
   const [timeline, setTimeline] = useState<TimelineRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [analyzingDocIds, setAnalyzingDocIds] = useState<Set<string>>(
@@ -165,17 +374,22 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
   const [sendLinkBusy, setSendLinkBusy] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const highlightRef = useRef<HTMLDivElement | null>(null);
 
   const loadData = useCallback(async () => {
     try {
       const h = await authHeaders();
-      const [diagRes, tlRes] = await Promise.all([
+      const [diagRes, tlRes, eobRes] = await Promise.all([
         fetch(
           `${API_BASE}/patients/${encodeURIComponent(patientId)}/diagnostics?clinic_id=${encodeURIComponent(clinicId)}`,
           { headers: h },
         ),
         fetch(
           `${API_BASE}/patients/${encodeURIComponent(patientId)}/imaging-timeline?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers: h },
+        ),
+        fetch(
+          `${API_BASE}/patients/${encodeURIComponent(patientId)}/eob-extractions?clinic_id=${encodeURIComponent(clinicId)}`,
           { headers: h },
         ),
       ]);
@@ -186,6 +400,10 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
       if (tlRes.ok) {
         const rows = (await tlRes.json()) as TimelineRow[];
         setTimeline(Array.isArray(rows) ? rows : []);
+      }
+      if (eobRes.ok) {
+        const rows = (await eobRes.json()) as EobExtractionRow[];
+        setEobExtractions(Array.isArray(rows) ? rows : []);
       }
     } finally {
       setLoading(false);
@@ -240,16 +458,24 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
   );
 
   useEffect(() => {
-    const checkComplete = (docId: string, rows: DiagnosticRow[]) => {
-      const row = rows.find((a) => a.document_id === docId);
-      return row && (row.clinician_summary ?? "").trim().length > 0;
+    if (!highlightDocumentId || !highlightRef.current) return;
+    highlightRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [highlightDocumentId, eobExtractions]);
+
+  useEffect(() => {
+    const checkComplete = (docId: string) => {
+      const clinical = analyses.find((a) => a.document_id === docId);
+      if (clinical && (clinical.clinician_summary ?? "").trim().length > 0) {
+        return true;
+      }
+      return eobExtractions.some((e) => e.document_id === docId);
     };
 
     setAnalyzingDocIds((prev) => {
       const next = new Set(prev);
       let changed = false;
       for (const id of prev) {
-        if (checkComplete(id, analyses)) {
+        if (checkComplete(id)) {
           next.delete(id);
           changed = true;
         }
@@ -261,7 +487,7 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
       const next = new Set(prev);
       let changed = false;
       for (const id of prev) {
-        if (checkComplete(id, analyses)) {
+        if (checkComplete(id)) {
           next.delete(id);
           changed = true;
         }
@@ -273,7 +499,7 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
       clearInterval(pollRef.current);
       pollRef.current = null;
     }
-  }, [analyses, analyzingDocIds.size, rerunningDocIds.size]);
+  }, [analyses, eobExtractions, analyzingDocIds.size, rerunningDocIds.size]);
 
   async function uploadFile(file: File) {
     if (file.size > MAX_BYTES) {
@@ -302,7 +528,12 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
         startAnalysisPolling(data.document_id, "upload");
       }
       await loadData();
-      setToast("Document uploaded — analysis in progress");
+      const isEob = EOB_DOC_TYPES.has(documentType);
+      setToast(
+        isEob
+          ? "EOB uploaded — financial extraction in progress"
+          : "Document uploaded — analysis in progress",
+      );
     } catch (e) {
       setUploadError(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -359,8 +590,15 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
   }
 
   const orphanAnalyzing = [...analyzingDocIds].filter(
-    (id) => !analyses.some((a) => a.document_id === id),
+    (id) =>
+      !analyses.some((a) => a.document_id === id) &&
+      !eobExtractions.some((e) => e.document_id === id),
   );
+
+  const clinicalAnalyses = analyses.filter((row) => {
+    const docType = row.patient_documents?.document_type ?? "";
+    return !EOB_DOC_TYPES.has(docType);
+  });
 
   return (
     <div className="space-y-8">
@@ -462,7 +700,9 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
         </h2>
         {loading ? (
           <p className="text-sm text-gray-500">Loading…</p>
-        ) : analyses.length === 0 && orphanAnalyzing.length === 0 ? (
+        ) : clinicalAnalyses.length === 0 &&
+          eobExtractions.length === 0 &&
+          orphanAnalyzing.length === 0 ? (
           <p className="text-sm text-gray-500">
             No analyses yet. Upload a document to begin.
           </p>
@@ -477,7 +717,53 @@ export function DiagnosticsTab({ patientId, clinicId }: Props) {
                 Analyzing…
               </div>
             ))}
-            {analyses.map((row) => {
+            {eobExtractions.map((row) => {
+              const docId = row.document_id ?? "";
+              const analyzing =
+                (docId && analyzingDocIds.has(docId)) ||
+                (docId && rerunningDocIds.has(docId));
+              const highlighted = highlightDocumentId === docId;
+
+              if (analyzing) {
+                return (
+                  <div
+                    key={`eob-analyzing-${row.id}`}
+                    className={`${DS_CARD} flex items-center gap-3 p-5 text-sm text-gray-600`}
+                  >
+                    <Loader2 className="h-5 w-5 animate-spin text-teal-600" />
+                    Extracting EOB financial data…
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={row.id}
+                  id={docId ? `eob-summary-${docId}` : undefined}
+                  ref={highlighted ? highlightRef : undefined}
+                  className={`${DS_CARD} p-5 ${
+                    highlighted ? "ring-2 ring-teal-400 ring-offset-2" : ""
+                  }`}
+                >
+                  <EobSummaryPanel row={row} />
+                  {docId ? (
+                    <div className="mt-4 border-t border-gray-100 pt-3">
+                      <button
+                        type="button"
+                        className={`${DS_SECONDARY_BTN} text-xs`}
+                        disabled={rerunningDocIds.has(docId)}
+                        onClick={() => void rerunAnalysis(docId)}
+                      >
+                        {rerunningDocIds.has(docId)
+                          ? "Re-running…"
+                          : "Re-run Extraction"}
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+            {clinicalAnalyses.map((row) => {
               const flags = Array.isArray(row.red_flags) ? row.red_flags : [];
               const soap = (row.soap_suggestions ?? {}) as SoapSuggestions;
               const st = row.status ?? "analyzed";

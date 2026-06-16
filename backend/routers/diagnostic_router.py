@@ -43,9 +43,34 @@ _VALID_DOC_TYPES = frozenset(
         "prescription",
         "insurance_card",
         "id_document",
+        "eob",
+        "reduction_letter",
         "other",
     }
 )
+
+_EOB_DOC_TYPES = frozenset({"eob", "reduction_letter"})
+
+_EOB_ANALYSIS_SYSTEM = """You are a medical billing specialist. Extract all financial information from this EOB (Explanation of Benefits) document and return ONLY a JSON object with these exact fields:
+{
+  "insurance_company": str,
+  "claim_number": str or null,
+  "patient_name": str,
+  "date_of_service": str (YYYY-MM-DD) or null,
+  "date_processed": str (YYYY-MM-DD) or null,
+  "cpt_codes": [{"code": str, "description": str, "billed": float, "allowed": float, "paid": float, "adjustment": float, "patient_responsibility": float}],
+  "total_billed": float,
+  "total_allowed": float,
+  "total_paid": float,
+  "total_adjustment": float,
+  "total_patient_responsibility": float,
+  "denial_reasons": [str],
+  "denial_codes": [str],
+  "needs_resubmission": bool,
+  "missing_information": [str],
+  "notes": str or null
+}
+Return only the JSON object, no other text."""
 
 _ANALYSIS_SYSTEM = """You are a clinical AI assistant analyzing a medical document for a licensed clinician.
 
@@ -166,6 +191,280 @@ def _extract_json_object(text: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("expected JSON object")
     return data
+
+
+def _is_eob_doc_type(document_type: str) -> bool:
+    return document_type.strip().lower() in _EOB_DOC_TYPES
+
+
+def _safe_float(value: Any) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _safe_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(x).strip() for x in value if str(x).strip()]
+
+
+def _call_claude_eob_extraction(extracted_text: str) -> dict[str, Any]:
+    api_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY is not configured")
+
+    try:
+        import anthropic
+    except ImportError as exc:
+        raise RuntimeError("anthropic package is not installed") from exc
+
+    client = anthropic.Anthropic(api_key=api_key)
+    message = client.messages.create(
+        model=_ANTHROPIC_MODEL,
+        max_tokens=4096,
+        system=_EOB_ANALYSIS_SYSTEM,
+        messages=[
+            {
+                "role": "user",
+                "content": f"Document text:\n{extracted_text[:120000]}",
+            }
+        ],
+    )
+    blocks = getattr(message, "content", None) or []
+    parts: list[str] = []
+    for block in blocks:
+        if hasattr(block, "text"):
+            parts.append(str(block.text))
+        elif isinstance(block, dict) and block.get("text"):
+            parts.append(str(block["text"]))
+    raw = "".join(parts).strip()
+    return _extract_json_object(raw)
+
+
+def _eob_cpt_code_set(cpt_codes: Any) -> set[str]:
+    codes: set[str] = set()
+    if not isinstance(cpt_codes, list):
+        return codes
+    for item in cpt_codes:
+        if isinstance(item, dict):
+            code = str(item.get("code") or "").strip()
+        else:
+            code = str(item).strip()
+        if code:
+            codes.add(code)
+    return codes
+
+
+def _match_insurance_claim(
+    *,
+    patient_id: str,
+    clinic_id: str,
+    date_of_service: Optional[str],
+    cpt_codes: Any,
+) -> Optional[str]:
+    resp = (
+        supabase.table("insurance_claims")
+        .select("id, first_treatment_date, cpt_codes")
+        .eq("patient_id", patient_id)
+        .eq("clinic_id", clinic_id)
+        .execute()
+    )
+    _handle_supabase_error(resp)
+    claims = resp.data or []
+    if not claims:
+        return None
+
+    eob_codes = _eob_cpt_code_set(cpt_codes)
+    dos = (date_of_service or "")[:10] if date_of_service else ""
+    best_id: Optional[str] = None
+    best_score = -1
+
+    for claim in claims:
+        if not isinstance(claim, dict):
+            continue
+        claim_id = str(claim.get("id") or "").strip()
+        if not claim_id:
+            continue
+        claim_dos = str(claim.get("first_treatment_date") or "")[:10]
+        claim_codes = {
+            str(c).strip()
+            for c in (claim.get("cpt_codes") or [])
+            if str(c).strip()
+        }
+        dos_match = bool(dos and claim_dos == dos)
+        code_match = bool(eob_codes and claim_codes and (eob_codes & claim_codes))
+        score = 0
+        if dos_match:
+            score += 2
+        if code_match:
+            score += 1
+        if score > best_score:
+            best_score = score
+            best_id = claim_id
+
+    return best_id if best_score > 0 else None
+
+
+def _claim_status_from_eob(extraction: dict[str, Any]) -> Optional[str]:
+    if _safe_float(extraction.get("total_paid")) > 0:
+        return "paid"
+    if _safe_str_list(extraction.get("denial_reasons")):
+        return "denied"
+    if extraction.get("needs_resubmission"):
+        return "denied"
+    return None
+
+
+def _create_eob_resubmission_task(
+    *,
+    clinic_id: str,
+    patient_id: str,
+    claim_id: Optional[str],
+    patient_name: str,
+    insurance_company: str,
+    denial_reasons: list[str],
+    missing_information: list[str],
+) -> Optional[str]:
+    reasons = ", ".join(denial_reasons) if denial_reasons else "None listed"
+    missing = ", ".join(missing_information) if missing_information else "None listed"
+    description = (
+        f"EOB received for {patient_name} from {insurance_company}. "
+        f"Denial reasons: {reasons}. Missing: {missing}."
+    )
+    ins = (
+        supabase.table("clinic_tasks")
+        .insert(
+            {
+                "clinic_id": clinic_id,
+                "patient_id": patient_id,
+                "claim_id": claim_id,
+                "task_type": "eob_resubmission",
+                "title": "EOB Resubmission Required",
+                "description": description,
+                "priority": "high",
+                "status": "open",
+            }
+        )
+        .execute()
+    )
+    _handle_supabase_error(ins)
+    rows = ins.data or []
+    if not rows:
+        return None
+    return str(rows[0].get("id") or "").strip() or None
+
+
+def _run_eob_extraction(
+    *,
+    document_id: str,
+    patient_id: str,
+    clinic_id: str,
+    storage_path: str,
+    mime_type: str,
+    file_name: str,
+) -> None:
+    try:
+        data = _download_from_storage(storage_path)
+        extracted = extract_text_from_bytes(data, mime_type, file_name)
+        if not extracted.strip():
+            extracted = "(No extractable text — scanned EOB may require manual review.)"
+
+        ai = _call_claude_eob_extraction(extracted)
+        date_of_service = _parse_imaging_date(ai.get("date_of_service"))
+        denial_reasons = _safe_str_list(ai.get("denial_reasons"))
+        denial_codes = _safe_str_list(ai.get("denial_codes"))
+        missing_information = _safe_str_list(ai.get("missing_information"))
+        needs_resubmission = bool(ai.get("needs_resubmission"))
+
+        claim_id = _match_insurance_claim(
+            patient_id=patient_id,
+            clinic_id=clinic_id,
+            date_of_service=date_of_service,
+            cpt_codes=ai.get("cpt_codes"),
+        )
+
+        if claim_id:
+            new_status = _claim_status_from_eob(ai)
+            if new_status:
+                supabase.table("insurance_claims").update(
+                    {"status": new_status, "updated_at": _now_iso()}
+                ).eq("id", claim_id).execute()
+
+        task_id: Optional[str] = None
+        if needs_resubmission:
+            patient_name = str(ai.get("patient_name") or "").strip() or "patient"
+            insurance_company = str(ai.get("insurance_company") or "").strip() or "insurer"
+            task_id = _create_eob_resubmission_task(
+                clinic_id=clinic_id,
+                patient_id=patient_id,
+                claim_id=claim_id,
+                patient_name=patient_name,
+                insurance_company=insurance_company,
+                denial_reasons=denial_reasons,
+                missing_information=missing_information,
+            )
+
+        supabase.table("eob_extractions").delete().eq("document_id", document_id).execute()
+
+        row = {
+            "clinic_id": clinic_id,
+            "patient_id": patient_id,
+            "document_id": document_id,
+            "claim_id": claim_id,
+            "task_id": task_id,
+            "insurance_company": str(ai.get("insurance_company") or "").strip() or None,
+            "date_of_service": date_of_service,
+            "total_billed": _safe_float(ai.get("total_billed")),
+            "total_allowed": _safe_float(ai.get("total_allowed")),
+            "total_paid": _safe_float(ai.get("total_paid")),
+            "total_adjustment": _safe_float(ai.get("total_adjustment")),
+            "total_patient_responsibility": _safe_float(
+                ai.get("total_patient_responsibility")
+            ),
+            "denial_reasons": denial_reasons,
+            "denial_codes": denial_codes,
+            "needs_resubmission": needs_resubmission,
+            "missing_information": missing_information,
+            "raw_extraction": ai,
+        }
+        supabase.table("eob_extractions").insert(row).execute()
+    except Exception:
+        traceback.print_exc()
+
+
+def _schedule_document_processing(
+    background_tasks: BackgroundTasks,
+    *,
+    document_type: str,
+    document_id: str,
+    patient_id: str,
+    clinic_id: str,
+    storage_path: str,
+    mime_type: str,
+    file_name: str,
+) -> None:
+    if _is_eob_doc_type(document_type):
+        background_tasks.add_task(
+            _run_eob_extraction,
+            document_id=document_id,
+            patient_id=patient_id,
+            clinic_id=clinic_id,
+            storage_path=storage_path,
+            mime_type=mime_type,
+            file_name=file_name,
+        )
+    else:
+        background_tasks.add_task(
+            _run_document_analysis,
+            document_id=document_id,
+            patient_id=patient_id,
+            clinic_id=clinic_id,
+            storage_path=storage_path,
+            mime_type=mime_type,
+            file_name=file_name,
+        )
 
 
 def _call_claude_analysis(extracted_text: str) -> dict[str, Any]:
@@ -360,8 +659,9 @@ async def upload_patient_document(
     )
     document_id = str(row["id"])
 
-    background_tasks.add_task(
-        _run_document_analysis,
+    _schedule_document_processing(
+        background_tasks,
+        document_type=doc_type,
         document_id=document_id,
         patient_id=pid,
         clinic_id=cid,
@@ -433,8 +733,10 @@ def analyze_patient_document(
 
     doc = rows[0]
     path = str(doc.get("file_url") or "")
-    background_tasks.add_task(
-        _run_document_analysis,
+    doc_type = str(doc.get("document_type") or "").strip().lower()
+    _schedule_document_processing(
+        background_tasks,
+        document_type=doc_type,
         document_id=did,
         patient_id=pid,
         clinic_id=cid,
@@ -443,6 +745,74 @@ def analyze_patient_document(
         file_name=str(doc.get("file_name") or ""),
     )
     return {"status": "analyzing", "document_id": did}
+
+
+@router.delete("/patients/{patient_id}/documents/{document_id}")
+def delete_patient_document(
+    patient_id: str,
+    document_id: str,
+    user: ClinicUserDep,
+):
+    pid = patient_id.strip()
+    did = document_id.strip()
+    cid = user.clinic_id
+    _assert_patient_in_clinic(pid, cid)
+
+    doc_resp = (
+        supabase.table("patient_documents")
+        .select("*")
+        .eq("id", did)
+        .eq("patient_id", pid)
+        .eq("clinic_id", cid)
+        .limit(1)
+        .execute()
+    )
+    _handle_supabase_error(doc_resp)
+    rows = doc_resp.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    doc = rows[0]
+    path = str(doc.get("file_url") or "")
+    if path:
+        try:
+            supabase.storage.from_(_BUCKET).remove([path])
+        except Exception:
+            traceback.print_exc()
+
+    supabase.table("eob_extractions").delete().eq("document_id", did).execute()
+    supabase.table("diagnostic_analyses").delete().eq("document_id", did).execute()
+    dele = (
+        supabase.table("patient_documents")
+        .delete()
+        .eq("id", did)
+        .eq("patient_id", pid)
+        .eq("clinic_id", cid)
+        .execute()
+    )
+    _handle_supabase_error(dele)
+    return {"success": True, "document_id": did}
+
+
+@router.get("/patients/{patient_id}/eob-extractions")
+def list_eob_extractions(
+    patient_id: str,
+    user: ClinicUserDep,
+):
+    pid = patient_id.strip()
+    cid = user.clinic_id
+    _assert_patient_in_clinic(pid, cid)
+
+    resp = (
+        supabase.table("eob_extractions")
+        .select("*, patient_documents(file_name, document_type, created_at)")
+        .eq("patient_id", pid)
+        .eq("clinic_id", cid)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    _handle_supabase_error(resp)
+    return resp.data or []
 
 
 @router.get("/patients/{patient_id}/diagnostics")
@@ -702,8 +1072,9 @@ async def public_upload_document(
         {"used_at": _now_iso()}
     ).eq("token", ctx["token"]).execute()
 
-    background_tasks.add_task(
-        _run_document_analysis,
+    _schedule_document_processing(
+        background_tasks,
+        document_type=doc_type,
         document_id=document_id,
         patient_id=pid,
         clinic_id=cid,

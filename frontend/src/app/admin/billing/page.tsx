@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { Download, FileBarChart } from "lucide-react";
 
 import { useClinic } from "@/app/admin/ClinicContext";
@@ -65,6 +66,8 @@ function filterClaimsForExport(
 
 export default function AdminBillingPage() {
   const { clinicId } = useClinic();
+  const searchParams = useSearchParams();
+  const claimIdFromUrl = searchParams.get("claim_id");
   const defaultRange = currentMonthRange();
 
   const [data, setData] = useState<BillingDashboardData | null>(null);
@@ -135,6 +138,38 @@ export default function AdminBillingPage() {
   useEffect(() => {
     void fetchDashboard();
   }, [fetchDashboard]);
+
+  useEffect(() => {
+    if (!claimIdFromUrl) return;
+    const inList = data?.claims.find((c) => c.id === claimIdFromUrl);
+    if (inList) {
+      setDetailClaim(inList);
+      return;
+    }
+    void (async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/billing/claims/${encodeURIComponent(claimIdFromUrl)}`,
+          { headers: await authHeaders() },
+        );
+        if (!res.ok) return;
+        const claim = (await res.json()) as InsuranceClaimDetail;
+        setDetailClaim({
+          id: claim.id,
+          claim_number: String(claim.claim_number ?? ""),
+          patient_name: "",
+          insurance_carrier: String(claim.payer_name ?? ""),
+          date_of_service: claim.first_treatment_date ?? null,
+          total_billed_cents: Math.round(Number(claim.total_amount ?? 0) * 100),
+          amount_paid_cents: 0,
+          amount_remaining_cents: 0,
+          status: String(claim.status ?? ""),
+        });
+      } catch {
+        /* ignore — claim may be outside current filters */
+      }
+    })();
+  }, [claimIdFromUrl, data?.claims]);
 
   useEffect(() => {
     if (!toast) return;
