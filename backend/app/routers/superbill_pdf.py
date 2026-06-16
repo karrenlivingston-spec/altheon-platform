@@ -22,7 +22,7 @@ FONT = "helv"
 FONT_B = "hebo"
 
 _PLACEHOLDER_VALUES = frozenset(
-    {"·", "•", "-", "—", "–", "n/a", "na", "none", "null"}
+    {"•", "-", "—", "–", "n/a", "na", "none", "null"}
 )
 
 
@@ -396,8 +396,8 @@ def build_superbill_pdf(
         group_number
         if group_number
         and group_number.strip()
-        not in ["", "·", "•", "—", "N/A", "null", "None"]
-        else "—"
+        not in ["", "•", "—", "N/A", "null", "None"]
+        else "-"
     )
 
     cpt_codes = normalize_cpt_codes(claim.get("cpt_codes"))
