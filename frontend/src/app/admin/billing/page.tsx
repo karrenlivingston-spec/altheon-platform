@@ -18,6 +18,7 @@ import ClaimDetailModal from "@/components/admin/billing/ClaimDetailModal";
 import ClaimsAction from "@/components/admin/billing/ClaimsAction";
 import ClaimsList, { type ClaimsFilter } from "@/components/admin/billing/ClaimsList";
 import ERAPanel from "@/components/admin/billing/ERAPanel";
+import PatientStatementModal from "@/components/admin/billing/PatientStatementModal";
 import PayerSummary from "@/components/admin/billing/PayerSummary";
 import SuperbillModal from "@/components/admin/billing/SuperbillModal";
 import {
@@ -78,6 +79,7 @@ export default function AdminBillingPage() {
 
   const [isNewClaimModalOpen, setIsNewClaimModalOpen] = useState(false);
   const [isSuperbillModalOpen, setIsSuperbillModalOpen] = useState(false);
+  const [isStatementModalOpen, setIsStatementModalOpen] = useState(false);
   const [editingClaim, setEditingClaim] = useState<{ id: string } | null>(null);
   const [detailClaim, setDetailClaim] = useState<BillingClaimRow | null>(null);
   const [exporting, setExporting] = useState(false);
@@ -430,6 +432,7 @@ export default function AdminBillingPage() {
               setToast({ kind: "success", message })
             }
             onCreateSuperbill={() => setIsSuperbillModalOpen(true)}
+            onPatientStatement={() => setIsStatementModalOpen(true)}
           />
         </div>
       </div>
@@ -456,6 +459,13 @@ export default function AdminBillingPage() {
       <SuperbillModal
         isOpen={isSuperbillModalOpen}
         onClose={() => setIsSuperbillModalOpen(false)}
+        onSuccess={showSuccess}
+        onError={showError}
+      />
+
+      <PatientStatementModal
+        isOpen={isStatementModalOpen}
+        onClose={() => setIsStatementModalOpen(false)}
         onSuccess={showSuccess}
         onError={showError}
       />

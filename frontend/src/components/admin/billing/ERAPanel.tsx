@@ -13,6 +13,7 @@ type ERAPanelProps = {
   payments: RecentPaymentRow[];
   onComingSoon?: (message: string) => void;
   onCreateSuperbill?: () => void;
+  onPatientStatement?: () => void;
 };
 
 const TOOL_LINKS = [
@@ -34,7 +35,7 @@ const TOOL_LINKS = [
   {
     label: "Patient Statements",
     kind: "action" as const,
-    action: "coming_soon" as const,
+    action: "patient_statement" as const,
   },
 ] as const;
 
@@ -54,6 +55,7 @@ export default function ERAPanel({
   payments,
   onComingSoon,
   onCreateSuperbill,
+  onPatientStatement,
 }: ERAPanelProps) {
   return (
     <div className="space-y-6">
@@ -125,16 +127,10 @@ export default function ERAPanel({
               ) : (
                 <button
                   type="button"
-                  onClick={() =>
-                    onComingSoon?.(`${link.label} — coming soon`)
-                  }
-                  className="flex w-full items-center justify-between rounded-lg px-3 py-2 text-left text-sm text-gray-400 hover:bg-gray-50"
-                  title="Coming soon"
+                  onClick={() => onPatientStatement?.()}
+                  className="block w-full rounded-lg px-3 py-2 text-left text-sm font-medium text-teal-700 hover:bg-teal-50"
                 >
-                  <span>{link.label}</span>
-                  <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-gray-500">
-                    Coming Soon
-                  </span>
+                  {link.label}
                 </button>
               )}
             </li>
