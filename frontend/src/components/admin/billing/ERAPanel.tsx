@@ -22,8 +22,8 @@ const TOOL_LINKS = [
   },
   {
     label: "Insurance Verification",
-    href: null,
-    comingSoon: true,
+    href: "/admin/billing/insurance-verification",
+    comingSoon: false,
   },
   {
     label: "Fee Schedule",

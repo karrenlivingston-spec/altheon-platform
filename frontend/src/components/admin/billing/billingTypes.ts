@@ -78,6 +78,41 @@ export type PayerSummaryReportData = {
   payers: PayerSummaryDetailRow[];
 };
 
+export type InsuranceCoverageDetail = {
+  category: string;
+  coverage_level: string;
+  amount: string | number;
+};
+
+export type InsuranceVerificationResult = {
+  eligible: boolean;
+  plan_name: string;
+  plan_begin_date: string;
+  subscriber_name: string;
+  member_id: string;
+  group_number: string;
+  copay: number | null;
+  deductible: number | null;
+  deductible_met: number | null;
+  out_of_pocket_max: number | null;
+  out_of_pocket_met: number | null;
+  coverage_details: InsuranceCoverageDetail[];
+  raw_response: Record<string, unknown>;
+  verification_id?: string;
+  verified_at?: string;
+};
+
+export type InsuranceVerificationHistoryRow = {
+  id: string;
+  payer_id: string;
+  member_id: string;
+  verified_at: string;
+  eligible: boolean;
+  plan_name: string;
+  copay: number | null;
+  deductible: number | null;
+};
+
 export function collectionRateBarColor(rate: number): string {
   if (rate >= 80) return "bg-green-500";
   if (rate >= 50) return "bg-yellow-500";

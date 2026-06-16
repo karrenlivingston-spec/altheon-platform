@@ -26,6 +26,10 @@ STEDI_STATUS_URL = (
     "https://healthcare.us.stedi.com/2024-04-01"
     "/change/medicalnetwork/claimstatus/v3"
 )
+STEDI_ELIGIBILITY_URL = (
+    "https://healthcare.us.stedi.com/2024-04-01"
+    "/change/medicalnetwork/eligibility/v3"
+)
 
 BILLING_PROVIDER_NPI = "1234567890"
 BILLING_PROVIDER_TAX_ID = "123456789"
@@ -315,6 +319,216 @@ def _build_stedi_837p_payload(
     }
 
 
+def _parse_stedi_benefit_amount(value: Any) -> Optional[float]:
+    if value is None:
+        return None
+    s = str(value).strip().replace(",", "").replace("$", "")
+    if not s:
+        return None
+    try:
+        return round(float(s), 2)
+    except (TypeError, ValueError):
+        return None
+
+
+def _stedi_date_to_iso(value: Any) -> str:
+    s = str(value or "").strip()
+    if len(s) >= 8 and s[:8].isdigit():
+        return f"{s[0:4]}-{s[4:6]}-{s[6:8]}"
+    d = _parse_date_only(value)
+    return d.isoformat() if d else ""
+
+
+def _build_stedi_eligibility_payload(body: "InsuranceVerificationBody") -> dict[str, Any]:
+    encounter: dict[str, Any] = {"serviceTypeCodes": ["30"]}
+    if body.date_of_service is not None:
+        encounter["dateOfService"] = _format_stedi_date(body.date_of_service)
+
+    return {
+        "tradingPartnerServiceId": body.payer_id.strip(),
+        "provider": {
+            "organizationName": BILLING_PROVIDER_ORG_NAME,
+            "npi": BILLING_PROVIDER_NPI,
+        },
+        "subscriber": {
+            "firstName": body.first_name.strip(),
+            "lastName": body.last_name.strip(),
+            "dateOfBirth": _format_stedi_date(body.date_of_birth),
+            "memberId": body.member_id.strip(),
+        },
+        "encounter": encounter,
+    }
+
+
+def _parse_stedi_271_response(
+    data: dict[str, Any],
+    *,
+    fallback_member_id: str = "",
+    fallback_subscriber_name: str = "",
+) -> dict[str, Any]:
+    benefits = data.get("benefitsInformation")
+    if not isinstance(benefits, list):
+        benefits = []
+
+    eligible = False
+    copay: Optional[float] = None
+    deductible: Optional[float] = None
+    deductible_met: Optional[float] = None
+    out_of_pocket_max: Optional[float] = None
+    out_of_pocket_met: Optional[float] = None
+    coverage_details: list[dict[str, Any]] = []
+    plan_name = ""
+
+    for item in benefits:
+        if not isinstance(item, dict):
+            continue
+
+        code = str(item.get("code") or "").strip().upper()
+        name = str(item.get("name") or "").strip()
+        time_code = str(item.get("timeQualifierCode") or "").strip()
+        amount = _parse_stedi_benefit_amount(item.get("benefitAmount"))
+        percent = item.get("benefitPercent")
+        coverage_level = str(
+            item.get("coverageLevel") or item.get("coverageLevelCode") or ""
+        ).strip()
+
+        if code == "1" or "active coverage" in name.lower():
+            eligible = True
+            if not plan_name:
+                plan_name = str(
+                    item.get("planCoverage")
+                    or item.get("insuranceType")
+                    or name
+                    or ""
+                ).strip()
+
+        if code == "B" and copay is None and amount is not None:
+            copay = amount
+        elif code == "C":
+            if time_code == "29" and amount is not None:
+                remaining = amount
+                if deductible is not None:
+                    deductible_met = round(max(0.0, deductible - remaining), 2)
+                else:
+                    deductible_met = None
+            elif time_code in ("23", "24", "") and amount is not None:
+                deductible = amount
+                if deductible_met is None and time_code == "29":
+                    pass
+        elif code == "G":
+            if time_code == "29" and amount is not None:
+                remaining = amount
+                if out_of_pocket_max is not None:
+                    out_of_pocket_met = round(
+                        max(0.0, out_of_pocket_max - remaining), 2
+                    )
+            elif amount is not None:
+                out_of_pocket_max = amount
+
+        category = name
+        if not category:
+            service_types = item.get("serviceTypes")
+            if isinstance(service_types, list) and service_types:
+                category = str(service_types[0])
+            else:
+                st_codes = item.get("serviceTypeCodes")
+                if isinstance(st_codes, list) and st_codes:
+                    category = f"Service type {st_codes[0]}"
+
+        amount_display: Any = amount
+        if amount_display is None and percent is not None:
+            amount_display = f"{percent}%"
+
+        coverage_details.append(
+            {
+                "category": category or code or "Benefit",
+                "coverage_level": coverage_level,
+                "amount": amount_display if amount_display is not None else "",
+            }
+        )
+
+    plan_info = data.get("planInformation")
+    if isinstance(plan_info, dict):
+        plan_name = plan_name or str(
+            plan_info.get("groupDescription")
+            or plan_info.get("planDescription")
+            or plan_info.get("policyNumber")
+            or ""
+        ).strip()
+
+    plan_dates = data.get("planDateInformation")
+    plan_begin_date = ""
+    if isinstance(plan_dates, dict):
+        plan_begin_date = _stedi_date_to_iso(
+            plan_dates.get("planBegin")
+            or plan_dates.get("eligibilityBegin")
+            or plan_dates.get("plan")
+        )
+
+    subscriber = data.get("subscriber")
+    if not isinstance(subscriber, dict):
+        subscriber = {}
+    dep = data.get("dependents")
+    if isinstance(dep, list) and dep and isinstance(dep[0], dict):
+        subscriber = dep[0]
+
+    sub_first = str(subscriber.get("firstName") or "").strip()
+    sub_last = str(subscriber.get("lastName") or "").strip()
+    subscriber_name = f"{sub_first} {sub_last}".strip() or fallback_subscriber_name
+    member_id = str(subscriber.get("memberId") or fallback_member_id).strip()
+    group_number = str(
+        subscriber.get("groupNumber")
+        or (plan_info.get("groupNumber") if isinstance(plan_info, dict) else "")
+        or ""
+    ).strip()
+
+    if deductible is not None and deductible_met is None:
+        for item in benefits:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("code") or "").upper() != "C":
+                continue
+            if str(item.get("timeQualifierCode") or "") == "29":
+                remaining = _parse_stedi_benefit_amount(item.get("benefitAmount"))
+                if remaining is not None:
+                    deductible_met = round(max(0.0, deductible - remaining), 2)
+                    break
+
+    if out_of_pocket_max is not None and out_of_pocket_met is None:
+        for item in benefits:
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("code") or "").upper() != "G":
+                continue
+            if str(item.get("timeQualifierCode") or "") == "29":
+                remaining = _parse_stedi_benefit_amount(item.get("benefitAmount"))
+                if remaining is not None:
+                    out_of_pocket_met = round(
+                        max(0.0, out_of_pocket_max - remaining), 2
+                    )
+                    break
+
+    errors = data.get("errors")
+    if isinstance(errors, list) and errors:
+        eligible = False
+
+    return {
+        "eligible": eligible,
+        "plan_name": plan_name,
+        "plan_begin_date": plan_begin_date,
+        "subscriber_name": subscriber_name,
+        "member_id": member_id,
+        "group_number": group_number,
+        "copay": copay,
+        "deductible": deductible,
+        "deductible_met": deductible_met,
+        "out_of_pocket_max": out_of_pocket_max,
+        "out_of_pocket_met": out_of_pocket_met,
+        "coverage_details": coverage_details,
+        "raw_response": data,
+    }
+
+
 def _claim_status_from_stedi_response(data: dict[str, Any]) -> str:
     claims = data.get("claims")
     if not isinstance(claims, list) or not claims:
@@ -371,6 +585,17 @@ class CreateClaimBody(BaseModel):
     cpt_codes: list[str] = Field(default_factory=list)
     total_amount: float
     notes: Optional[str] = None
+
+
+class InsuranceVerificationBody(BaseModel):
+    clinic_id: str
+    patient_id: str
+    payer_id: str
+    member_id: str
+    date_of_birth: date
+    first_name: str
+    last_name: str
+    date_of_service: Optional[date] = None
 
 
 class PatchClaimBody(BaseModel):
@@ -1170,3 +1395,148 @@ def payer_summary_report(clinic_id: str = Query(...)):
     except Exception as exc:
         logger.exception("payer_summary_report failed clinic_id=%s", cid)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/insurance-verification")
+def insurance_verification(body: InsuranceVerificationBody):
+    cid = body.clinic_id.strip()
+    pid = body.patient_id.strip()
+    if not cid or not pid:
+        raise HTTPException(
+            status_code=400, detail="clinic_id and patient_id are required"
+        )
+    if not body.payer_id.strip() or not body.member_id.strip():
+        raise HTTPException(
+            status_code=400, detail="payer_id and member_id are required"
+        )
+
+    api_key = _stedi_api_key()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Stedi API key not configured")
+
+    payload = _build_stedi_eligibility_payload(body)
+    headers = _stedi_headers(api_key)
+
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            response = client.post(
+                STEDI_ELIGIBILITY_URL,
+                headers=headers,
+                json=payload,
+            )
+    except httpx.RequestError as exc:
+        logger.exception("Stedi eligibility request failed patient_id=%s", pid)
+        raise HTTPException(
+            status_code=502, detail=f"Stedi request failed: {exc}"
+        ) from exc
+
+    if response.status_code >= 400:
+        raise HTTPException(
+            status_code=502, detail=_stedi_error_detail(response)
+        )
+
+    try:
+        data = response.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail="Invalid JSON response from Stedi"
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise HTTPException(
+            status_code=502, detail="Unexpected Stedi response format"
+        )
+
+    fallback_name = f"{body.first_name.strip()} {body.last_name.strip()}".strip()
+    summary = _parse_stedi_271_response(
+        data,
+        fallback_member_id=body.member_id.strip(),
+        fallback_subscriber_name=fallback_name,
+    )
+
+    verified_at = _now_iso()
+    save_row: dict[str, Any] = {
+        "clinic_id": cid,
+        "patient_id": pid,
+        "payer_id": body.payer_id.strip(),
+        "member_id": body.member_id.strip(),
+        "verified_at": verified_at,
+        "eligible": summary["eligible"],
+        "plan_name": summary.get("plan_name") or None,
+        "copay": summary.get("copay"),
+        "deductible": summary.get("deductible"),
+        "raw_response": summary.get("raw_response") or data,
+    }
+
+    try:
+        ins = supabase.table("insurance_verifications").insert(save_row).execute()
+        _handle_supabase_error(ins)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "insurance_verification save failed clinic_id=%s patient_id=%s",
+            cid,
+            pid,
+        )
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    saved = (ins.data or [{}])[0]
+    summary["verification_id"] = str(saved.get("id") or "")
+    summary["verified_at"] = verified_at
+    return summary
+
+
+@router.get("/insurance-verification-history")
+def insurance_verification_history(
+    clinic_id: str = Query(...),
+    patient_id: str = Query(...),
+):
+    cid = clinic_id.strip()
+    pid = patient_id.strip()
+    if not cid or not pid:
+        raise HTTPException(
+            status_code=400, detail="clinic_id and patient_id are required"
+        )
+
+    try:
+        resp = (
+            supabase.table("insurance_verifications")
+            .select(
+                "id, payer_id, member_id, verified_at, eligible, "
+                "plan_name, copay, deductible"
+            )
+            .eq("clinic_id", cid)
+            .eq("patient_id", pid)
+            .order("verified_at", desc=True)
+            .limit(50)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "insurance_verification_history failed clinic_id=%s patient_id=%s",
+            cid,
+            pid,
+        )
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    rows: list[dict[str, Any]] = []
+    for row in resp.data or []:
+        if not isinstance(row, dict):
+            continue
+        rows.append(
+            {
+                "id": str(row.get("id") or ""),
+                "payer_id": str(row.get("payer_id") or ""),
+                "member_id": str(row.get("member_id") or ""),
+                "verified_at": row.get("verified_at"),
+                "eligible": bool(row.get("eligible")),
+                "plan_name": str(row.get("plan_name") or ""),
+                "copay": row.get("copay"),
+                "deductible": row.get("deductible"),
+            }
+        )
+    return rows
