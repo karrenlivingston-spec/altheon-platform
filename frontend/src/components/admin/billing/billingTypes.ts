@@ -57,6 +57,82 @@ export type PayerSummaryRow = {
   collection_rate: number;
 };
 
+export type AgingBucketKey = "0_30" | "31_60" | "61_90" | "90_plus";
+
+export type AgingBucketFilter = "all" | AgingBucketKey;
+
+export type AgingSummaryBucket = {
+  bucket: AgingBucketKey;
+  label: string;
+  count: number;
+  total_amount: number;
+  total_amount_cents: number;
+};
+
+export type AgingClaimRow = {
+  id: string;
+  claim_number: string;
+  patient_name: string;
+  payer_name: string;
+  first_treatment_date: string | null;
+  total_amount: number;
+  status: string;
+  days_outstanding: number;
+  bucket: AgingBucketKey;
+};
+
+export type AgingReportData = {
+  summary: AgingSummaryBucket[];
+  aging: BillingDashboardData["aging"];
+  claims: AgingClaimRow[];
+};
+
+export const AGING_BUCKET_META = [
+  {
+    key: "bucket_0_30" as const,
+    filter: "0_30" as const,
+    label: "0–30 Days",
+    shortLabel: "0–30",
+    color: "#16a34a",
+    cardClass: "border-green-200 bg-green-50",
+    textClass: "text-green-800",
+  },
+  {
+    key: "bucket_31_60" as const,
+    filter: "31_60" as const,
+    label: "31–60 Days",
+    shortLabel: "31–60",
+    color: "#eab308",
+    cardClass: "border-yellow-200 bg-yellow-50",
+    textClass: "text-yellow-900",
+  },
+  {
+    key: "bucket_61_90" as const,
+    filter: "61_90" as const,
+    label: "61–90 Days",
+    shortLabel: "61–90",
+    color: "#f97316",
+    cardClass: "border-orange-200 bg-orange-50",
+    textClass: "text-orange-900",
+  },
+  {
+    key: "bucket_90_plus" as const,
+    filter: "90_plus" as const,
+    label: "90+ Days",
+    shortLabel: "90+",
+    color: "#dc2626",
+    cardClass: "border-red-200 bg-red-50",
+    textClass: "text-red-800",
+  },
+] as const;
+
+export function formatUsdAmount(amount: number): string {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+  }).format(amount);
+}
+
 export type BillingDashboardData = {
   metrics: {
     total_billed_mtd_cents: number;

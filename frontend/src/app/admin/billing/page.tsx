@@ -353,7 +353,10 @@ export default function AdminBillingPage() {
 
         <div className="xl:col-span-4">
           {data ? (
-            <AgingDonut aging={data.aging} />
+            <AgingDonut
+              aging={data.aging}
+              reportHref="/admin/billing/aging-report"
+            />
           ) : (
             <div className="h-80 animate-pulse rounded-xl border border-gray-200 bg-white" />
           )}

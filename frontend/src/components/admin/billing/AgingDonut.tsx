@@ -1,26 +1,31 @@
 "use client";
 
+import Link from "next/link";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 
 import { DS_CARD } from "@/app/admin/designSystem";
 import {
+  AGING_BUCKET_META,
   BillingDashboardData,
   formatUsdFromCents,
 } from "@/components/admin/billing/billingTypes";
 
 type AgingDonutProps = {
   aging: BillingDashboardData["aging"];
+  reportHref?: string;
+  title?: string;
+  showLegend?: boolean;
+  className?: string;
 };
 
-const BUCKET_META = [
-  { key: "bucket_0_30" as const, label: "0–30 days", color: "#16a34a" },
-  { key: "bucket_31_60" as const, label: "31–60 days", color: "#eab308" },
-  { key: "bucket_61_90" as const, label: "61–90 days", color: "#f97316" },
-  { key: "bucket_90_plus" as const, label: "90+ days", color: "#dc2626" },
-];
-
-export default function AgingDonut({ aging }: AgingDonutProps) {
-  const slices = BUCKET_META.map((b) => ({
+export default function AgingDonut({
+  aging,
+  reportHref,
+  title = "Aging Receivables",
+  showLegend = true,
+  className,
+}: AgingDonutProps) {
+  const slices = AGING_BUCKET_META.map((b) => ({
     name: b.label,
     value: aging[b.key],
     color: b.color,
@@ -34,11 +39,22 @@ export default function AgingDonut({ aging }: AgingDonutProps) {
       ? slices
       : [{ name: "Empty", value: 1, color: "#e5e7eb" }];
 
+  const reportLink = reportHref ? (
+    <Link
+      href={reportHref}
+      className="text-xs font-medium text-teal-600 hover:text-teal-700"
+    >
+      View Aging Report →
+    </Link>
+  ) : (
+    <span className="text-xs font-medium text-teal-600">View Aging Report →</span>
+  );
+
   return (
-    <div className={DS_CARD}>
+    <div className={className ?? DS_CARD}>
       <div className="mb-3 flex items-center justify-between">
-        <h2 className="text-base font-semibold text-gray-900">Aging Receivables</h2>
-        <span className="text-xs font-medium text-teal-600">View Aging Report →</span>
+        <h2 className="text-base font-semibold text-gray-900">{title}</h2>
+        {reportLink}
       </div>
       <div className="relative h-48">
         <ResponsiveContainer width="100%" height="100%">
@@ -78,7 +94,7 @@ export default function AgingDonut({ aging }: AgingDonutProps) {
           )}
         </div>
       </div>
-      {!isEmpty ? (
+      {showLegend && !isEmpty ? (
         <ul className="mt-2 space-y-1 text-xs">
           {slices.map((s) => (
             <li key={s.name} className="flex justify-between text-gray-600">

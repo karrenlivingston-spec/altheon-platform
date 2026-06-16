@@ -922,3 +922,158 @@ def list_unbilled_appointments(clinic_id: str = Query(...)):
     except Exception as exc:
         logger.exception("list_unbilled_appointments failed clinic_id=%s", cid)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+_AGING_BUCKET_LABELS = {
+    "0_30": "0–30 days",
+    "31_60": "31–60 days",
+    "61_90": "61–90 days",
+    "90_plus": "90+ days",
+}
+
+
+def _parse_claim_date(value: Any) -> Optional[date]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(s[:10])
+    except ValueError:
+        return None
+
+
+def _aging_bucket_key(age_days: int) -> str:
+    if age_days <= 30:
+        return "0_30"
+    if age_days <= 60:
+        return "31_60"
+    if age_days <= 90:
+        return "61_90"
+    return "90_plus"
+
+
+def _amount_to_cents(value: Any) -> int:
+    try:
+        return round(float(value or 0) * 100)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _claim_number_from_row(row: dict[str, Any], index: int) -> str:
+    dos = str(row.get("first_treatment_date") or "")[:10]
+    if dos:
+        return f"CLM-{dos.replace('-', '')}-{index + 1:03d}"
+    cid = str(row.get("id") or "")
+    return f"CLM-{cid[:8].upper()}" if cid else f"CLM-{index + 1:03d}"
+
+
+def _patient_name_from_claim(row: dict[str, Any]) -> str:
+    patients = row.get("patients")
+    if isinstance(patients, list):
+        patients = patients[0] if patients else {}
+    if isinstance(patients, dict):
+        fn = str(patients.get("first_name") or "").strip()
+        ln = str(patients.get("last_name") or "").strip()
+        name = f"{fn} {ln}".strip()
+        if name:
+            return name
+    return "—"
+
+
+@router.get("/aging-report")
+def aging_report(clinic_id: str = Query(...)):
+    cid = clinic_id.strip()
+    if not cid:
+        raise HTTPException(status_code=400, detail="clinic_id is required")
+
+    today = datetime.now(NY).date()
+
+    try:
+        resp = (
+            supabase.table("insurance_claims")
+            .select(
+                "id, payer_name, first_treatment_date, total_amount, status, "
+                "patients(first_name, last_name)"
+            )
+            .eq("clinic_id", cid)
+            .order("first_treatment_date", desc=True)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+
+        open_rows = [
+            r
+            for r in (resp.data or [])
+            if isinstance(r, dict)
+            and str(r.get("status") or "").strip().lower() != "paid"
+        ]
+
+        bucket_counts = {"0_30": 0, "31_60": 0, "61_90": 0, "90_plus": 0}
+        bucket_amounts = {"0_30": 0.0, "31_60": 0.0, "61_90": 0.0, "90_plus": 0.0}
+        bucket_cents = {
+            "0_30": 0,
+            "31_60": 0,
+            "61_90": 0,
+            "90_plus": 0,
+        }
+        detail_rows: list[dict[str, Any]] = []
+
+        for idx, row in enumerate(open_rows):
+            dos = _parse_claim_date(row.get("first_treatment_date"))
+            if dos is None:
+                continue
+
+            age_days = max(0, (today - dos).days)
+            bucket = _aging_bucket_key(age_days)
+            amount = float(row.get("total_amount") or 0)
+            amount_cents = _amount_to_cents(amount)
+
+            bucket_counts[bucket] += 1
+            bucket_amounts[bucket] += amount
+            bucket_cents[bucket] += amount_cents
+
+            detail_rows.append(
+                {
+                    "id": str(row.get("id") or ""),
+                    "claim_number": _claim_number_from_row(row, idx),
+                    "patient_name": _patient_name_from_claim(row),
+                    "payer_name": str(row.get("payer_name") or "").strip() or "—",
+                    "first_treatment_date": dos.isoformat(),
+                    "total_amount": round(amount, 2),
+                    "status": str(row.get("status") or "draft").strip().lower(),
+                    "days_outstanding": age_days,
+                    "bucket": bucket,
+                }
+            )
+
+        summary = [
+            {
+                "bucket": key,
+                "label": _AGING_BUCKET_LABELS[key],
+                "count": bucket_counts[key],
+                "total_amount": round(bucket_amounts[key], 2),
+                "total_amount_cents": bucket_cents[key],
+            }
+            for key in ("0_30", "31_60", "61_90", "90_plus")
+        ]
+
+        aging = {
+            "bucket_0_30": bucket_cents["0_30"],
+            "bucket_31_60": bucket_cents["31_60"],
+            "bucket_61_90": bucket_cents["61_90"],
+            "bucket_90_plus": bucket_cents["90_plus"],
+            "total": sum(bucket_cents.values()),
+        }
+
+        return {
+            "summary": summary,
+            "aging": aging,
+            "claims": detail_rows,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("aging_report failed clinic_id=%s", cid)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
