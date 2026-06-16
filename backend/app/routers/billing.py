@@ -14,7 +14,11 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from app.db import supabase
-from app.routers.superbill_pdf import build_superbill_pdf
+from app.routers.superbill_pdf import (
+    build_superbill_pdf,
+    normalize_cpt_codes,
+    sanitize_group_number,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -1598,6 +1602,9 @@ def generate_superbill(body: SuperbillBody):
     if not patient:
         patient = _fetch_patient_for_claim(claim.get("patient_id")) or {}
 
+    sanitized_group = sanitize_group_number(patient.get("insurance_group_number"))
+    patient = {**patient, "insurance_group_number": sanitized_group}
+
     try:
         clinic_resp = (
             supabase.table("clinics")
@@ -1633,13 +1640,11 @@ def generate_superbill(body: SuperbillBody):
         except Exception:
             logger.exception("superbill fetch clinician failed id=%s", clinician_id)
 
-    cpt_codes = [
-        str(c).strip().upper()
-        for c in (claim.get("cpt_codes") or [])
-        if str(c).strip()
-    ]
+    cpt_codes = normalize_cpt_codes(claim.get("cpt_codes"))
     if not cpt_codes:
         cpt_codes = ["99213"]
+
+    claim = {**claim, "cpt_codes": cpt_codes}
 
     cpt_descriptions: dict[str, str] = {}
     try:

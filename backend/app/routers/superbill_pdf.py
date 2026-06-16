@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
@@ -19,6 +20,59 @@ LINE = (0.8, 0.84, 0.85)
 
 FONT = "helv"
 FONT_B = "hebo"
+
+_PLACEHOLDER_VALUES = frozenset(
+    {"·", "•", "-", "—", "–", "n/a", "na", "none", "null"}
+)
+
+
+def sanitize_group_number(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s or s.lower() in _PLACEHOLDER_VALUES:
+        return None
+    return s
+
+
+def display_field(value: Any) -> str:
+    if value is None:
+        return "—"
+    s = str(value).strip()
+    if not s or s.lower() in _PLACEHOLDER_VALUES:
+        return "—"
+    return s
+
+
+def normalize_cpt_codes(value: Any) -> list[str]:
+    if value is None:
+        return []
+    items: list[Any]
+    if isinstance(value, list):
+        items = value
+    elif isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return []
+        if s.startswith("["):
+            try:
+                parsed = json.loads(s)
+                items = parsed if isinstance(parsed, list) else [s]
+            except json.JSONDecodeError:
+                items = [part.strip() for part in s.split(",") if part.strip()]
+        elif "," in s:
+            items = [part.strip() for part in s.split(",") if part.strip()]
+        else:
+            items = [s]
+    else:
+        return []
+
+    out: list[str] = []
+    for item in items:
+        code = str(item).strip().upper().replace(".", "")
+        if code and code not in out:
+            out.append(code)
+    return out
 
 
 def _fmt_date(value: Any) -> str:
@@ -263,11 +317,12 @@ class SuperbillPdfBuilder:
 
         draw_row(headers, FONT_B, (0.91, 0.96, 0.95))
         for i, r in enumerate(rows):
-            is_total = i == len(rows) - 1 and str(r[0]).upper() == "TOTAL"
+            label = str(r[2]).strip().upper() if len(r) >= 3 else ""
+            is_summary = label in ("TOTAL:", "SUBTOTAL:", "TOTAL BILLED:")
             draw_row(
                 r,
-                FONT_B if is_total else FONT,
-                LIGHT_ROW if i % 2 and not is_total else None,
+                FONT_B if is_summary else FONT,
+                LIGHT_ROW if i % 2 and not is_summary else None,
             )
         self.y += 8
 
@@ -336,13 +391,9 @@ def build_superbill_pdf(
     clinic_phone = f"Phone: {clinic_phone_raw}" if clinic_phone_raw else ""
     clinic_ids = f"NPI: {npi}   Tax ID: {tax_id}"
 
-    group_number = str(patient.get("insurance_group_number") or "").strip()
+    group_number = display_field(sanitize_group_number(patient.get("insurance_group_number")))
 
-    cpt_codes = [
-        str(c).strip().upper()
-        for c in (claim.get("cpt_codes") or [])
-        if str(c).strip()
-    ]
+    cpt_codes = normalize_cpt_codes(claim.get("cpt_codes"))
     if not cpt_codes:
         cpt_codes = ["99213"]
 
@@ -352,23 +403,33 @@ def build_superbill_pdf(
         total_amount = 0.0
 
     per_line_fallback = (
-        round(total_amount / len(cpt_codes), 2) if cpt_codes else total_amount
+        round(total_amount / len(cpt_codes), 2) if cpt_codes and total_amount > 0 else 0.0
     )
 
     charge_rows: list[list[str]] = []
-    computed_total = 0.0
+    line_subtotal = 0.0
     for code in cpt_codes:
-        desc = cpt_descriptions.get(code) or cpt_descriptions.get(code.replace(".", "")) or "—"
+        desc = (
+            cpt_descriptions.get(code)
+            or cpt_descriptions.get(code.replace(".", ""))
+            or "—"
+        )
         charge = fee_by_code.get(code)
         if charge is None:
             charge = fee_by_code.get(code.replace(".", ""))
         if charge is None:
             charge = per_line_fallback
-        computed_total += charge
+        line_subtotal += charge
         charge_rows.append([code, desc, "1", _fmt_money(charge)])
 
-    display_total = total_amount if total_amount > 0 else computed_total
-    charge_rows.append(["", "", "TOTAL:", _fmt_money(display_total)])
+    line_subtotal = round(line_subtotal, 2)
+    billed_total = round(total_amount, 2) if total_amount > 0 else line_subtotal
+
+    if line_subtotal != billed_total and len(charge_rows) > 0:
+        charge_rows.append(["", "", "Subtotal:", _fmt_money(line_subtotal)])
+        charge_rows.append(["", "", "Total Billed:", _fmt_money(billed_total)])
+    else:
+        charge_rows.append(["", "", "TOTAL:", _fmt_money(billed_total)])
 
     diagnosis_codes = [
         str(c).strip().upper()
@@ -394,10 +455,10 @@ def build_superbill_pdf(
             ("PATIENT", patient_name),
             ("DOB", _fmt_date(patient.get("date_of_birth"))),
             ("ADDRESS", _patient_address(patient)),
-            ("INSURANCE", str(claim.get("payer_name") or "—")),
-            ("MEMBER ID", str(claim.get("member_id") or "—")),
-            ("POLICY #", str(claim.get("policy_number") or "—")),
-            ("GROUP #", group_number or "—"),
+            ("INSURANCE", display_field(claim.get("payer_name"))),
+            ("MEMBER ID", display_field(claim.get("member_id"))),
+            ("POLICY #", display_field(claim.get("policy_number"))),
+            ("GROUP #", group_number),
         ],
         cols=2,
     )
