@@ -146,7 +146,7 @@ export default function AdminOverviewPage() {
             </div>
 
             <div className="space-y-6">
-              <TasksAlerts data={data} />
+              <TasksAlerts data={data} onRefresh={() => void fetchSummary({ silent: true })} />
               <ClaimsAction data={data} />
             </div>
 

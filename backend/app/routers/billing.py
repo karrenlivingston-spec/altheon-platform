@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.db import supabase
 from app.routers.patient_statement_pdf import build_patient_statement_pdf
+from app.routers.resubmission_pdf import build_resubmission_pdf
 from app.routers.superbill_pdf import (
     build_superbill_pdf,
     normalize_cpt_codes,
@@ -610,6 +611,13 @@ class InsuranceVerificationBody(BaseModel):
 class SuperbillBody(BaseModel):
     clinic_id: str
     claim_id: str
+
+
+class ResubmissionPackageBody(BaseModel):
+    clinic_id: str
+    patient_id: str
+    claim_id: str
+    eob_extraction_id: str
 
 
 class PatientStatementBody(BaseModel):
@@ -1892,6 +1900,380 @@ def generate_patient_statement(body: PatientStatementBody):
         content=pdf_bytes,
         media_type="application/pdf",
         headers=headers,
+    )
+
+
+def _safe_str_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(x).strip() for x in value if str(x).strip()]
+
+
+def _call_claude_resubmission_letter(
+    *,
+    patient_name: str,
+    dob: str,
+    insurance_company: str,
+    claim_number: str,
+    date_of_service: str,
+    cpt_codes: list[str],
+    denial_reasons: list[str],
+    denial_codes: list[str],
+    missing_information: list[str],
+    soap_note_summary: str,
+) -> str:
+    api_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY is not configured")
+
+    try:
+        import anthropic
+    except ImportError as exc:
+        raise RuntimeError("anthropic package is not installed") from exc
+
+    prompt = (
+        "You are a medical billing specialist. Write a professional insurance claim "
+        "resubmission cover letter for the following denial.\n\n"
+        f"Patient: {patient_name}, DOB: {dob}\n"
+        f"Insurance: {insurance_company}\n"
+        f"Claim #: {claim_number}\n"
+        f"Date of Service: {date_of_service}\n"
+        f"CPT Codes: {', '.join(cpt_codes) if cpt_codes else '—'}\n"
+        f"Denial Reasons: {', '.join(denial_reasons) if denial_reasons else '—'}\n"
+        f"Denial Codes: {', '.join(denial_codes) if denial_codes else '—'}\n"
+        f"Missing Information Requested: "
+        f"{', '.join(missing_information) if missing_information else '—'}\n"
+        f"Clinical Notes Summary: {soap_note_summary}\n\n"
+        "Write a 2-3 paragraph professional letter addressing each denial reason "
+        "with supporting clinical justification. Be specific and reference the "
+        "clinical documentation. Return only the letter text."
+    )
+
+    client = anthropic.Anthropic(api_key=api_key)
+    message = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=2048,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    blocks = getattr(message, "content", None) or []
+    parts: list[str] = []
+    for block in blocks:
+        if hasattr(block, "text"):
+            parts.append(str(block.text))
+        elif isinstance(block, dict) and block.get("text"):
+            parts.append(str(block["text"]))
+    letter = "".join(parts).strip()
+    if not letter:
+        raise RuntimeError("Empty cover letter from AI")
+    return letter
+
+
+def _soap_note_summary(note: Optional[dict[str, Any]]) -> str:
+    if not note:
+        return "No clinical note available."
+    parts: list[str] = []
+    for label, key in (
+        ("Subjective", "subjective"),
+        ("Objective", "objective"),
+        ("Assessment", "assessment"),
+        ("Plan", "plan"),
+    ):
+        val = str(note.get(key) or "").strip()
+        if val:
+            parts.append(f"{label}: {val[:500]}")
+    return " | ".join(parts) if parts else "Clinical note on file with limited content."
+
+
+def _fetch_clinical_note_for_claim(
+    *,
+    clinic_id: str,
+    patient_id: str,
+    claim: dict[str, Any],
+) -> Optional[dict[str, Any]]:
+    note_fields = "subjective, objective, assessment, plan, signed_at, created_at"
+    appointment_id = str(claim.get("appointment_id") or "").strip()
+    if appointment_id:
+        try:
+            appt_note = (
+                supabase.table("clinical_notes")
+                .select(note_fields)
+                .eq("clinic_id", clinic_id)
+                .eq("patient_id", patient_id)
+                .eq("appointment_id", appointment_id)
+                .order("signed_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            _handle_supabase_error(appt_note)
+            rows = appt_note.data or []
+            if rows:
+                return rows[0]
+        except Exception:
+            logger.exception(
+                "resubmission note lookup by appointment failed claim=%s",
+                claim.get("id"),
+            )
+
+    try:
+        notes_resp = (
+            supabase.table("clinical_notes")
+            .select(note_fields)
+            .eq("clinic_id", clinic_id)
+            .eq("patient_id", patient_id)
+            .order("signed_at", desc=True)
+            .order("created_at", desc=True)
+            .limit(5)
+            .execute()
+        )
+        _handle_supabase_error(notes_resp)
+        rows = notes_resp.data or []
+        return rows[0] if rows else None
+    except Exception:
+        logger.exception(
+            "resubmission note lookup failed patient_id=%s", patient_id
+        )
+        return None
+
+
+@router.post("/resubmission-package")
+def generate_resubmission_package(body: ResubmissionPackageBody):
+    cid = body.clinic_id.strip()
+    pid = body.patient_id.strip()
+    claim_id = body.claim_id.strip()
+    eob_id = body.eob_extraction_id.strip()
+    if not cid or not pid or not claim_id or not eob_id:
+        raise HTTPException(
+            status_code=400,
+            detail="clinic_id, patient_id, claim_id, and eob_extraction_id are required",
+        )
+
+    try:
+        eob_resp = (
+            supabase.table("eob_extractions")
+            .select("*")
+            .eq("id", eob_id)
+            .eq("clinic_id", cid)
+            .eq("patient_id", pid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(eob_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("resubmission fetch eob failed eob_id=%s", eob_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    eob_rows = eob_resp.data or []
+    if not eob_rows:
+        raise HTTPException(status_code=404, detail="EOB extraction not found")
+    eob = eob_rows[0]
+
+    try:
+        claim_resp = (
+            supabase.table("insurance_claims")
+            .select(
+                "*, patients(first_name, last_name, date_of_birth, "
+                "address_line1, address_line2, city, state, zip, "
+                "insurance_group_number)"
+            )
+            .eq("id", claim_id)
+            .eq("clinic_id", cid)
+            .eq("patient_id", pid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(claim_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("resubmission fetch claim failed claim_id=%s", claim_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    claim_rows = claim_resp.data or []
+    if not claim_rows:
+        raise HTTPException(status_code=404, detail="Claim not found")
+    claim = claim_rows[0]
+
+    matched_claim_id = str(eob.get("claim_id") or "").strip()
+    if matched_claim_id and matched_claim_id != claim_id:
+        raise HTTPException(
+            status_code=400,
+            detail="EOB extraction is linked to a different claim",
+        )
+
+    patient = _nested_patient(claim)
+    if not patient:
+        patient = _fetch_patient_for_claim(pid) or {}
+
+    try:
+        clinic_resp = (
+            supabase.table("clinics")
+            .select("name, address, phone")
+            .eq("id", cid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(clinic_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("resubmission fetch clinic failed clinic_id=%s", cid)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    clinic = (clinic_resp.data or [{}])[0]
+
+    clinician: Optional[dict[str, Any]] = None
+    clinician_id = str(claim.get("clinician_id") or "").strip()
+    if clinician_id:
+        try:
+            clin_resp = (
+                supabase.table("clinicians")
+                .select("first_name, last_name, title")
+                .eq("id", clinician_id)
+                .limit(1)
+                .execute()
+            )
+            _handle_supabase_error(clin_resp)
+            clin_rows = clin_resp.data or []
+            clinician = clin_rows[0] if clin_rows else None
+        except Exception:
+            logger.exception("resubmission fetch clinician failed id=%s", clinician_id)
+
+    clinical_note = _fetch_clinical_note_for_claim(
+        clinic_id=cid, patient_id=pid, claim=claim
+    )
+
+    cpt_codes = normalize_cpt_codes(claim.get("cpt_codes"))
+    if not cpt_codes:
+        cpt_codes = ["99213"]
+    claim = {**claim, "cpt_codes": cpt_codes}
+
+    raw = eob.get("raw_extraction") if isinstance(eob.get("raw_extraction"), dict) else {}
+    denial_reasons = _safe_str_list(eob.get("denial_reasons") or raw.get("denial_reasons"))
+    denial_codes = _safe_str_list(eob.get("denial_codes") or raw.get("denial_codes"))
+    missing_information = _safe_str_list(
+        eob.get("missing_information") or raw.get("missing_information")
+    )
+
+    patient_name = (
+        f"{patient.get('first_name') or ''} {patient.get('last_name') or ''}".strip()
+        or "Patient"
+    )
+    dob = str(patient.get("date_of_birth") or "")[:10] or "—"
+    insurance_company = str(
+        eob.get("insurance_company") or claim.get("payer_name") or ""
+    ).strip() or "Insurance Carrier"
+    claim_number = str(claim.get("claim_number") or claim_id).strip()
+    dos = str(
+        eob.get("date_of_service") or claim.get("first_treatment_date") or ""
+    )[:10] or "—"
+    soap_summary = _soap_note_summary(clinical_note)
+
+    try:
+        cover_letter = _call_claude_resubmission_letter(
+            patient_name=patient_name,
+            dob=dob,
+            insurance_company=insurance_company,
+            claim_number=claim_number,
+            date_of_service=dos,
+            cpt_codes=cpt_codes,
+            denial_reasons=denial_reasons,
+            denial_codes=denial_codes,
+            missing_information=missing_information,
+            soap_note_summary=soap_summary,
+        )
+    except Exception as exc:
+        logger.exception("resubmission cover letter failed claim_id=%s", claim_id)
+        raise HTTPException(
+            status_code=500, detail=f"Cover letter generation failed: {exc}"
+        ) from exc
+
+    cpt_descriptions: dict[str, str] = {}
+    try:
+        cpt_resp = (
+            supabase.table("cpt_codes")
+            .select("code, description")
+            .in_("code", cpt_codes)
+            .execute()
+        )
+        _handle_supabase_error(cpt_resp)
+        for row in cpt_resp.data or []:
+            if isinstance(row, dict) and row.get("code"):
+                cpt_descriptions[str(row["code"]).strip().upper()] = str(
+                    row.get("description") or ""
+                ).strip()
+    except Exception:
+        logger.exception("resubmission fetch cpt codes failed claim_id=%s", claim_id)
+
+    fee_by_code: dict[str, float] = {}
+    try:
+        fee_resp = (
+            supabase.table("clinic_fee_schedules")
+            .select("cpt_code, charge")
+            .eq("clinic_id", cid)
+            .in_("cpt_code", cpt_codes)
+            .eq("is_active", True)
+            .execute()
+        )
+        _handle_supabase_error(fee_resp)
+        for row in fee_resp.data or []:
+            if not isinstance(row, dict):
+                continue
+            code = str(row.get("cpt_code") or "").strip().upper()
+            try:
+                fee_by_code[code] = float(row.get("charge") or 0)
+            except (TypeError, ValueError):
+                continue
+    except Exception:
+        logger.exception("resubmission fetch fee schedule failed clinic_id=%s", cid)
+
+    try:
+        pdf_bytes, filename = build_resubmission_pdf(
+            clinic=clinic,
+            patient=patient,
+            claim=claim,
+            clinician=clinician,
+            eob=eob,
+            cover_letter=cover_letter,
+            clinical_note=clinical_note,
+            cpt_descriptions=cpt_descriptions,
+            fee_by_code=fee_by_code,
+            npi=BILLING_PROVIDER_NPI,
+            tax_id=BILLING_PROVIDER_TAX_ID,
+        )
+    except Exception as exc:
+        logger.exception("resubmission pdf failed claim_id=%s", claim_id)
+        raise HTTPException(
+            status_code=500, detail=f"Resubmission PDF generation failed: {exc}"
+        ) from exc
+
+    now = _now_iso()
+    task_id = str(eob.get("task_id") or "").strip()
+    try:
+        supabase.table("eob_extractions").update(
+            {"resubmission_prepared": True}
+        ).eq("id", eob_id).execute()
+        if task_id:
+            supabase.table("clinic_tasks").update(
+                {"resubmission_generated_at": now, "updated_at": now}
+            ).eq("id", task_id).eq("clinic_id", cid).execute()
+        else:
+            supabase.table("clinic_tasks").update(
+                {"resubmission_generated_at": now, "updated_at": now}
+            ).eq("claim_id", claim_id).eq("clinic_id", cid).eq(
+                "task_type", "eob_resubmission"
+            ).in_("status", ["open", "in_progress"]).execute()
+    except Exception:
+        logger.exception(
+            "resubmission status update failed eob_id=%s claim_id=%s",
+            eob_id,
+            claim_id,
+        )
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

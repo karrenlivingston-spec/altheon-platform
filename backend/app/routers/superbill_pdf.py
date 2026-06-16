@@ -180,7 +180,7 @@ class SuperbillPdfBuilder:
                 )
                 left_y += 10
 
-        title = "SUPERBILL"
+        title = str(h.get("document_title") or "SUPERBILL")
         tw = fitz.get_text_length(title, fontname=FONT_B, fontsize=14)
         p.insert_text(
             (PAGE_W - MARGIN - tw, top + 8),
@@ -214,6 +214,31 @@ class SuperbillPdfBuilder:
             width=1.2,
         )
         return bottom + 14
+
+    def new_page(self, document_title: str = "SUPERBILL") -> None:
+        self.page = self.doc.new_page(width=PAGE_W, height=PAGE_H)
+        self.header["document_title"] = document_title
+        self.y = self._draw_header()
+
+    def body_text(self, text: str, fontsize: float = 10.0) -> None:
+        doc_title = str(self.header.get("document_title") or "SUPERBILL")
+        for paragraph in (text or "").split("\n\n"):
+            paragraph = paragraph.strip()
+            if not paragraph:
+                continue
+            for line in self._wrap(paragraph, CONTENT_W, fontsize):
+                if self.y > PAGE_H - FOOTER_H:
+                    self.new_page(doc_title)
+                self.page.insert_text(
+                    (MARGIN, self.y),
+                    line,
+                    fontsize=fontsize,
+                    fontname=FONT,
+                    color=DARK,
+                )
+                self.y += fontsize * 1.35
+            self.y += fontsize * 0.75
+        self.y += 6
 
     def section_header(self, title: str) -> None:
         h = 18.0

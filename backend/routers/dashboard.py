@@ -7,12 +7,16 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel, Field
 
 from app.db import supabase
 from routers.fee_schedule import ClinicUserDep
 
 router = APIRouter()
+
+_OPEN_TASK_STATUSES = frozenset({"open", "in_progress"})
+_PRIORITY_ORDER = {"urgent": 0, "high": 1, "normal": 2, "low": 3}
 
 NY = ZoneInfo("America/New_York")
 
@@ -112,6 +116,96 @@ def _sum_amount(rows: list[dict[str, Any]], key: str = "total_billed_cents") -> 
         except (TypeError, ValueError):
             pass
     return total
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _shape_clinic_task(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row.get("id") or ""),
+        "title": str(row.get("title") or "").strip(),
+        "description": str(row.get("description") or "").strip() or None,
+        "priority": str(row.get("priority") or "normal").strip(),
+        "patient_id": str(row.get("patient_id") or "").strip() or None,
+        "task_type": str(row.get("task_type") or "").strip(),
+        "claim_id": str(row.get("claim_id") or "").strip() or None,
+        "eob_extraction_id": str(row.get("eob_extraction_id") or "").strip() or None,
+        "status": str(row.get("status") or "").strip(),
+        "created_at": row.get("created_at"),
+        "resubmission_generated_at": row.get("resubmission_generated_at"),
+    }
+
+
+def _enrich_tasks_with_eob_ids(
+    cid: str, rows: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    if not rows:
+        return rows
+    try:
+        eob_resp = (
+            supabase.table("eob_extractions")
+            .select("id, claim_id, task_id")
+            .eq("clinic_id", cid)
+            .execute()
+        )
+        _handle_supabase_error(eob_resp)
+    except Exception:
+        traceback.print_exc()
+        return rows
+
+    by_task: dict[str, str] = {}
+    by_claim: dict[str, str] = {}
+    for item in eob_resp.data or []:
+        if not isinstance(item, dict):
+            continue
+        eob_id = str(item.get("id") or "").strip()
+        if not eob_id:
+            continue
+        task_id = str(item.get("task_id") or "").strip()
+        claim_id = str(item.get("claim_id") or "").strip()
+        if task_id:
+            by_task[task_id] = eob_id
+        if claim_id:
+            by_claim[claim_id] = eob_id
+
+    enriched: list[dict[str, Any]] = []
+    for row in rows:
+        copy = dict(row)
+        tid = str(copy.get("id") or "").strip()
+        cid_claim = str(copy.get("claim_id") or "").strip()
+        copy["eob_extraction_id"] = by_task.get(tid) or by_claim.get(cid_claim)
+        enriched.append(copy)
+    return enriched
+
+
+def _sort_clinic_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def sort_key(row: dict[str, Any]) -> tuple[int, str]:
+        priority = str(row.get("priority") or "normal").lower()
+        return (_PRIORITY_ORDER.get(priority, 9), str(row.get("created_at") or ""))
+
+    return sorted(rows, key=sort_key)
+
+
+def _fetch_open_clinic_tasks(cid: str) -> list[dict[str, Any]]:
+    resp = (
+        supabase.table("clinic_tasks")
+        .select(
+            "id, title, description, priority, patient_id, task_type, "
+            "claim_id, status, created_at, resubmission_generated_at"
+        )
+        .eq("clinic_id", cid)
+        .in_("status", list(_OPEN_TASK_STATUSES))
+        .execute()
+    )
+    _handle_supabase_error(resp)
+    rows = _sort_clinic_tasks([r for r in (resp.data or []) if isinstance(r, dict)])
+    return _enrich_tasks_with_eob_ids(cid, rows)
+
+
+class PatchClinicTaskBody(BaseModel):
+    status: str = Field(..., pattern="^(completed|in_progress|cancelled)$")
 
 
 def _claims_bucket(status: str) -> Optional[str]:
@@ -412,6 +506,24 @@ def dashboard_summary(clinic: ClinicUserDep):
             if str(r.get("status") or "").strip().lower() == "scheduled"
         )
 
+        open_clinic_task_rows: list[dict[str, Any]] = []
+        eob_resubmission_count = 0
+        open_clinic_tasks_count = 0
+        clinic_tasks_list: list[dict[str, Any]] = []
+        try:
+            open_clinic_task_rows = _fetch_open_clinic_tasks(cid)
+            open_clinic_tasks_count = len(open_clinic_task_rows)
+            eob_resubmission_count = sum(
+                1
+                for row in open_clinic_task_rows
+                if str(row.get("task_type") or "").strip() == "eob_resubmission"
+            )
+            clinic_tasks_list = [
+                _shape_clinic_task(row) for row in open_clinic_task_rows[:10]
+            ]
+        except Exception:
+            traceback.print_exc()
+
         # --- Recent activity ---
         activities: list[dict[str, Any]] = []
 
@@ -595,6 +707,9 @@ def dashboard_summary(clinic: ClinicUserDep):
                 "notes_review": notes_review,
                 "legal_in_progress": legal_in_progress,
                 "unconfirmed_appointments": appts_unconfirmed,
+                "eob_resubmission": eob_resubmission_count,
+                "clinic_tasks_open": open_clinic_tasks_count,
+                "clinic_tasks": clinic_tasks_list,
             },
             "schedule_today": schedule_today,
             "upcoming_appointments": upcoming_appointments,
@@ -608,3 +723,75 @@ def dashboard_summary(clinic: ClinicUserDep):
             status_code=500,
             detail=f"Dashboard summary failed: {exc}",
         ) from exc
+
+
+@router.get("/clinic-tasks")
+def list_clinic_tasks(
+    clinic: ClinicUserDep,
+    status: Optional[str] = Query(default=None),
+    priority: Optional[str] = Query(default=None),
+    task_type: Optional[str] = Query(default=None),
+):
+    cid = clinic.clinic_id
+    try:
+        q = (
+            supabase.table("clinic_tasks")
+            .select(
+                "id, title, description, priority, patient_id, task_type, "
+                "claim_id, status, created_at, updated_at, resubmission_generated_at"
+            )
+            .eq("clinic_id", cid)
+        )
+        if status:
+            st = status.strip().lower()
+            if st != "all":
+                q = q.eq("status", st)
+        else:
+            q = q.in_("status", list(_OPEN_TASK_STATUSES))
+        if priority:
+            q = q.eq("priority", priority.strip().lower())
+        if task_type:
+            q = q.eq("task_type", task_type.strip().lower())
+        resp = q.execute()
+        _handle_supabase_error(resp)
+        rows = _sort_clinic_tasks(
+            [r for r in (resp.data or []) if isinstance(r, dict)]
+        )
+        rows = _enrich_tasks_with_eob_ids(cid, rows)
+        return [_shape_clinic_task(row) for row in rows]
+    except HTTPException:
+        raise
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.patch("/clinic-tasks/{task_id}")
+def patch_clinic_task(task_id: str, body: PatchClinicTaskBody, clinic: ClinicUserDep):
+    tid = task_id.strip()
+    if not tid:
+        raise HTTPException(status_code=400, detail="task_id is required")
+    new_status = body.status.strip().lower()
+    if new_status not in ("completed", "in_progress", "cancelled"):
+        raise HTTPException(status_code=400, detail="Invalid status")
+
+    cid = clinic.clinic_id
+    try:
+        upd = (
+            supabase.table("clinic_tasks")
+            .update({"status": new_status, "updated_at": _now_iso()})
+            .eq("id", tid)
+            .eq("clinic_id", cid)
+            .execute()
+        )
+        _handle_supabase_error(upd)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    rows = upd.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Task not found")
+    return _shape_clinic_task(rows[0])

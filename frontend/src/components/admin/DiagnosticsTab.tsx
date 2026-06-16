@@ -15,6 +15,7 @@ import {
   DS_PRIMARY_BTN,
   DS_SECONDARY_BTN,
 } from "@/app/admin/designSystem";
+import { downloadResubmissionPackage } from "@/components/admin/billing/resubmissionDownload";
 import { supabase } from "@/lib/supabase";
 
 const API_BASE =
@@ -99,6 +100,7 @@ type EobExtractionRow = {
   needs_resubmission?: boolean | null;
   missing_information?: string[] | null;
   raw_extraction?: { cpt_codes?: EobCptLine[] } | null;
+  resubmission_prepared?: boolean | null;
   created_at?: string | null;
   patient_documents?: { file_name?: string; document_type?: string } | null;
 };
@@ -185,8 +187,22 @@ type Props = {
   highlightDocumentId?: string | null;
 };
 
-function EobSummaryPanel({ row }: { row: EobExtractionRow }) {
+function EobSummaryPanel({
+  row,
+  patientId,
+  clinicId,
+  onPrepared,
+  onToast,
+}: {
+  row: EobExtractionRow;
+  patientId: string;
+  clinicId: string;
+  onPrepared?: () => void;
+  onToast?: (message: string) => void;
+}) {
   const needsResub = Boolean(row.needs_resubmission);
+  const [preparing, setPreparing] = useState(false);
+  const [prepared, setPrepared] = useState(Boolean(row.resubmission_prepared));
   const denialReasons = Array.isArray(row.denial_reasons) ? row.denial_reasons : [];
   const denialCodes = Array.isArray(row.denial_codes) ? row.denial_codes : [];
   const missingInfo = Array.isArray(row.missing_information)
@@ -199,6 +215,41 @@ function EobSummaryPanel({ row }: { row: EobExtractionRow }) {
     row.patient_documents?.document_type === "reduction_letter"
       ? "Reduction Letter"
       : "EOB";
+
+  async function prepareResubmission(regenerate = false) {
+    if (!row.claim_id) {
+      onToast?.("No matching claim found for resubmission.");
+      return;
+    }
+    setPreparing(true);
+    try {
+      const h = await authHeaders(true);
+      await downloadResubmissionPackage({
+        clinicId,
+        patientId,
+        claimId: row.claim_id,
+        eobExtractionId: row.id,
+        authHeaders: h,
+      });
+      setPrepared(true);
+      onPrepared?.();
+      onToast?.(
+        regenerate
+          ? "Resubmission package regenerated"
+          : "Resubmission package ready for review",
+      );
+    } catch (e) {
+      onToast?.(
+        e instanceof Error ? e.message : "Could not generate resubmission package",
+      );
+    } finally {
+      setPreparing(false);
+    }
+  }
+
+  useEffect(() => {
+    setPrepared(Boolean(row.resubmission_prepared));
+  }, [row.resubmission_prepared]);
 
   return (
     <div className="space-y-4">
@@ -341,6 +392,37 @@ function EobSummaryPanel({ row }: { row: EobExtractionRow }) {
           </span>
         ) : null}
       </div>
+
+      {needsResub && row.claim_id ? (
+        <div className="flex flex-wrap items-center gap-3 border-t border-gray-100 pt-4">
+          {prepared ? (
+            <>
+              <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-800">
+                ✓ Resubmission Prepared
+              </span>
+              <button
+                type="button"
+                disabled={preparing}
+                className="text-sm text-teal-700 hover:underline disabled:opacity-60"
+                onClick={() => void prepareResubmission(true)}
+              >
+                {preparing ? "Generating…" : "Re-generate"}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              disabled={preparing}
+              className={`${DS_PRIMARY_BTN} text-sm disabled:opacity-60`}
+              onClick={() => void prepareResubmission(false)}
+            >
+              {preparing
+                ? "Generating resubmission package…"
+                : "📄 Prepare Resubmission Package"}
+            </button>
+          )}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -745,7 +827,13 @@ export function DiagnosticsTab({
                     highlighted ? "ring-2 ring-teal-400 ring-offset-2" : ""
                   }`}
                 >
-                  <EobSummaryPanel row={row} />
+                  <EobSummaryPanel
+                    row={row}
+                    patientId={patientId}
+                    clinicId={clinicId}
+                    onPrepared={() => void loadData()}
+                    onToast={setToast}
+                  />
                   {docId ? (
                     <div className="mt-4 border-t border-gray-100 pt-3">
                       <button

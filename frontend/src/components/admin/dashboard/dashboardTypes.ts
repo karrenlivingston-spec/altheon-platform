@@ -19,6 +19,20 @@ export type ActivityItem = {
   timestamp: string;
 };
 
+export type ClinicTaskRow = {
+  id: string;
+  title: string;
+  description?: string | null;
+  priority: string;
+  patient_id?: string | null;
+  task_type: string;
+  claim_id?: string | null;
+  eob_extraction_id?: string | null;
+  status?: string;
+  created_at?: string | null;
+  resubmission_generated_at?: string | null;
+};
+
 export type DashboardSummary = {
   appointments_today: number;
   patients_this_week: number;
@@ -50,6 +64,9 @@ export type DashboardSummary = {
     notes_review: number;
     legal_in_progress: number;
     unconfirmed_appointments: number;
+    eob_resubmission: number;
+    clinic_tasks_open: number;
+    clinic_tasks: ClinicTaskRow[];
   };
   schedule_today: ScheduleRow[];
   upcoming_appointments: ScheduleRow[];

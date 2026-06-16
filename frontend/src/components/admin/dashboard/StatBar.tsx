@@ -68,7 +68,8 @@ export default function StatBar({ data, loading }: StatBarProps) {
     data.tasks.incomplete_intakes +
     data.tasks.notes_review +
     data.tasks.legal_in_progress +
-    data.tasks.unconfirmed_appointments;
+    data.tasks.unconfirmed_appointments +
+    (data.tasks.clinic_tasks_open ?? 0);
   const claimsNeed =
     data.claims_requiring_action.denied.count +
     data.claims_requiring_action.pending.count;
