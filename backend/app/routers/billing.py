@@ -14,10 +14,12 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.routers.patient_statement_pdf import build_patient_statement_pdf
 from app.routers.superbill_pdf import (
     build_superbill_pdf,
     normalize_cpt_codes,
 )
+from app.sms import send_sms
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -608,6 +610,12 @@ class InsuranceVerificationBody(BaseModel):
 class SuperbillBody(BaseModel):
     clinic_id: str
     claim_id: str
+
+
+class PatientStatementBody(BaseModel):
+    clinic_id: str
+    patient_id: str
+    delivery: str = "download"
 
 
 class PatchClaimBody(BaseModel):
@@ -1716,3 +1724,179 @@ def generate_superbill(body: SuperbillBody):
         media_type="application/pdf",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+def _patient_statement_totals(
+    claims: list[dict[str, Any]],
+) -> tuple[float, float, float]:
+    """Returns (total_billed, insurance_paid, balance_due)."""
+    total_billed = 0.0
+    insurance_paid = 0.0
+    for claim in claims:
+        try:
+            billed = float(claim.get("total_amount") or 0)
+        except (TypeError, ValueError):
+            billed = 0.0
+        total_billed += billed
+        if str(claim.get("status") or "").strip().lower() == "paid":
+            insurance_paid += billed
+    total_billed = round(total_billed, 2)
+    insurance_paid = round(insurance_paid, 2)
+    balance_due = round(max(0.0, total_billed - insurance_paid), 2)
+    return total_billed, insurance_paid, balance_due
+
+
+@router.post("/patient-statement")
+def generate_patient_statement(body: PatientStatementBody):
+    cid = body.clinic_id.strip()
+    pid = body.patient_id.strip()
+    delivery = (body.delivery or "download").strip().lower()
+    if not cid or not pid:
+        raise HTTPException(
+            status_code=400, detail="clinic_id and patient_id are required"
+        )
+    if delivery not in ("download", "sms", "both"):
+        raise HTTPException(status_code=400, detail="Invalid delivery option")
+
+    try:
+        claims_resp = (
+            supabase.table("insurance_claims")
+            .select(
+                "id, first_treatment_date, payer_name, cpt_codes, "
+                "total_amount, status"
+            )
+            .eq("clinic_id", cid)
+            .eq("patient_id", pid)
+            .order("first_treatment_date")
+            .execute()
+        )
+        _handle_supabase_error(claims_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "patient statement fetch claims failed clinic_id=%s patient_id=%s",
+            cid,
+            pid,
+        )
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    claims = [r for r in (claims_resp.data or []) if isinstance(r, dict)]
+
+    try:
+        patient_resp = (
+            supabase.table("patients")
+            .select(
+                "id, first_name, last_name, date_of_birth, phone, "
+                "address_line1, address_line2, city, state, zip"
+            )
+            .eq("id", pid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(patient_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("patient statement fetch patient failed patient_id=%s", pid)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    patient_rows = patient_resp.data or []
+    if not patient_rows:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    patient = patient_rows[0]
+
+    try:
+        clinic_resp = (
+            supabase.table("clinics")
+            .select("name, address, phone")
+            .eq("id", cid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(clinic_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("patient statement fetch clinic failed clinic_id=%s", cid)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    clinic_rows = clinic_resp.data or []
+    clinic = clinic_rows[0] if clinic_rows else {}
+
+    total_billed, insurance_paid, balance_due = _patient_statement_totals(claims)
+    adjustments = 0.0
+
+    try:
+        pdf_bytes, filename = build_patient_statement_pdf(
+            clinic=clinic,
+            patient=patient,
+            claims=claims,
+            total_billed=total_billed,
+            insurance_paid=insurance_paid,
+            adjustments=adjustments,
+            balance_due=balance_due,
+        )
+    except Exception as exc:
+        logger.exception(
+            "patient statement pdf generation failed patient_id=%s", pid
+        )
+        raise HTTPException(
+            status_code=500, detail=f"Statement PDF generation failed: {exc}"
+        ) from exc
+
+    sms_sent = False
+    if delivery in ("sms", "both"):
+        phone = str(patient.get("phone") or "").strip()
+        if not phone:
+            raise HTTPException(
+                status_code=400,
+                detail="Patient has no phone number on file for SMS delivery",
+            )
+        clinic_name = str(clinic.get("name") or "your clinic").strip()
+        clinic_phone = str(clinic.get("phone") or "").strip()
+        first_name = str(patient.get("first_name") or "there").strip() or "there"
+        call_clause = (
+            f"Please call {clinic_phone} to make a payment. "
+            if clinic_phone
+            else "Please call us to make a payment. "
+        )
+        message = (
+            f"Hi {first_name}, your statement from {clinic_name} is ready. "
+            f"Total balance due: {_format_statement_amount(balance_due)}. "
+            f"{call_clause}Reply STOP to opt out."
+        )
+        sid = send_sms(
+            cid,
+            phone,
+            message,
+            patient_id=pid,
+            message_type="patient_statement",
+        )
+        sms_sent = sid is not None
+
+    if delivery == "sms":
+        return {
+            "delivery": delivery,
+            "sms_sent": sms_sent,
+            "total_billed": total_billed,
+            "insurance_paid": insurance_paid,
+            "balance_due": balance_due,
+        }
+
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    if delivery == "both":
+        headers["X-SMS-Sent"] = "true" if sms_sent else "false"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers=headers,
+    )
+
+
+def _format_statement_amount(amount: float) -> str:
+    try:
+        return f"${float(amount):,.2f}"
+    except (TypeError, ValueError):
+        return "$0.00"
