@@ -17,7 +17,6 @@ from app.db import supabase
 from app.routers.superbill_pdf import (
     build_superbill_pdf,
     normalize_cpt_codes,
-    sanitize_group_number,
 )
 
 router = APIRouter()
@@ -1602,8 +1601,18 @@ def generate_superbill(body: SuperbillBody):
     if not patient:
         patient = _fetch_patient_for_claim(claim.get("patient_id")) or {}
 
-    sanitized_group = sanitize_group_number(patient.get("insurance_group_number"))
-    patient = {**patient, "insurance_group_number": sanitized_group}
+    group_number = str(patient.get("insurance_group_number") or "").strip()
+    group_display = (
+        group_number
+        if group_number
+        and group_number.strip()
+        not in ["", "·", "•", "—", "N/A", "null", "None"]
+        else "—"
+    )
+    patient = {
+        **patient,
+        "insurance_group_number": None if group_display == "—" else group_number,
+    }
 
     try:
         clinic_resp = (

@@ -391,7 +391,14 @@ def build_superbill_pdf(
     clinic_phone = f"Phone: {clinic_phone_raw}" if clinic_phone_raw else ""
     clinic_ids = f"NPI: {npi}   Tax ID: {tax_id}"
 
-    group_number = display_field(sanitize_group_number(patient.get("insurance_group_number")))
+    group_number = str(patient.get("insurance_group_number") or "").strip()
+    group_display = (
+        group_number
+        if group_number
+        and group_number.strip()
+        not in ["", "·", "•", "—", "N/A", "null", "None"]
+        else "—"
+    )
 
     cpt_codes = normalize_cpt_codes(claim.get("cpt_codes"))
     if not cpt_codes:
@@ -458,7 +465,7 @@ def build_superbill_pdf(
             ("INSURANCE", display_field(claim.get("payer_name"))),
             ("MEMBER ID", display_field(claim.get("member_id"))),
             ("POLICY #", display_field(claim.get("policy_number"))),
-            ("GROUP #", group_number),
+            ("GROUP #", group_display),
         ],
         cols=2,
     )
