@@ -12,9 +12,85 @@ from app.routers.superbill_pdf import (
     _fmt_money,
     _patient_address,
     display_field,
+    format_letter_date,
     normalize_cpt_codes,
+    pdf_display_value,
+    resolve_claim_number,
     sanitize_group_number,
 )
+
+
+_COVER_PLACEHOLDER_LINES = (
+    "[Provider Letterhead]",
+    "[Date]",
+    "[Address]",
+    "[Provider Name and Title]",
+    "[Contact Information]",
+)
+
+
+def _insurance_address(eob: dict[str, Any]) -> Optional[str]:
+    raw = eob.get("raw_extraction") if isinstance(eob.get("raw_extraction"), dict) else {}
+    for key in (
+        "insurance_company_address",
+        "payer_address",
+        "insurance_address",
+        "address",
+    ):
+        val = str(raw.get(key) or eob.get(key) or "").strip()
+        if val and val.lower() not in ("null", "none", "n/a"):
+            return val
+    return None
+
+
+def clean_cover_letter_body(
+    text: str,
+    *,
+    letter_date: str,
+    provider_name: str,
+    clinic_phone: str,
+    insurance_address: Optional[str] = None,
+) -> str:
+    out = (text or "").strip()
+    replacements = {
+        "[Provider Letterhead]": "",
+        "[Date]": letter_date,
+        "[Address]": insurance_address or "",
+        "[Provider Name and Title]": provider_name,
+        "[Contact Information]": clinic_phone,
+    }
+    for placeholder, value in replacements.items():
+        out = out.replace(placeholder, value)
+
+    lines: list[str] = []
+    for line in out.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            lines.append("")
+            continue
+        if stripped in _COVER_PLACEHOLDER_LINES:
+            continue
+        if stripped.lower() in (
+            "provider letterhead",
+            "date:",
+            "address:",
+            "provider name and title:",
+            "contact information:",
+        ):
+            continue
+        lines.append(line.rstrip())
+
+    paragraphs: list[str] = []
+    current: list[str] = []
+    for line in lines:
+        if line.strip():
+            current.append(line.strip())
+        elif current:
+            paragraphs.append("\n".join(current))
+            current = []
+    if current:
+        paragraphs.append("\n".join(current))
+    return "\n\n".join(p for p in paragraphs if p.strip())
 
 
 def _soap_summary(note: Optional[dict[str, Any]]) -> str:
@@ -138,10 +214,11 @@ def build_resubmission_pdf(
     clinic_name = display_field(clinic.get("name") or clinic.get("brand_name"))
     clinic_address = display_field(clinic.get("address"))
     clinic_phone_raw = str(clinic.get("phone") or "").strip()
-    clinic_phone = display_field(clinic_phone_raw)
+    clinic_phone = pdf_display_value(clinic_phone_raw)
     clinic_ids = f"NPI: {npi}  |  Tax ID: {tax_id}"
 
     today = datetime.now(timezone.utc).strftime("%m/%d/%Y")
+    letter_date = format_letter_date()
     dos = _fmt_date(
         eob.get("date_of_service") or claim.get("first_treatment_date")
     )
@@ -149,10 +226,25 @@ def build_resubmission_pdf(
         f"{patient.get('first_name') or ''} {patient.get('last_name') or ''}".strip()
         or "Patient"
     )
-    insurance_company = display_field(
+    insurance_company = pdf_display_value(
         eob.get("insurance_company") or claim.get("payer_name")
     )
-    claim_number = display_field(claim.get("claim_number"))
+    claim_number = pdf_display_value(
+        resolve_claim_number(claim, eob=eob),
+        fallback="-",
+    )
+    insurance_address = _insurance_address(eob)
+    provider_name = _clinician_display(clinician)
+    if provider_name == "—":
+        provider_name = clinic_name
+
+    cover_letter = clean_cover_letter_body(
+        cover_letter,
+        letter_date=letter_date,
+        provider_name=provider_name,
+        clinic_phone=clinic_phone_raw or clinic_phone,
+        insurance_address=insurance_address,
+    )
 
     group_number = str(patient.get("insurance_group_number") or "").strip()
     group_display = sanitize_group_number(group_number) or "-"
@@ -169,17 +261,21 @@ def build_resubmission_pdf(
 
     builder = SuperbillPdfBuilder(header)
     builder.section_header("Cover Letter")
-    builder.field_grid(
+    cover_fields: list[tuple[str, str]] = [
+        ("DATE", letter_date),
+        ("TO", insurance_company),
+    ]
+    if insurance_address:
+        cover_fields.append(("ADDRESS", insurance_address))
+    cover_fields.extend(
         [
-            ("TO", insurance_company),
-            (
-                "RE",
-                f"Claim Resubmission — {patient_name} — DOS: {dos}",
-            ),
+            ("RE", f"Claim Resubmission — {patient_name} — DOS: {dos}"),
             ("CLAIM #", claim_number),
-        ],
-        cols=1,
+            ("FROM", provider_name),
+            ("CONTACT", clinic_phone),
+        ]
     )
+    builder.field_grid(cover_fields, cols=1)
     builder.body_text(cover_letter)
 
     builder.new_page("RESUBMISSION — ORIGINAL CLAIM")

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import date, datetime, timezone
 from typing import Any, Optional
 
@@ -21,8 +22,13 @@ LINE = (0.8, 0.84, 0.85)
 FONT = "helv"
 FONT_B = "hebo"
 
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
 _PLACEHOLDER_VALUES = frozenset(
-    {"•", "-", "—", "–", "n/a", "na", "none", "null"}
+    {"•", "-", "—", "–", "n/a", "na", "none", "null", "·"}
 )
 
 
@@ -42,6 +48,48 @@ def display_field(value: Any) -> str:
     if not s or s.lower() in _PLACEHOLDER_VALUES:
         return "—"
     return s
+
+
+def pdf_display_value(value: Any, *, fallback: str = "-") -> str:
+    """PDF-safe field value — ASCII fallback instead of em dash / middle dot."""
+    rendered = display_field(value)
+    if rendered == "—":
+        return fallback
+    return rendered
+
+
+def is_uuid(value: Any) -> bool:
+    return bool(_UUID_RE.match(str(value or "").strip()))
+
+
+def resolve_claim_number(
+    claim: dict[str, Any],
+    *,
+    index: int = 0,
+    eob: Optional[dict[str, Any]] = None,
+) -> str:
+    """Formatted claim number for display — matches ClaimsList / SuperbillModal logic."""
+    if eob:
+        raw = eob.get("raw_extraction") if isinstance(eob.get("raw_extraction"), dict) else {}
+        for candidate in (raw.get("claim_number"), eob.get("claim_number")):
+            s = str(candidate or "").strip()
+            if s and s.lower() not in _PLACEHOLDER_VALUES and not is_uuid(s):
+                return s
+
+    stored = str(claim.get("claim_number") or "").strip()
+    if stored and stored.lower() not in _PLACEHOLDER_VALUES and not is_uuid(stored):
+        return stored
+
+    dos = str(claim.get("first_treatment_date") or "")[:10]
+    if dos:
+        return f"CLM-{dos.replace('-', '')}-{index + 1:03d}"
+    cid = str(claim.get("id") or "")
+    return f"CLM-{cid[:8].upper()}" if cid else f"CLM-{index + 1:03d}"
+
+
+def format_letter_date(dt: Optional[datetime] = None) -> str:
+    when = dt or datetime.now(timezone.utc)
+    return f"{when.strftime('%B')} {when.day}, {when.year}"
 
 
 def normalize_cpt_codes(value: Any) -> list[str]:

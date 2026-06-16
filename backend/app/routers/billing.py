@@ -15,10 +15,16 @@ from pydantic import BaseModel, Field
 
 from app.db import supabase
 from app.routers.patient_statement_pdf import build_patient_statement_pdf
-from app.routers.resubmission_pdf import build_resubmission_pdf
+from app.routers.resubmission_pdf import (
+    _insurance_address,
+    build_resubmission_pdf,
+    clean_cover_letter_body,
+)
 from app.routers.superbill_pdf import (
     build_superbill_pdf,
+    format_letter_date,
     normalize_cpt_codes,
+    resolve_claim_number,
 )
 from app.sms import send_sms
 
@@ -1921,6 +1927,9 @@ def _call_claude_resubmission_letter(
     denial_codes: list[str],
     missing_information: list[str],
     soap_note_summary: str,
+    letter_date: str,
+    provider_name: str,
+    clinic_phone: str,
 ) -> str:
     api_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
     if not api_key:
@@ -1944,9 +1953,13 @@ def _call_claude_resubmission_letter(
         f"Missing Information Requested: "
         f"{', '.join(missing_information) if missing_information else '—'}\n"
         f"Clinical Notes Summary: {soap_note_summary}\n\n"
-        "Write a 2-3 paragraph professional letter addressing each denial reason "
-        "with supporting clinical justification. Be specific and reference the "
-        "clinical documentation. Return only the letter text."
+        "Write ONLY 2-3 body paragraphs addressing each denial reason with supporting "
+        "clinical justification. Be specific and reference the clinical documentation.\n\n"
+        "Do NOT include letterhead, date line, recipient address block, salutation block, "
+        "signature block, or any placeholder text in square brackets such as "
+        "[Provider Letterhead], [Date], [Address], [Provider Name and Title], or "
+        "[Contact Information]. Those elements are printed separately on clinic letterhead.\n\n"
+        "Return only the body paragraphs."
     )
 
     client = anthropic.Anthropic(api_key=api_key)
@@ -2163,11 +2176,31 @@ def generate_resubmission_package(body: ResubmissionPackageBody):
     insurance_company = str(
         eob.get("insurance_company") or claim.get("payer_name") or ""
     ).strip() or "Insurance Carrier"
-    claim_number = str(claim.get("claim_number") or claim_id).strip()
+    claim_number = resolve_claim_number(claim, eob=eob)
     dos = str(
         eob.get("date_of_service") or claim.get("first_treatment_date") or ""
     )[:10] or "—"
     soap_summary = _soap_note_summary(clinical_note)
+    letter_date = format_letter_date()
+    provider_name = " ".join(
+        part
+        for part in (
+            str((clinician or {}).get("first_name") or "").strip(),
+            str((clinician or {}).get("last_name") or "").strip(),
+        )
+        if part
+    ).strip()
+    title = str((clinician or {}).get("title") or "").strip()
+    if provider_name and title:
+        provider_display = f"{provider_name}, {title}"
+    elif provider_name:
+        provider_display = provider_name
+    elif title:
+        provider_display = title
+    else:
+        provider_display = str(clinic.get("name") or clinic.get("brand_name") or "Provider").strip()
+    clinic_phone = str(clinic.get("phone") or "").strip()
+    insurance_address = _insurance_address(eob)
 
     try:
         cover_letter = _call_claude_resubmission_letter(
@@ -2181,6 +2214,16 @@ def generate_resubmission_package(body: ResubmissionPackageBody):
             denial_codes=denial_codes,
             missing_information=missing_information,
             soap_note_summary=soap_summary,
+            letter_date=letter_date,
+            provider_name=provider_display,
+            clinic_phone=clinic_phone,
+        )
+        cover_letter = clean_cover_letter_body(
+            cover_letter,
+            letter_date=letter_date,
+            provider_name=provider_display,
+            clinic_phone=clinic_phone,
+            insurance_address=insurance_address,
         )
     except Exception as exc:
         logger.exception("resubmission cover letter failed claim_id=%s", claim_id)
@@ -2231,7 +2274,7 @@ def generate_resubmission_package(body: ResubmissionPackageBody):
         pdf_bytes, filename = build_resubmission_pdf(
             clinic=clinic,
             patient=patient,
-            claim=claim,
+            claim={**claim, "claim_number": claim_number},
             clinician=clinician,
             eob=eob,
             cover_letter=cover_letter,
