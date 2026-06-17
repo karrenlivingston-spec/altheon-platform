@@ -18,6 +18,7 @@ import {
   DS_TR,
 } from "@/app/admin/designSystem";
 import ClaimDetailModal from "@/components/admin/billing/ClaimDetailModal";
+import BillingSubNav from "@/components/admin/billing/BillingSubNav";
 import CollectionRateBar from "@/components/admin/billing/CollectionRateBar";
 import {
   InsuranceClaimDetail,
@@ -259,6 +260,8 @@ export default function PayerSummaryPage() {
           Collections performance by insurance carrier
         </p>
       </div>
+
+      <BillingSubNav />
 
       {error ? (
         <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">

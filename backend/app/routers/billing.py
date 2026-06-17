@@ -27,8 +27,11 @@ from app.routers.superbill_pdf import (
     resolve_claim_number,
 )
 from app.sms import send_sms
+from routers.fee_schedule import ClinicUserDep
 
 router = APIRouter()
+
+MEDICARE_CAP_DOLLARS = 2480.0
 logger = logging.getLogger(__name__)
 
 STEDI_SUBMIT_URL = (
@@ -1429,6 +1432,106 @@ def payer_summary_report(clinic_id: str = Query(...)):
     except Exception as exc:
         logger.exception("payer_summary_report failed clinic_id=%s", cid)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/benefits-ledger")
+def clinic_benefits_ledger(clinic: ClinicUserDep):
+    """Insurance utilization grouped by patient and payer (clinic-wide)."""
+    cid = clinic.clinic_id
+    try:
+        resp = (
+            supabase.table("insurance_claims")
+            .select(
+                "patient_id, payer_name, total_amount, status, "
+                "patients(first_name, last_name)"
+            )
+            .eq("clinic_id", cid)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+
+        groups: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in resp.data or []:
+            if not isinstance(row, dict):
+                continue
+            pid = str(row.get("patient_id") or "").strip()
+            if not pid:
+                continue
+
+            payer = str(row.get("payer_name") or "").strip() or "Unknown"
+            key = (pid, payer)
+
+            patients_raw = row.get("patients")
+            if isinstance(patients_raw, list):
+                patients_raw = patients_raw[0] if patients_raw else {}
+            if not isinstance(patients_raw, dict):
+                patients_raw = {}
+            fn = str(patients_raw.get("first_name") or "").strip()
+            ln = str(patients_raw.get("last_name") or "").strip()
+
+            entry = groups.get(key)
+            if not entry:
+                entry = {
+                    "patient_id": pid,
+                    "patient_name": f"{fn} {ln}".strip() or "—",
+                    "patient_last_name": ln.lower(),
+                    "patient_first_name": fn.lower(),
+                    "payer_name": payer,
+                    "visit_count": 0,
+                    "total_billed": 0.0,
+                    "total_paid": 0.0,
+                }
+                groups[key] = entry
+
+            try:
+                amount = float(row.get("total_amount") or 0)
+            except (TypeError, ValueError):
+                amount = 0.0
+            entry["visit_count"] += 1
+            entry["total_billed"] += amount
+            if str(row.get("status") or "").strip().lower() == "paid":
+                entry["total_paid"] += amount
+
+        sorted_entries = sorted(
+            groups.values(),
+            key=lambda entry: (
+                str(entry.get("patient_last_name") or ""),
+                str(entry.get("patient_first_name") or ""),
+                str(entry.get("payer_name") or "").lower(),
+            ),
+        )
+        out: list[dict[str, Any]] = []
+        for entry in sorted_entries:
+            payer_name = str(entry["payer_name"])
+            is_medicare = "medicare" in payer_name.lower()
+            total_billed = round(float(entry["total_billed"]), 2)
+            total_paid = round(float(entry["total_paid"]), 2)
+            medicare_cap_used = total_billed if is_medicare else None
+            medicare_cap_remaining = (
+                round(max(0.0, MEDICARE_CAP_DOLLARS - total_billed), 2)
+                if is_medicare
+                else None
+            )
+            out.append(
+                {
+                    "patient_id": entry["patient_id"],
+                    "patient_name": entry["patient_name"],
+                    "payer_name": payer_name,
+                    "visit_count": int(entry["visit_count"]),
+                    "total_billed": total_billed,
+                    "total_paid": total_paid,
+                    "is_medicare": is_medicare,
+                    "medicare_cap_used": medicare_cap_used,
+                    "medicare_cap_remaining": medicare_cap_remaining,
+                }
+            )
+
+        return out
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("clinic_benefits_ledger failed clinic_id=%s", cid)
+        return []
 
 
 @router.post("/insurance-verification")

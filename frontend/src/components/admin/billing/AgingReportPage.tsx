@@ -18,6 +18,7 @@ import {
 } from "@/app/admin/designSystem";
 import NewClaimModal from "@/components/admin/appointments/NewClaimModal";
 import AgingDonut from "@/components/admin/billing/AgingDonut";
+import BillingSubNav from "@/components/admin/billing/BillingSubNav";
 import ClaimDetailModal from "@/components/admin/billing/ClaimDetailModal";
 import {
   AGING_BUCKET_META,
@@ -234,6 +235,8 @@ export default function AgingReportPage() {
           Outstanding receivables by age bucket
         </p>
       </div>
+
+      <BillingSubNav />
 
       {error ? (
         <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">

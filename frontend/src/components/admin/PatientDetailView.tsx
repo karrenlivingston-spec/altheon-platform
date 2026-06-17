@@ -42,7 +42,7 @@ const NY = "America/New_York";
 const SECONDARY_STAGGER_MS = 200;
 const TAB_ACCENT = "var(--color-primary, #0D9488)";
 
-type PageTab =
+export type PageTab =
   | "overview"
   | "appointments"
   | "clinical"
@@ -276,6 +276,7 @@ export type PatientDetailViewProps = {
   patientId: string;
   clinicId: string;
   embedded?: boolean;
+  initialTab?: PageTab;
   onBack?: () => void;
 };
 
@@ -283,6 +284,7 @@ export function PatientDetailView({
   patientId,
   clinicId,
   embedded = false,
+  initialTab,
   onBack,
 }: PatientDetailViewProps) {
   const [patient, setPatient] = useState<PatientRecord | null>(null);
@@ -309,7 +311,7 @@ export function PatientDetailView({
   const [actionError, setActionError] = useState<string | null>(null);
   const [editMode, setEditMode] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
-  const [pageTab, setPageTab] = useState<PageTab>("overview");
+  const [pageTab, setPageTab] = useState<PageTab>(initialTab ?? "overview");
   const [eobHighlightDocId, setEobHighlightDocId] = useState<string | null>(null);
   const [piCasesEverOpened, setPiCasesEverOpened] = useState(false);
   const [headerStats, setHeaderStats] = useState<PatientHeaderStats | null>(null);
@@ -497,7 +499,7 @@ export function PatientDetailView({
     setPatientLoadError(null);
     setPatient(null);
     setDraft(null);
-    setPageTab("overview");
+    setPageTab(initialTab ?? "overview");
     setHeaderStats(null);
     setPiCasesEverOpened(false);
     setPiRows([]);
@@ -548,7 +550,7 @@ export function PatientDetailView({
     return () => {
       cancelled = true;
     };
-  }, [patientId, clinicId]);
+  }, [patientId, clinicId, initialTab]);
 
   useEffect(() => {
     if (!patientReady || !patientId || !clinicId) return;

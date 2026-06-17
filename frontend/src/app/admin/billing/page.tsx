@@ -15,6 +15,7 @@ import {
 import NewClaimModal from "@/components/admin/appointments/NewClaimModal";
 import AgingDonut from "@/components/admin/billing/AgingDonut";
 import BillingMetrics from "@/components/admin/billing/BillingMetrics";
+import BillingSubNav from "@/components/admin/billing/BillingSubNav";
 import ClaimDetailModal from "@/components/admin/billing/ClaimDetailModal";
 import ClaimsAction from "@/components/admin/billing/ClaimsAction";
 import ClaimsList, { type ClaimsFilter } from "@/components/admin/billing/ClaimsList";
@@ -372,6 +373,8 @@ export default function AdminBillingPage() {
           </button>
         </div>
       </div>
+
+      <BillingSubNav />
 
       {error ? (
         <div className="mb-6 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
