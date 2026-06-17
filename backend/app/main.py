@@ -56,6 +56,7 @@ from routers.billing_dashboard import router as billing_dashboard_router
 from routers.dashboard import router as dashboard_router
 from routers.patient_header import router as patient_header_router
 from routers.plan_of_care import router as plan_of_care_router
+from routers.analytics_router import router as analytics_router
 
 load_dotenv()
 
@@ -171,6 +172,7 @@ app.include_router(dme_router.router, prefix="", tags=["dme"])
 app.include_router(groups_router.router, prefix="/groups", tags=["groups"])
 app.include_router(groups_router.patients_groups_router, tags=["groups"])
 app.include_router(superadmin_router.router, prefix="/superadmin", tags=["superadmin"])
+app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
 
 
 @app.get("/")

@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import {
   LayoutDashboard,
+  BarChart2,
   CalendarDays,
   ChevronDown,
   Scale,
@@ -119,6 +120,8 @@ function AdminAuthenticatedShellInner({
 
   const roleReady = !clinicLoading;
   const isSuperAdmin = roleReady && role === "super_admin";
+  const isPlatformAnalyticsAdmin =
+    roleReady && (role === "super_admin" || role === "platform_admin");
 
   function isNavLinkActive(href: string): boolean {
     if (href === "/dashboard/clinics") {
@@ -308,6 +311,21 @@ function AdminAuthenticatedShellInner({
                 Overview
               </span>
             </Link>
+            {isPlatformAnalyticsAdmin ? (
+              <Link
+                href="/admin/analytics"
+                className={navLinkClass("/admin/analytics")}
+                onClick={() => setSidebarOpen(false)}
+              >
+                <span className="flex items-center gap-3">
+                  <BarChart2
+                    className={navIconClass("/admin/analytics")}
+                    aria-hidden
+                  />
+                  Analytics
+                </span>
+              </Link>
+            ) : null}
             <Link
               href="/admin/appointments"
               className={navLinkClass("/admin/appointments")}
