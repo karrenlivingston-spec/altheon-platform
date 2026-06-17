@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { Eye, MoreHorizontal } from "lucide-react";
+import { Eye, FileText, Trash2 } from "lucide-react";
 
 import {
   DS_CARD,
@@ -14,7 +13,6 @@ import {
 } from "@/app/admin/designSystem";
 import {
   BillingClaimRow,
-  CLAIM_STATUS_OPTIONS,
   claimStatusBadgeClass,
   claimStatusLabel,
   formatUsdFromCentsPrecise,
@@ -44,9 +42,8 @@ type ClaimsListProps = {
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: number) => void;
   onView: (claim: BillingClaimRow) => void;
-  onEdit: (claim: BillingClaimRow) => void;
+  onSuperbill: (claim: BillingClaimRow) => void;
   onDelete: (claim: BillingClaimRow) => void;
-  onStatusChange: (claim: BillingClaimRow, status: string) => void;
 };
 
 const TABS: { key: ClaimsFilter; label: string; countKey: string }[] = [
@@ -67,6 +64,9 @@ function formatSubmitted(createdAt: string | null | undefined): string {
   return formatDate(createdAt);
 }
 
+const iconBtn =
+  "rounded p-1.5 text-gray-500 transition-colors hover:bg-gray-100";
+
 export default function ClaimsList({
   claims,
   total,
@@ -83,24 +83,10 @@ export default function ClaimsList({
   onPageChange,
   onPageSizeChange,
   onView,
-  onEdit,
+  onSuperbill,
   onDelete,
-  onStatusChange,
 }: ClaimsListProps) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  const [menuId, setMenuId] = useState<string | null>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!menuId) return;
-    function onDocMouseDown(e: MouseEvent) {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuId(null);
-      }
-    }
-    document.addEventListener("mousedown", onDocMouseDown);
-    return () => document.removeEventListener("mousedown", onDocMouseDown);
-  }, [menuId]);
 
   return (
     <div className={DS_CARD}>
@@ -142,141 +128,114 @@ export default function ClaimsList({
         ))}
       </div>
 
-      <div className={DS_TABLE_WRAP}>
-        <table className="min-w-full divide-y divide-gray-100">
+      <div className={`${DS_TABLE_WRAP} max-w-full overflow-x-auto`}>
+        <table className="min-w-[72rem] w-full divide-y divide-gray-100">
           <thead className={DS_TABLE_HEAD}>
             <tr>
-              <th className={DS_TH}>Claim #</th>
-              <th className={DS_TH}>Patient</th>
-              <th className={DS_TH}>Payer</th>
-              <th className={DS_TH}>DOS</th>
-              <th className={DS_TH}>Charges</th>
-              <th className={DS_TH}>Status</th>
-              <th className={DS_TH}>Submitted</th>
-              <th className={DS_TH}>Paid/Adjusted</th>
-              <th className={DS_TH}>Balance</th>
-              <th className={DS_TH}>Actions</th>
+              <th className={`${DS_TH} whitespace-nowrap`}>Claim #</th>
+              <th className={`${DS_TH} whitespace-nowrap`}>Patient</th>
+              <th className={`${DS_TH} whitespace-nowrap`}>Payer</th>
+              <th className={`${DS_TH} whitespace-nowrap`}>DOS</th>
+              <th className={`${DS_TH} whitespace-nowrap`}>Charges</th>
+              <th className={`${DS_TH} whitespace-nowrap`}>Status</th>
+              <th className={`${DS_TH} whitespace-nowrap`}>Submitted</th>
+              <th className={`${DS_TH} whitespace-nowrap`}>Paid/Adjusted</th>
+              <th className={`${DS_TH} whitespace-nowrap`}>Balance</th>
+              <th
+                className={`${DS_TH} w-24 min-w-24 whitespace-nowrap text-right`}
+              >
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={10} className="px-6 py-12 text-center text-sm text-gray-500">
+                <td
+                  colSpan={10}
+                  className="px-6 py-12 text-center text-sm text-gray-500"
+                >
                   Loading claims…
                 </td>
               </tr>
             ) : claims.length === 0 ? (
               <tr>
-                <td colSpan={10} className="px-6 py-12 text-center text-sm text-gray-500">
+                <td
+                  colSpan={10}
+                  className="px-6 py-12 text-center text-sm text-gray-500"
+                >
                   No claims match your filters
                 </td>
               </tr>
             ) : (
-              claims.map((claim) => {
-                const isDraft =
-                  String(claim.status ?? "").toLowerCase() === "draft";
-                const currentStatus = String(claim.status ?? "").toLowerCase();
-
-                return (
-                  <tr key={claim.id} className={DS_TR}>
-                    <td className={`${DS_TD_PRIMARY} font-mono text-xs`}>
-                      {claim.claim_number}
-                    </td>
-                    <td className={DS_TD_PRIMARY}>{claim.patient_name}</td>
-                    <td className={DS_TD_PRIMARY}>{claim.insurance_carrier}</td>
-                    <td className={DS_TD_PRIMARY}>
-                      {formatDate(claim.date_of_service)}
-                    </td>
-                    <td className={DS_TD_PRIMARY}>
-                      {formatUsdFromCentsPrecise(claim.total_billed_cents)}
-                    </td>
-                    <td className={DS_TD_PRIMARY}>
-                      <span className={claimStatusBadgeClass(claim.status)}>
-                        {claimStatusLabel(claim.status)}
-                      </span>
-                    </td>
-                    <td className={DS_TD_PRIMARY}>
-                      {formatSubmitted(claim.created_at)}
-                    </td>
-                    <td className={DS_TD_PRIMARY}>
-                      {formatUsdFromCentsPrecise(claim.amount_paid_cents)}
-                    </td>
-                    <td className={DS_TD_PRIMARY}>
-                      {formatUsdFromCentsPrecise(claim.amount_remaining_cents)}
-                    </td>
-                    <td className={`${DS_TD_PRIMARY} relative`}>
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => onView(claim)}
-                          className="rounded p-1 text-gray-500 hover:bg-gray-100"
-                          aria-label="View claim"
-                        >
-                          <Eye className="h-4 w-4" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setMenuId(menuId === claim.id ? null : claim.id)
-                          }
-                          className="rounded p-1 text-gray-500 hover:bg-gray-100"
-                          aria-label="More actions"
-                        >
-                          <MoreHorizontal className="h-4 w-4" />
-                        </button>
-                      </div>
-                      {menuId === claim.id ? (
-                        <div
-                          ref={menuRef}
-                          className="absolute right-0 top-8 z-20 min-w-[180px] rounded-lg border border-gray-200 bg-white py-1 text-left shadow-lg"
-                        >
-                          <button
-                            type="button"
-                            className="block w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-gray-50"
-                            onClick={() => {
-                              setMenuId(null);
-                              onEdit(claim);
-                            }}
-                          >
-                            Edit
-                          </button>
-                          {isDraft ? (
-                            <button
-                              type="button"
-                              className="block w-full px-3 py-2 text-left text-sm text-red-600 hover:bg-red-50"
-                              onClick={() => {
-                                setMenuId(null);
-                                onDelete(claim);
-                              }}
-                            >
-                              Delete
-                            </button>
-                          ) : null}
-                          <div className="my-1 border-t border-gray-100" />
-                          <p className="px-3 py-1 text-xs font-medium text-gray-400">
-                            Change status
-                          </p>
-                          {CLAIM_STATUS_OPTIONS.filter(
-                            (s) => s !== currentStatus,
-                          ).map((status) => (
-                            <button
-                              key={status}
-                              type="button"
-                              className="block w-full px-3 py-2 text-left text-sm text-gray-800 hover:bg-gray-50"
-                              onClick={() => {
-                                setMenuId(null);
-                                onStatusChange(claim, status);
-                              }}
-                            >
-                              {claimStatusLabel(status)}
-                            </button>
-                          ))}
-                        </div>
-                      ) : null}
-                    </td>
-                  </tr>
-                );
-              })
+              claims.map((claim) => (
+                <tr key={claim.id} className={DS_TR}>
+                  <td
+                    className={`${DS_TD_PRIMARY} whitespace-nowrap font-mono text-xs`}
+                  >
+                    {claim.claim_number}
+                  </td>
+                  <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
+                    {claim.patient_name}
+                  </td>
+                  <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
+                    {claim.insurance_carrier}
+                  </td>
+                  <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
+                    {formatDate(claim.date_of_service)}
+                  </td>
+                  <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
+                    {formatUsdFromCentsPrecise(claim.total_billed_cents)}
+                  </td>
+                  <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
+                    <span className={claimStatusBadgeClass(claim.status)}>
+                      {claimStatusLabel(claim.status)}
+                    </span>
+                  </td>
+                  <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
+                    {formatSubmitted(claim.created_at)}
+                  </td>
+                  <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
+                    {formatUsdFromCentsPrecise(claim.amount_paid_cents)}
+                  </td>
+                  <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
+                    {formatUsdFromCentsPrecise(claim.amount_remaining_cents)}
+                  </td>
+                  <td
+                    className={`${DS_TD_PRIMARY} w-24 min-w-24 whitespace-nowrap`}
+                  >
+                    <div className="flex items-center justify-end gap-0.5">
+                      <button
+                        type="button"
+                        onClick={() => onView(claim)}
+                        className={iconBtn}
+                        aria-label="View claim"
+                        title="View"
+                      >
+                        <Eye className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onSuperbill(claim)}
+                        className={iconBtn}
+                        aria-label="Generate superbill"
+                        title="Superbill"
+                      >
+                        <FileText className="h-4 w-4" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onDelete(claim)}
+                        className="rounded p-1.5 text-red-600 transition-colors hover:bg-red-50"
+                        aria-label="Delete claim"
+                        title="Delete"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))
             )}
           </tbody>
         </table>

@@ -217,7 +217,7 @@ export default function AdminBillingPage() {
   async function handleDeleteClaim(claim: BillingClaimRow) {
     const label = claim.claim_number || claim.id;
     const ok = window.confirm(
-      `Delete draft claim ${label}? This cannot be undone.`,
+      `Delete claim ${label}? This cannot be undone.`,
     );
     if (!ok) return;
 
@@ -245,19 +245,21 @@ export default function AdminBillingPage() {
     }
   }
 
-  async function handleStatusChange(claim: BillingClaimRow, status: string) {
+  async function handleSuperbillForClaim(claim: BillingClaimRow) {
+    if (!clinicId) return;
     try {
-      const res = await fetch(
-        `${API_BASE}/billing/claims/${encodeURIComponent(claim.id)}`,
-        {
-          method: "PATCH",
-          headers: {
-            ...(await authHeaders()),
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ status }),
+      const res = await fetch(`${API_BASE}/billing/superbill`, {
+        method: "POST",
+        headers: {
+          ...(await authHeaders()),
+          "Content-Type": "application/json",
         },
-      );
+        body: JSON.stringify({
+          clinic_id: clinicId,
+          claim_id: claim.id,
+        }),
+      });
+
       if (!res.ok) {
         const json: unknown = await res.json().catch(() => ({}));
         const detail =
@@ -266,14 +268,26 @@ export default function AdminBillingPage() {
           "detail" in json &&
           typeof (json as { detail: unknown }).detail === "string"
             ? (json as { detail: string }).detail
-            : `Error ${res.status}`;
+            : "Could not generate superbill";
         showError(detail);
         return;
       }
-      showSuccess("Claim status updated");
-      void fetchDashboard({ silent: true });
+
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const filename = match?.[1] ?? "superbill.pdf";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      showSuccess("Superbill generated successfully");
     } catch {
-      showError("Could not update claim status");
+      showError("Could not generate superbill");
     }
   }
 
@@ -454,12 +468,9 @@ export default function AdminBillingPage() {
               setPageSize(size);
               setPage(0);
             }}
-            onView={(claim) => setDetailClaim(claim)}
-            onEdit={openEditClaim}
+            onView={openEditClaim}
+            onSuperbill={(claim) => void handleSuperbillForClaim(claim)}
             onDelete={(claim) => void handleDeleteClaim(claim)}
-            onStatusChange={(claim, status) =>
-              void handleStatusChange(claim, status)
-            }
           />
         </div>
 
