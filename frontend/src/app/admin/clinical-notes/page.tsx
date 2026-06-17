@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ChevronDown, ChevronRight, Filter, Mic, Search } from "lucide-react";
+import { ChevronDown, ChevronRight, Filter, Mic, Search, X } from "lucide-react";
 
 import {
   DS_CARD,
@@ -597,6 +597,11 @@ export default function AdminClinicalNotesPage() {
     pendingScribeTestsRef.current = [];
   }
 
+  function closeEditor() {
+    setEditorOpen(false);
+    resetEditor();
+  }
+
   function openNewNote() {
     resetEditor();
     setEditorTab(1);
@@ -1183,12 +1188,22 @@ export default function AdminClinicalNotesPage() {
             aria-labelledby="cn-editor-title"
           >
             <div className="shrink-0 border-b border-gray-100 pb-4">
-              <h2
-                id="cn-editor-title"
-                className="text-lg font-semibold text-gray-900"
-              >
-                {editingId ? "Edit clinical note" : "New clinical note"}
-              </h2>
+              <div className="flex items-start justify-between gap-4">
+                <h2
+                  id="cn-editor-title"
+                  className="text-lg font-semibold text-gray-900"
+                >
+                  {editingId ? "Edit clinical note" : "New clinical note"}
+                </h2>
+                <button
+                  type="button"
+                  onClick={closeEditor}
+                  className="rounded-lg p-1 text-gray-500 hover:bg-gray-100"
+                  aria-label="Close"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
               <nav
                 className="mt-4 flex flex-wrap gap-1"
                 aria-label="Editor steps"
@@ -1542,16 +1557,6 @@ export default function AdminClinicalNotesPage() {
                       <p className="rounded-lg border border-gray-100 bg-gray-50 px-4 py-6 text-center text-sm text-gray-600">
                         No AI review issues for this draft.
                       </p>
-                      <div className="flex justify-end">
-                        <button
-                          type="button"
-                          disabled={editorBusy}
-                          onClick={() => void submitForAiReview()}
-                          className={`${DS_PRIMARY_BTN} min-h-[44px] disabled:opacity-60`}
-                        >
-                          {editorBusy ? "Working…" : "Submit for AI Review"}
-                        </button>
-                      </div>
                     </>
                   )}
                 </div>
@@ -1616,31 +1621,43 @@ export default function AdminClinicalNotesPage() {
                       </p>
                     </div>
                   ) : null}
-
-                  <div className="flex flex-wrap justify-end gap-2 border-t border-gray-100 pt-4">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setEditorOpen(false);
-                        resetEditor();
-                      }}
-                      className={`${DS_SECONDARY_BTN} min-h-[44px] px-4 py-2.5`}
-                    >
-                      Cancel
-                    </button>
-                    {canEditNote(draftNoteStatus) ? (
-                      <button
-                        type="button"
-                        disabled={editorBusy}
-                        onClick={() => void saveDraft()}
-                        className={`${DS_SECONDARY_BTN} min-h-[44px] px-4 py-2.5 disabled:opacity-60`}
-                      >
-                        {editorBusy ? "Saving…" : "Save Draft"}
-                      </button>
-                    ) : null}
-                  </div>
                 </div>
               ) : null}
+            </div>
+
+            <div className="shrink-0 border-t border-gray-100 pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={closeEditor}
+                  className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                >
+                  Cancel
+                </button>
+                <div className="flex flex-wrap gap-2">
+                  {editorTab === 5 &&
+                  draftNoteStatus !== "ai_flagged" ? (
+                    <button
+                      type="button"
+                      disabled={editorBusy}
+                      onClick={() => void submitForAiReview()}
+                      className={`${DS_PRIMARY_BTN} min-h-[44px] disabled:opacity-60`}
+                    >
+                      {editorBusy ? "Working…" : "Submit for AI Review"}
+                    </button>
+                  ) : null}
+                  {editorTab === 6 && canEditNote(draftNoteStatus) ? (
+                    <button
+                      type="button"
+                      disabled={editorBusy}
+                      onClick={() => void saveDraft()}
+                      className={`${DS_SECONDARY_BTN} min-h-[44px] px-4 py-2.5 disabled:opacity-60`}
+                    >
+                      {editorBusy ? "Saving…" : "Save Draft"}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
             </div>
           </div>
         </div>
