@@ -698,7 +698,7 @@ def _build_analytics_pdf(
     )
     page.insert_text(
         fitz.Point(MARGIN, y + 18),
-        "KJL Creative Solutions / Altheon",
+        "Altheon",
         fontsize=10,
         fontname=FONT_B,
         color=DARK,
