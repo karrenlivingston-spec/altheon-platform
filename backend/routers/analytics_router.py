@@ -504,98 +504,83 @@ def _clinician_name(row: dict[str, Any]) -> str:
 
 
 def _load_clinic_clinicians(clinic_id: str) -> list[dict[str, Any]]:
-    today = _eastern_today()
-    month_start = _month_start(today)
-    biz_days = _business_days_elapsed(month_start, today)
-
-    clinicians: list[dict[str, Any]] = []
     try:
+        today = _eastern_today()
+        month_start = _month_start(today)
+        biz_days = _business_days_elapsed(month_start, today)
+        month_start_iso = (
+            datetime.combine(month_start, datetime.min.time(), tzinfo=_NY)
+            .astimezone(timezone.utc)
+            .isoformat()
+        )
+        month_end_iso = (
+            datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=_NY)
+            .astimezone(timezone.utc)
+            .isoformat()
+        )
+
         cl_resp = (
             supabase.table("clinicians")
-            .select("id,first_name,last_name,is_active")
+            .select("id,first_name,last_name")
             .eq("clinic_id", clinic_id)
+            .eq("is_active", True)
             .execute()
         )
         clinicians = [r for r in (cl_resp.data or []) if isinstance(r, dict)]
+
+        out: list[dict[str, Any]] = []
+        for row in clinicians:
+            cid = str(row.get("id") or "").strip()
+            if not cid:
+                continue
+
+            appts_this = 0
+            notes_signed = 0
+            try:
+                appt_resp = (
+                    supabase.table("appointments")
+                    .select("id", count="exact")
+                    .eq("clinician_id", cid)
+                    .gte("start_time", month_start_iso)
+                    .lt("start_time", month_end_iso)
+                    .limit(1)
+                    .execute()
+                )
+                appts_this = int(
+                    getattr(appt_resp, "count", None) or len(appt_resp.data or [])
+                )
+            except Exception:
+                traceback.print_exc()
+
+            try:
+                notes_resp = (
+                    supabase.table("clinical_notes")
+                    .select("id", count="exact")
+                    .eq("clinician_id", cid)
+                    .eq("status", "signed")
+                    .limit(1)
+                    .execute()
+                )
+                notes_signed = int(
+                    getattr(notes_resp, "count", None) or len(notes_resp.data or [])
+                )
+            except Exception:
+                traceback.print_exc()
+
+            out.append(
+                {
+                    "clinician_name": _clinician_name(row),
+                    "appointments_this_month": appts_this,
+                    "notes_signed": notes_signed,
+                    "avg_per_day": _round1(appts_this / biz_days),
+                }
+            )
+
+        out.sort(key=lambda r: (-r["appointments_this_month"], r["clinician_name"]))
+        return out
     except Exception:
         traceback.print_exc()
         return []
-
-    appts_this_by_clinician: dict[str, int] = {}
-    try:
-        appt_resp = (
-            supabase.table("appointments")
-            .select("clinician_id,start_time")
-            .eq("clinic_id", clinic_id)
-            .execute()
-        )
-        for row in appt_resp.data or []:
-            if not isinstance(row, dict):
-                continue
-            if not _in_month(row.get("start_time"), month_start):
-                continue
-            cid = str(row.get("clinician_id") or "").strip()
-            if cid:
-                appts_this_by_clinician[cid] = appts_this_by_clinician.get(cid, 0) + 1
-    except Exception:
-        traceback.print_exc()
-
-    notes_by_clinician: dict[str, int] = {}
-    try:
-        notes_resp = (
-            supabase.table("clinical_notes")
-            .select("appointment_id,status")
-            .eq("clinic_id", clinic_id)
-            .eq("status", "signed")
-            .execute()
-        )
-        signed_rows = [r for r in (notes_resp.data or []) if isinstance(r, dict)]
-        appt_ids = list(
-            {
-                str(r.get("appointment_id") or "").strip()
-                for r in signed_rows
-                if r.get("appointment_id")
-            }
-        )
-        appt_to_clinician: dict[str, str] = {}
-        if appt_ids:
-            ap_lookup = (
-                supabase.table("appointments")
-                .select("id,clinician_id")
-                .in_("id", appt_ids)
-                .execute()
-            )
-            for row in ap_lookup.data or []:
-                if not isinstance(row, dict):
-                    continue
-                aid = str(row.get("id") or "").strip()
-                clid = str(row.get("clinician_id") or "").strip()
-                if aid and clid:
-                    appt_to_clinician[aid] = clid
-        for row in signed_rows:
-            aid = str(row.get("appointment_id") or "").strip()
-            clid = appt_to_clinician.get(aid, "")
-            if clid:
-                notes_by_clinician[clid] = notes_by_clinician.get(clid, 0) + 1
-    except Exception:
-        traceback.print_exc()
-
-    out: list[dict[str, Any]] = []
-    for row in clinicians:
-        cid = str(row.get("id") or "").strip()
-        if not cid:
-            continue
-        appts_this = int(appts_this_by_clinician.get(cid, 0))
-        out.append(
-            {
-                "clinician_name": _clinician_name(row),
-                "appointments_this_month": appts_this,
-                "notes_signed": int(notes_by_clinician.get(cid, 0)),
-                "avg_per_day": _round1(appts_this / biz_days),
-            }
-        )
-    out.sort(key=lambda r: (-r["appointments_this_month"], r["clinician_name"]))
-    return out
 
 
 def _fmt_money(value: Any) -> str:
