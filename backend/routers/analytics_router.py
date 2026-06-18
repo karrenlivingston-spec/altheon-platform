@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import traceback
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Literal, Optional
 from zoneinfo import ZoneInfo
 
@@ -503,25 +503,164 @@ def _clinician_name(row: dict[str, Any]) -> str:
     return name or "Unknown"
 
 
+def _clinician_display_name(row: dict[str, Any]) -> str:
+    name = _clinician_name(row)
+    if name == "Unknown":
+        return name
+    title = str(row.get("title") or "").strip().upper()
+    if title in ("DC", "MD", "DO", "DPT", "PT"):
+        return f"Dr. {name}"
+    return name
+
+
+def _next_month_start(d: date) -> date:
+    if d.month == 12:
+        return date(d.year + 1, 1, 1)
+    return date(d.year, d.month + 1, 1)
+
+
+def _current_month_utc_bounds() -> tuple[str, str]:
+    today = _eastern_today()
+    month_start = _month_start(today)
+    next_month = _next_month_start(today)
+    start_utc = (
+        datetime.combine(month_start, time(0, 0), tzinfo=_NY)
+        .astimezone(timezone.utc)
+        .isoformat()
+    )
+    end_utc = (
+        datetime.combine(next_month, time(0, 0), tzinfo=_NY)
+        .astimezone(timezone.utc)
+        .isoformat()
+    )
+    return start_utc, end_utc
+
+
+def _days_elapsed_this_month() -> int:
+    today = _eastern_today()
+    return max((today - _month_start(today)).days + 1, 1)
+
+
+def _period_utc_bounds(start: date, end: date) -> tuple[str, str]:
+    start_utc = (
+        datetime.combine(start, time(0, 0), tzinfo=_NY)
+        .astimezone(timezone.utc)
+        .isoformat()
+    )
+    end_utc = (
+        datetime.combine(end + timedelta(days=1), time(0, 0), tzinfo=_NY)
+        .astimezone(timezone.utc)
+        .isoformat()
+    )
+    return start_utc, end_utc
+
+
+def _clinicians_trend_period_range(period: str) -> tuple[date, date]:
+    today = _eastern_today()
+    p = (period or "month").strip().lower()
+    if p == "week":
+        start = today - timedelta(days=6)
+    elif p == "quarter":
+        start = today - timedelta(days=89)
+    elif p == "year":
+        start = today - timedelta(days=364)
+    else:
+        start = _month_start(today)
+    return start, today
+
+
+def _safe_supabase_count(build_query) -> int:
+    try:
+        resp = build_query().limit(1).execute()
+        return int(getattr(resp, "count", None) or 0)
+    except Exception:
+        traceback.print_exc()
+        return 0
+
+
+def _clinician_productivity_row(
+    clinic_id: str,
+    row: dict[str, Any],
+    *,
+    month_start_iso: str,
+    month_end_iso: str,
+    days_elapsed: int,
+) -> dict[str, Any]:
+    clinician_id = str(row.get("id") or "").strip()
+    appointments_this_month = 0
+    completed_this_month = 0
+    notes_this_month = 0
+    notes_signed_this_month = 0
+
+    if clinician_id:
+        appointments_this_month = _safe_supabase_count(
+            lambda: supabase.table("appointments")
+            .select("id", count="exact")
+            .eq("clinic_id", clinic_id)
+            .eq("clinician_id", clinician_id)
+            .gte("start_time", month_start_iso)
+            .lt("start_time", month_end_iso)
+        )
+        completed_this_month = _safe_supabase_count(
+            lambda: supabase.table("appointments")
+            .select("id", count="exact")
+            .eq("clinic_id", clinic_id)
+            .eq("clinician_id", clinician_id)
+            .eq("status", "completed")
+            .gte("start_time", month_start_iso)
+            .lt("start_time", month_end_iso)
+        )
+        notes_this_month = _safe_supabase_count(
+            lambda: supabase.table("clinical_notes")
+            .select("id", count="exact")
+            .eq("clinic_id", clinic_id)
+            .eq("clinician_id", clinician_id)
+            .gte("created_at", month_start_iso)
+        )
+        notes_signed_this_month = _safe_supabase_count(
+            lambda: supabase.table("clinical_notes")
+            .select("id", count="exact")
+            .eq("clinic_id", clinic_id)
+            .eq("clinician_id", clinician_id)
+            .gte("created_at", month_start_iso)
+            .not_.is_("signed_at", "null")
+        )
+
+    completion_rate = (
+        _round1(completed_this_month / appointments_this_month * 100)
+        if appointments_this_month > 0
+        else 0.0
+    )
+    notes_signed_pct = (
+        _round1(notes_signed_this_month / notes_this_month * 100)
+        if notes_this_month > 0
+        else 0.0
+    )
+    avg_appts_per_day = _round1(appointments_this_month / days_elapsed)
+
+    return {
+        "clinician_id": clinician_id,
+        "first_name": str(row.get("first_name") or "").strip(),
+        "last_name": str(row.get("last_name") or "").strip(),
+        "title": str(row.get("title") or "").strip() or None,
+        "appointments_this_month": appointments_this_month,
+        "completed_this_month": completed_this_month,
+        "completion_rate": completion_rate,
+        "notes_this_month": notes_this_month,
+        "notes_signed_this_month": notes_signed_this_month,
+        "notes_signed_pct": notes_signed_pct,
+        "avg_appts_per_day": avg_appts_per_day,
+    }
+
+
 def _load_clinic_clinicians(clinic_id: str) -> list[dict[str, Any]]:
     try:
-        today = _eastern_today()
-        month_start = _month_start(today)
-        biz_days = _business_days_elapsed(month_start, today)
-        month_start_iso = (
-            datetime.combine(month_start, datetime.min.time(), tzinfo=_NY)
-            .astimezone(timezone.utc)
-            .isoformat()
-        )
-        month_end_iso = (
-            datetime.combine(today + timedelta(days=1), datetime.min.time(), tzinfo=_NY)
-            .astimezone(timezone.utc)
-            .isoformat()
-        )
+        month_start_iso, month_end_iso = _current_month_utc_bounds()
+        days_elapsed = _days_elapsed_this_month()
 
         cl_resp = (
             supabase.table("clinicians")
-            .select("id,first_name,last_name")
+            .select("id,first_name,last_name,title")
             .eq("clinic_id", clinic_id)
             .eq("is_active", True)
             .execute()
@@ -530,57 +669,102 @@ def _load_clinic_clinicians(clinic_id: str) -> list[dict[str, Any]]:
 
         out: list[dict[str, Any]] = []
         for row in clinicians:
-            cid = str(row.get("id") or "").strip()
-            if not cid:
+            if not str(row.get("id") or "").strip():
                 continue
-
-            appts_this = 0
-            notes_signed = 0
-            try:
-                appt_resp = (
-                    supabase.table("appointments")
-                    .select("id", count="exact")
-                    .eq("clinician_id", cid)
-                    .gte("start_time", month_start_iso)
-                    .lt("start_time", month_end_iso)
-                    .limit(1)
-                    .execute()
-                )
-                appts_this = int(
-                    getattr(appt_resp, "count", None) or len(appt_resp.data or [])
-                )
-            except Exception:
-                traceback.print_exc()
-
-            try:
-                notes_resp = (
-                    supabase.table("clinical_notes")
-                    .select("id", count="exact")
-                    .eq("clinician_id", cid)
-                    .eq("status", "signed")
-                    .limit(1)
-                    .execute()
-                )
-                notes_signed = int(
-                    getattr(notes_resp, "count", None) or len(notes_resp.data or [])
-                )
-            except Exception:
-                traceback.print_exc()
-
             out.append(
-                {
-                    "clinician_name": _clinician_name(row),
-                    "appointments_this_month": appts_this,
-                    "notes_signed": notes_signed,
-                    "avg_per_day": _round1(appts_this / biz_days),
-                }
+                _clinician_productivity_row(
+                    clinic_id,
+                    row,
+                    month_start_iso=month_start_iso,
+                    month_end_iso=month_end_iso,
+                    days_elapsed=days_elapsed,
+                )
             )
 
-        out.sort(key=lambda r: (-r["appointments_this_month"], r["clinician_name"]))
+        out.sort(
+            key=lambda r: (
+                -int(r.get("appointments_this_month") or 0),
+                str(r.get("last_name") or ""),
+                str(r.get("first_name") or ""),
+            )
+        )
         return out
     except Exception:
         traceback.print_exc()
         return []
+
+
+def _load_clinic_clinicians_trend(clinic_id: str, period: str) -> dict[str, Any]:
+    p = (period or "month").strip().lower()
+    if p not in ("week", "month", "quarter", "year"):
+        p = "month"
+    try:
+        start, end = _clinicians_trend_period_range(p)
+        start_utc, end_utc = _period_utc_bounds(start, end)
+
+        cl_resp = (
+            supabase.table("clinicians")
+            .select("id,first_name,last_name,title")
+            .eq("clinic_id", clinic_id)
+            .eq("is_active", True)
+            .execute()
+        )
+        clinicians = [r for r in (cl_resp.data or []) if isinstance(r, dict)]
+
+        appt_resp = (
+            supabase.table("appointments")
+            .select("clinician_id,start_time")
+            .eq("clinic_id", clinic_id)
+            .gte("start_time", start_utc)
+            .lt("start_time", end_utc)
+            .execute()
+        )
+
+        counts: dict[tuple[str, str], int] = {}
+        for row in appt_resp.data or []:
+            if not isinstance(row, dict):
+                continue
+            cid = str(row.get("clinician_id") or "").strip()
+            ymd = _eastern_ymd(row.get("start_time"))
+            if not cid or not ymd:
+                continue
+            try:
+                d = date.fromisoformat(ymd)
+            except ValueError:
+                continue
+            if start <= d <= end:
+                key = (cid, ymd)
+                counts[key] = counts.get(key, 0) + 1
+
+        clinicians_out: list[dict[str, Any]] = []
+        for row in clinicians:
+            cid = str(row.get("id") or "").strip()
+            if not cid:
+                continue
+            daily: list[dict[str, Any]] = []
+            cursor = start
+            while cursor <= end:
+                key = cursor.isoformat()
+                daily.append(
+                    {
+                        "date": key,
+                        "count": counts.get((cid, key), 0),
+                    }
+                )
+                cursor += timedelta(days=1)
+            clinicians_out.append(
+                {
+                    "clinician_id": cid,
+                    "name": _clinician_display_name(row),
+                    "daily": daily,
+                }
+            )
+
+        clinicians_out.sort(key=lambda r: str(r.get("name") or ""))
+        return {"period": p, "clinicians": clinicians_out}
+    except Exception:
+        traceback.print_exc()
+        return {"period": p, "clinicians": []}
 
 
 def _fmt_money(value: Any) -> str:
@@ -793,6 +977,22 @@ def analytics_clinic_trend(
     except Exception:
         traceback.print_exc()
         return []
+
+
+@router.get("/clinic/{clinic_id}/clinicians/trend")
+def analytics_clinic_clinicians_trend(
+    clinic_id: str,
+    period: Literal["week", "month", "quarter", "year"] = Query(default="month"),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    _require_platform_analytics_admin(authorization)
+    try:
+        return _load_clinic_clinicians_trend(clinic_id, period)
+    except HTTPException:
+        raise
+    except Exception:
+        traceback.print_exc()
+        return {"period": period, "clinicians": []}
 
 
 @router.get("/clinic/{clinic_id}/clinicians")

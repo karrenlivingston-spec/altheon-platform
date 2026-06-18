@@ -13,6 +13,7 @@ import {
   BarChart,
   CartesianGrid,
   LabelList,
+  Legend,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -38,6 +39,8 @@ const API_BASE =
 
 const TEAL = "#0D9488";
 const AMBER = "#F59E0B";
+const CLINICIAN_LINE_COLORS = ["#0d9488", "#6366f1", "#f59e0b", "#f43f5e"];
+const CLINICIAN_TREND_STAGGER_MS = 250;
 
 type TrendPeriod = "week" | "month" | "quarter" | "year";
 
@@ -70,11 +73,34 @@ type TrendPoint = {
   revenue: number;
 };
 
-type ClinicianRow = {
-  clinician_name: string;
+type ClinicianMetrics = {
+  clinician_id: string;
+  first_name: string;
+  last_name: string;
+  title: string | null;
   appointments_this_month: number;
-  notes_signed: number;
-  avg_per_day: number;
+  completed_this_month: number;
+  completion_rate: number;
+  notes_this_month: number;
+  notes_signed_this_month: number;
+  notes_signed_pct: number;
+  avg_appts_per_day: number;
+};
+
+type ClinicianTrendDaily = {
+  date: string;
+  count: number;
+};
+
+type ClinicianTrendSeries = {
+  clinician_id: string;
+  name: string;
+  daily: ClinicianTrendDaily[];
+};
+
+type ClinicianTrendResponse = {
+  period: TrendPeriod | string;
+  clinicians: ClinicianTrendSeries[];
 };
 
 type OverviewResponse = {
@@ -155,6 +181,29 @@ function collectionRateClass(rate: number): string {
   return "text-red-600";
 }
 
+function pctBadgeClass(pct: number): string {
+  if (pct >= 80) {
+    return "inline-flex rounded-full bg-green-50 px-2 py-0.5 text-xs font-medium text-green-700";
+  }
+  if (pct >= 50) {
+    return "inline-flex rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700";
+  }
+  return "inline-flex rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600";
+}
+
+function formatClinicianDisplay(row: ClinicianMetrics): string {
+  const first = (row.first_name ?? "").trim();
+  const last = (row.last_name ?? "").trim();
+  const title = (row.title ?? "").trim();
+  const name = `${first} ${last}`.trim() || "Unknown";
+  const doctorTitles = new Set(["DC", "MD", "DO", "DPT", "PT"]);
+  if (title && doctorTitles.has(title.toUpperCase())) {
+    return `Dr. ${name}`;
+  }
+  if (title) return `${title} ${name}`;
+  return name;
+}
+
 function formatChartDate(iso: string): string {
   const d = new Date(`${iso}T12:00:00`);
   return d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
@@ -223,7 +272,8 @@ function ClinicTrendChart({
         if (!res.ok) throw new Error("Failed to load trend");
         const json = (await res.json()) as TrendPoint[];
         if (!cancelled) setData(Array.isArray(json) ? json : []);
-      } catch {
+      } catch (err) {
+        console.error("Clinic trend load failed:", err);
         if (!cancelled) setData([]);
       } finally {
         if (!cancelled) setLoading(false);
@@ -318,8 +368,8 @@ function ClinicTrendChart({
   );
 }
 
-function ClinicianTable({ clinicId }: { clinicId: string }) {
-  const [rows, setRows] = useState<ClinicianRow[]>([]);
+function ClinicianProductivityTable({ clinicId }: { clinicId: string }) {
+  const [rows, setRows] = useState<ClinicianMetrics[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -331,10 +381,11 @@ function ClinicianTable({ clinicId }: { clinicId: string }) {
           `${API_BASE}/analytics/clinic/${encodeURIComponent(clinicId)}/clinicians`,
           { headers: await authHeaders() },
         );
-        if (!res.ok) throw new Error("Failed to load clinicians");
-        const json = (await res.json()) as ClinicianRow[];
+        if (!res.ok) throw new Error(`Failed to load clinicians (${res.status})`);
+        const json = (await res.json()) as ClinicianMetrics[];
         if (!cancelled) setRows(Array.isArray(json) ? json : []);
-      } catch {
+      } catch (err) {
+        console.error("Clinician productivity load failed:", err);
         if (!cancelled) setRows([]);
       } finally {
         if (!cancelled) setLoading(false);
@@ -347,8 +398,10 @@ function ClinicianTable({ clinicId }: { clinicId: string }) {
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-8">
-        <Loader2 className="h-5 w-5 animate-spin text-[#0D9488]" aria-hidden />
+      <div className="space-y-2 py-4">
+        <SkeletonBlock className="h-10 w-full" />
+        <SkeletonBlock className="h-10 w-full" />
+        <SkeletonBlock className="h-10 w-full" />
       </div>
     );
   }
@@ -362,23 +415,39 @@ function ClinicianTable({ clinicId }: { clinicId: string }) {
   }
 
   return (
-    <div className={DS_TABLE_WRAP}>
-      <table className="min-w-full">
+    <div className={`${DS_TABLE_WRAP} overflow-x-auto`}>
+      <table className="min-w-[56rem] whitespace-nowrap">
         <thead className={DS_TABLE_HEAD}>
           <tr>
             <th className={DS_TH}>Clinician</th>
             <th className={DS_TH}>Appts This Month</th>
-            <th className={DS_TH}>Notes Signed</th>
+            <th className={DS_TH}>Completed</th>
+            <th className={DS_TH}>Completion Rate</th>
+            <th className={DS_TH}>Notes</th>
+            <th className={DS_TH}>Signed</th>
+            <th className={DS_TH}>Signed %</th>
             <th className={DS_TH}>Avg/Day</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row.clinician_name} className={DS_TR}>
-              <td className={DS_TD_PRIMARY}>{row.clinician_name}</td>
+            <tr key={row.clinician_id} className={DS_TR}>
+              <td className={DS_TD_PRIMARY}>{formatClinicianDisplay(row)}</td>
               <td className={DS_TD_PRIMARY}>{row.appointments_this_month}</td>
-              <td className={DS_TD_PRIMARY}>{row.notes_signed}</td>
-              <td className={DS_TD_PRIMARY}>{row.avg_per_day.toFixed(1)}</td>
+              <td className={DS_TD_PRIMARY}>{row.completed_this_month}</td>
+              <td className={DS_TD_PRIMARY}>
+                <span className={pctBadgeClass(row.completion_rate)}>
+                  {row.completion_rate.toFixed(1)}%
+                </span>
+              </td>
+              <td className={DS_TD_PRIMARY}>{row.notes_this_month}</td>
+              <td className={DS_TD_PRIMARY}>{row.notes_signed_this_month}</td>
+              <td className={DS_TD_PRIMARY}>
+                <span className={pctBadgeClass(row.notes_signed_pct)}>
+                  {row.notes_signed_pct.toFixed(1)}%
+                </span>
+              </td>
+              <td className={DS_TD_PRIMARY}>{row.avg_appts_per_day.toFixed(1)}</td>
             </tr>
           ))}
         </tbody>
@@ -387,8 +456,178 @@ function ClinicianTable({ clinicId }: { clinicId: string }) {
   );
 }
 
+function mergeClinicianTrendPoints(
+  clinicians: ClinicianTrendSeries[],
+): Array<{ date: string } & Record<string, number | string>> {
+  const dates = new Set<string>();
+  for (const clinician of clinicians) {
+    for (const point of clinician.daily) {
+      dates.add(point.date);
+    }
+  }
+  return Array.from(dates)
+    .sort()
+    .map((date) => {
+      const row: { date: string } & Record<string, number | string> = { date };
+      for (const clinician of clinicians) {
+        const point = clinician.daily.find((d) => d.date === date);
+        row[clinician.name] = point?.count ?? 0;
+      }
+      return row;
+    });
+}
+
+function ClinicianTrendChart({
+  clinicId,
+  period,
+}: {
+  clinicId: string;
+  period: TrendPeriod;
+}) {
+  const [series, setSeries] = useState<ClinicianTrendSeries[]>([]);
+  const [colorById, setColorById] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      (async () => {
+        setLoading(true);
+        try {
+          const [trendRes, colorsRes] = await Promise.all([
+            fetch(
+              `${API_BASE}/analytics/clinic/${encodeURIComponent(clinicId)}/clinicians/trend?period=${period}`,
+              { headers: await authHeaders() },
+            ),
+            supabase
+              .from("clinicians")
+              .select("id, color")
+              .eq("clinic_id", clinicId)
+              .eq("is_active", true),
+          ]);
+
+          if (!trendRes.ok) {
+            throw new Error(`Failed to load clinician trend (${trendRes.status})`);
+          }
+
+          const json = (await trendRes.json()) as ClinicianTrendResponse;
+          const clinicians = Array.isArray(json.clinicians) ? json.clinicians : [];
+
+          const colors: Record<string, string> = {};
+          if (!colorsRes.error && Array.isArray(colorsRes.data)) {
+            for (const row of colorsRes.data) {
+              const id = String(row.id ?? "").trim();
+              const color = String(row.color ?? "").trim();
+              if (id && color) colors[id] = color;
+            }
+          }
+
+          if (!cancelled) {
+            setSeries(clinicians);
+            setColorById(colors);
+          }
+        } catch (err) {
+          console.error("Clinician trend load failed:", err);
+          if (!cancelled) {
+            setSeries([]);
+            setColorById({});
+          }
+        } finally {
+          if (!cancelled) setLoading(false);
+        }
+      })();
+    }, CLINICIAN_TREND_STAGGER_MS);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [clinicId, period]);
+
+  const chartData = mergeClinicianTrendPoints(series);
+  const hasData =
+    series.length > 0 &&
+    series.some((clinician) => clinician.daily.some((point) => point.count > 0));
+
+  if (loading) {
+    return <SkeletonBlock className="h-56 w-full" />;
+  }
+
+  if (!hasData) {
+    return (
+      <p className="py-12 text-center text-sm text-gray-500">
+        No appointment data for this period.
+      </p>
+    );
+  }
+
+  return (
+    <ResponsiveContainer width="100%" height={260}>
+      <LineChart data={chartData} margin={{ top: 8, right: 12, left: 0, bottom: 0 }}>
+        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+        <XAxis
+          dataKey="date"
+          tickFormatter={formatChartDate}
+          axisLine={false}
+          tickLine={false}
+          tick={{ fill: "#9ca3af", fontSize: 11 }}
+          interval="preserveStartEnd"
+        />
+        <YAxis
+          allowDecimals={false}
+          domain={[0, "auto"]}
+          axisLine={false}
+          tickLine={false}
+          tick={{ fill: "#6b7280", fontSize: 11 }}
+          width={32}
+        />
+        <Tooltip
+          content={({ active, payload, label }) => {
+            if (!active || !payload?.length) return null;
+            const dateLabel =
+              typeof label === "string" ? formatChartDate(label) : String(label ?? "");
+            return (
+              <div className="rounded-lg border border-gray-200 bg-white px-3 py-2 text-xs shadow-md">
+                <p className="mb-1 font-medium text-gray-900">{dateLabel}</p>
+                {payload.map((entry) => (
+                  <p key={String(entry.dataKey)} style={{ color: entry.color }}>
+                    {entry.name}: {Number(entry.value ?? 0)}
+                  </p>
+                ))}
+              </div>
+            );
+          }}
+        />
+        <Legend
+          wrapperStyle={{ fontSize: 12, paddingTop: 8 }}
+          iconType="line"
+          iconSize={12}
+        />
+        {series.map((clinician, index) => {
+          const stroke =
+            colorById[clinician.clinician_id] ??
+            CLINICIAN_LINE_COLORS[index % CLINICIAN_LINE_COLORS.length];
+          return (
+            <Line
+              key={clinician.clinician_id}
+              type="monotone"
+              dataKey={clinician.name}
+              stroke={stroke}
+              strokeWidth={2}
+              dot={false}
+              name={clinician.name}
+            />
+          );
+        })}
+      </LineChart>
+    </ResponsiveContainer>
+  );
+}
+
 function ClinicDetailPanel({ clinicId }: { clinicId: string }) {
   const [period, setPeriod] = useState<TrendPeriod>("month");
+  const [clinicianTrendPeriod, setClinicianTrendPeriod] =
+    useState<TrendPeriod>("month");
 
   return (
     <div className="border-t border-gray-100 bg-gray-50/80 px-5 py-5">
@@ -400,7 +639,17 @@ function ClinicDetailPanel({ clinicId }: { clinicId: string }) {
       <h4 className="mb-3 mt-6 text-sm font-semibold text-gray-900">
         Clinician productivity
       </h4>
-      <ClinicianTable clinicId={clinicId} />
+      <ClinicianProductivityTable clinicId={clinicId} />
+      <div className="mb-4 mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <h4 className="text-sm font-semibold text-gray-900">
+          Clinician appointment trend
+        </h4>
+        <PeriodPills
+          value={clinicianTrendPeriod}
+          onChange={setClinicianTrendPeriod}
+        />
+      </div>
+      <ClinicianTrendChart clinicId={clinicId} period={clinicianTrendPeriod} />
     </div>
   );
 }
