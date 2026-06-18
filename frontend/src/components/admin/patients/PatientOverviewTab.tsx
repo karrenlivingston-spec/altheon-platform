@@ -11,6 +11,7 @@ import {
   formatUsdFromCents,
   fullAddress,
   patientDisplayName,
+  referralSourceLabel,
   relativeActivityTime,
 } from "@/components/admin/patients/patientTypes";
 
@@ -78,6 +79,12 @@ export default function PatientOverviewTab({
                 <div>
                   <dt className="text-gray-500">Address</dt>
                   <dd className="text-gray-900">{fullAddress(patient)}</dd>
+                </div>
+                <div>
+                  <dt className="text-gray-500">Referral Source</dt>
+                  <dd className="text-gray-900">
+                    {referralSourceLabel(patient.referral_source)}
+                  </dd>
                 </div>
               </dl>
             </div>

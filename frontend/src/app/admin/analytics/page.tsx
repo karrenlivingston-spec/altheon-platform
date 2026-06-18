@@ -9,7 +9,10 @@ import {
   Loader2,
 } from "lucide-react";
 import {
+  Bar,
+  BarChart,
   CartesianGrid,
+  LabelList,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -77,6 +80,12 @@ type ClinicianRow = {
 type OverviewResponse = {
   clinics: AnalyticsClinic[];
   totals: AnalyticsTotals;
+};
+
+type ReferralSourceRow = {
+  referral_source: string | null;
+  count: number;
+  label: string;
 };
 
 const PERIOD_OPTIONS: { value: TrendPeriod; label: string }[] = [
@@ -605,9 +614,90 @@ function ClinicAnalyticsCard({ clinic }: { clinic: AnalyticsClinic }) {
   );
 }
 
+function ReferralSourcesSection({ clinicId }: { clinicId: string }) {
+  const [rows, setRows] = useState<ReferralSourceRow[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadReferralSummary = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(
+        `${API_BASE}/patients/referral-source/summary?clinic_id=${encodeURIComponent(clinicId)}&platform_wide=true`,
+        { headers: await authHeaders() },
+      );
+      if (!res.ok) {
+        setRows([]);
+        return;
+      }
+      const json: unknown = await res.json();
+      setRows(Array.isArray(json) ? (json as ReferralSourceRow[]) : []);
+    } catch {
+      setRows([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [clinicId]);
+
+  useEffect(() => {
+    if (!clinicId) return;
+    void loadReferralSummary();
+  }, [clinicId, loadReferralSummary]);
+
+  const chartData = [...rows]
+    .filter((r) => r.count > 0)
+    .sort((a, b) => b.count - a.count)
+    .map((r) => ({ label: r.label, count: r.count }));
+
+  return (
+    <div className="mt-8 rounded-xl border border-gray-200 bg-white p-6 shadow-sm">
+      <h2 className="text-lg font-semibold text-gray-900">Referral Sources</h2>
+      <p className="mt-1 text-sm text-gray-500">How patients are finding your clinic</p>
+
+      {loading ? (
+        <SkeletonBlock className="mt-6 h-72" />
+      ) : chartData.length === 0 ? (
+        <div className="mt-6 rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-6 py-12 text-center text-sm text-gray-500">
+          No referral data yet. Referral sources will appear here as patients are
+          added with intake information.
+        </div>
+      ) : (
+        <div className="mt-6 h-80 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart
+              data={chartData}
+              layout="vertical"
+              margin={{ top: 4, right: 48, left: 8, bottom: 4 }}
+            >
+              <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#e5e7eb" />
+              <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+              <YAxis
+                type="category"
+                dataKey="label"
+                width={120}
+                tick={{ fontSize: 12 }}
+              />
+              <Tooltip
+                formatter={(value) => [Number(value ?? 0), "Patients"]}
+                contentStyle={{ borderRadius: 8, border: "1px solid #e5e7eb" }}
+              />
+              <Bar dataKey="count" fill={TEAL} radius={[0, 4, 4, 0]} maxBarSize={28}>
+                <LabelList
+                  dataKey="count"
+                  position="right"
+                  style={{ fill: "#374151", fontSize: 12, fontWeight: 500 }}
+                />
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function AdminAnalyticsPage() {
   const router = useRouter();
-  const { role, loading: clinicLoading } = useClinic();
+  const { role, clinicId, loading: clinicLoading } = useClinic();
   const isPlatformAdmin =
     !clinicLoading && (role === "super_admin" || role === "platform_admin");
 
@@ -736,6 +826,8 @@ export default function AdminAnalyticsPage() {
           No clinic data available.
         </div>
       ) : null}
+
+      {!loading && clinicId ? <ReferralSourcesSection clinicId={clinicId} /> : null}
     </div>
   );
 }

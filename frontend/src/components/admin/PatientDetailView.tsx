@@ -34,6 +34,7 @@ import PatientHeader from "@/components/admin/patients/PatientHeader";
 import PatientQuickStats from "@/components/admin/patients/PatientQuickStats";
 import PatientOverviewTab from "@/components/admin/patients/PatientOverviewTab";
 import type { PatientHeaderStats } from "@/components/admin/patients/patientTypes";
+import { REFERRAL_SOURCE_OPTIONS } from "@/components/admin/patients/patientTypes";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
@@ -86,6 +87,7 @@ type PatientRecord = {
   insurance_group_number?: string | null;
   primary_complaint?: string | null;
   referring_provider?: string | null;
+  referral_source?: string | null;
   notes?: string | null;
   created_at?: string | null;
   lawyer_name?: string | null;
@@ -688,6 +690,7 @@ export function PatientDetailView({
         "insurance_group_number",
         "primary_complaint",
         "referring_provider",
+        "referral_source",
         "notes",
       ] as const;
       for (const k of keys) {
@@ -1060,6 +1063,26 @@ export function PatientDetailView({
                 value={d.referring_provider ?? ""}
                 onChange={(e) => setDraftField("referring_provider", e.target.value)}
               />
+            </div>
+            <div>
+              <span className={LABEL_CLASS}>How did you hear about us?</span>
+              <select
+                className={FIELD_INPUT}
+                value={d.referral_source ?? ""}
+                onChange={(e) =>
+                  setDraftField(
+                    "referral_source",
+                    e.target.value ? e.target.value : null,
+                  )
+                }
+              >
+                <option value="">— Select —</option>
+                {REFERRAL_SOURCE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
             </div>
           </div>
         </div>

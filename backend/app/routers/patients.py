@@ -1,3 +1,4 @@
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -5,6 +6,7 @@ from fastapi import APIRouter, Body, HTTPException, Query
 
 from app.constants import STTPDN_CLINIC_ID
 from app.db import supabase
+from routers.fee_schedule import ClinicUserDep
 
 router = APIRouter()
 
@@ -33,6 +35,7 @@ _PATIENT_PUBLIC_KEYS = (
     "insurance_group_number",
     "primary_complaint",
     "referring_provider",
+    "referral_source",
     "notes",
     "created_at",
     "lawyer_name",
@@ -44,6 +47,64 @@ _PATIENT_PUBLIC_KEYS = (
 _PATCHABLE_PATIENT_FIELDS = frozenset(_PATIENT_PUBLIC_KEYS) - frozenset(
     {"id", "created_at"}
 )
+
+_VALID_REFERRAL_SOURCES = frozenset(
+    {
+        "google",
+        "facebook",
+        "instagram",
+        "attorney",
+        "existing_patient",
+        "doctor_referral",
+        "website",
+        "walk_in",
+        "other",
+    }
+)
+
+_REFERRAL_SOURCE_LABELS: dict[Optional[str], str] = {
+    "google": "Google",
+    "facebook": "Facebook",
+    "instagram": "Instagram",
+    "attorney": "Attorney",
+    "existing_patient": "Existing Patient",
+    "doctor_referral": "Doctor Referral",
+    "website": "Website",
+    "walk_in": "Walk In",
+    "other": "Other",
+    None: "Unknown",
+}
+
+
+def _normalize_referral_source(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    if s not in _VALID_REFERRAL_SOURCES:
+        raise HTTPException(status_code=400, detail="Invalid referral_source")
+    return s
+
+
+def _referral_source_label(value: Optional[str]) -> str:
+    if value is None or not str(value).strip():
+        return _REFERRAL_SOURCE_LABELS[None]
+    return _REFERRAL_SOURCE_LABELS.get(str(value).strip(), "Unknown")
+
+
+def _user_has_platform_role(user_id: str) -> bool:
+    try:
+        resp = (
+            supabase.table("clinic_users")
+            .select("role")
+            .eq("user_id", user_id)
+            .execute()
+        )
+        roles = {row.get("role") for row in resp.data or []}
+        return bool(roles & {"super_admin", "platform_admin"})
+    except Exception:
+        return False
 
 
 def _handle_supabase_error(response: Any) -> None:
@@ -262,6 +323,43 @@ def _related_pi_cases(patient_id: str, clinic_id: str) -> list[dict[str, Any]]:
     return out
 
 
+@router.get("/referral-source/summary")
+def referral_source_summary(
+    clinic: ClinicUserDep,
+    platform_wide: bool = Query(False),
+):
+    """Patient counts grouped by referral_source (clinic or platform-wide for admins)."""
+    try:
+        q = supabase.table("patients").select("referral_source")
+        if not (platform_wide and _user_has_platform_role(clinic.user_id)):
+            q = q.eq("clinic_id", clinic.clinic_id)
+        resp = q.execute()
+        _handle_supabase_error(resp)
+
+        counts: dict[Optional[str], int] = defaultdict(int)
+        for row in resp.data or []:
+            src = row.get("referral_source")
+            if src is not None:
+                src = str(src).strip() or None
+            counts[src] += 1
+
+        out: list[dict[str, Any]] = []
+        for src, count in sorted(
+            counts.items(),
+            key=lambda item: (-item[1], _referral_source_label(item[0])),
+        ):
+            out.append(
+                {
+                    "referral_source": src,
+                    "count": count,
+                    "label": _referral_source_label(src),
+                }
+            )
+        return out
+    except Exception:
+        return []
+
+
 @router.get("/{patient_id}/insurance")
 def get_patient_insurance(patient_id: str, clinic_id: str = Query(...)):
     """Primary insurance carrier for appointment popup / scheduling context."""
@@ -341,7 +439,11 @@ def create_patient(body: dict = Body(...)):
     for key in _PATCHABLE_PATIENT_FIELDS:
         if key in ("first_name", "last_name"):
             continue
-        if key in body and body[key] is not None:
+        if key not in body:
+            continue
+        if key == "referral_source":
+            insert_data[key] = _normalize_referral_source(body[key])
+        elif body[key] is not None:
             insert_data[key] = body[key]
 
     try:
@@ -414,7 +516,10 @@ def patch_patient(patient_id: str, clinic_id: str = Query(...), body: dict = Bod
             continue
         if key not in _PATCHABLE_PATIENT_FIELDS:
             continue
-        update_data[key] = val
+        if key == "referral_source":
+            update_data[key] = _normalize_referral_source(val)
+        else:
+            update_data[key] = val
 
     if update_data:
         update_data["updated_at"] = _now_iso()

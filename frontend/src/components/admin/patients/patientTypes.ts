@@ -43,6 +43,37 @@ export type PatientHeaderStats = {
   };
 };
 
+export type ReferralSource =
+  | "google"
+  | "facebook"
+  | "instagram"
+  | "attorney"
+  | "existing_patient"
+  | "doctor_referral"
+  | "website"
+  | "walk_in"
+  | "other";
+
+export const REFERRAL_SOURCE_OPTIONS: { value: ReferralSource; label: string }[] = [
+  { value: "google", label: "Google" },
+  { value: "facebook", label: "Facebook" },
+  { value: "instagram", label: "Instagram" },
+  { value: "attorney", label: "Attorney" },
+  { value: "existing_patient", label: "Existing Patient" },
+  { value: "doctor_referral", label: "Doctor Referral" },
+  { value: "website", label: "Website" },
+  { value: "walk_in", label: "Walk In" },
+  { value: "other", label: "Other" },
+];
+
+export function referralSourceLabel(
+  value: ReferralSource | string | null | undefined,
+): string {
+  if (!value) return "—";
+  const found = REFERRAL_SOURCE_OPTIONS.find((o) => o.value === value);
+  return found?.label ?? "—";
+}
+
 export type PatientRecord = {
   id: string;
   first_name?: string | null;
@@ -61,6 +92,7 @@ export type PatientRecord = {
   insurance_group_number?: string | null;
   primary_complaint?: string | null;
   referring_provider?: string | null;
+  referral_source?: ReferralSource | string | null;
   created_at?: string | null;
 };
 

@@ -8,6 +8,7 @@ import {
   DS_PRIMARY_BTN,
   DS_SECONDARY_BTN,
 } from "@/app/admin/designSystem";
+import { REFERRAL_SOURCE_OPTIONS } from "@/components/admin/patients/patientTypes";
 import { supabase } from "@/lib/supabase";
 
 const API_BASE =
@@ -46,6 +47,7 @@ export default function NewPatientModal({
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
+  const [referralSource, setReferralSource] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -57,6 +59,7 @@ export default function NewPatientModal({
     setDateOfBirth("");
     setEmail("");
     setAddress("");
+    setReferralSource("");
     setError(null);
     setBusy(false);
   }, [open]);
@@ -84,6 +87,7 @@ export default function NewPatientModal({
       };
       if (email.trim()) body.email = email.trim();
       if (address.trim()) body.address_line1 = address.trim();
+      if (referralSource.trim()) body.referral_source = referralSource.trim();
 
       const res = await fetch(`${API_BASE}/patients`, {
         method: "POST",
@@ -210,6 +214,21 @@ export default function NewPatientModal({
               className={`mt-1 ${DS_INPUT}`}
               placeholder="Optional — street, city, state, zip"
             />
+          </label>
+          <label className="block text-sm font-medium text-gray-700 sm:col-span-2">
+            How did you hear about us?
+            <select
+              value={referralSource}
+              onChange={(e) => setReferralSource(e.target.value)}
+              className={`mt-1 ${DS_INPUT}`}
+            >
+              <option value="">Optional</option>
+              {REFERRAL_SOURCE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
           </label>
         </div>
 
