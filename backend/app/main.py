@@ -31,6 +31,7 @@ from app.routers import (
     clinical_notes as clinical_notes_api_router,
     appointments_dashboard as appointments_dashboard_router,
     voice_agent as voice_agent_router,
+    voice as voice_router,
     clinics_dashboard as clinics_dashboard_router,
     memberships_dashboard as memberships_dashboard_router,
     groups_dashboard as groups_dashboard_router,
@@ -90,6 +91,7 @@ app.include_router(
     prefix="/api",
     tags=["Voice Agent"],
 )
+app.include_router(voice_router.router, prefix="/voice", tags=["Voice"])
 app.include_router(
     clinics_dashboard_router.router,
     prefix="/api",
