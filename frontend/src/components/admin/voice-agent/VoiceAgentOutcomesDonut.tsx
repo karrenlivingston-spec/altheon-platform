@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 
 import { DS_CARD } from "@/app/admin/designSystem";
@@ -14,6 +15,7 @@ export default function VoiceAgentOutcomesDonut({
   outcomes,
   loading,
 }: VoiceAgentOutcomesDonutProps) {
+  const router = useRouter();
   const data =
     outcomes?.breakdown.filter((b) => b.value > 0) ?? [];
   const total = outcomes?.total ?? 0;
@@ -24,7 +26,11 @@ export default function VoiceAgentOutcomesDonut({
         <h3 className="text-sm font-semibold text-gray-900">
           Call Outcomes (Last 7 Days)
         </h3>
-        <button type="button" className="text-xs font-medium text-emerald-700 hover:underline">
+        <button
+          type="button"
+          onClick={() => router.push("/admin/voice/reports")}
+          className="text-xs font-medium text-emerald-700 hover:underline"
+        >
           View Full Report →
         </button>
       </div>

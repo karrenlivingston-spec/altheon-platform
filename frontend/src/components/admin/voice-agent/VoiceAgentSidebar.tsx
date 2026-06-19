@@ -1,5 +1,7 @@
 "use client";
 
+import { useRouter } from "next/navigation";
+
 import { DS_CARD } from "@/app/admin/designSystem";
 import {
   REASON_ICONS,
@@ -24,6 +26,7 @@ export default function VoiceAgentSidebar({
   performance,
   loading,
 }: VoiceAgentSidebarProps) {
+  const router = useRouter();
   const maxCount = Math.max(...reasons.map((r) => r.count), 1);
 
   return (
@@ -104,6 +107,7 @@ export default function VoiceAgentSidebar({
             </p>
             <button
               type="button"
+              onClick={() => router.push("/admin/voice/insights")}
               className="mt-2 block w-full text-center text-xs font-medium text-emerald-700 hover:underline"
             >
               View Insights →

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   Copy,
   ExternalLink,
@@ -33,6 +34,7 @@ export default function VoiceAgentRecentCallsTable({
   calls,
   loading,
 }: VoiceAgentRecentCallsTableProps) {
+  const router = useRouter();
   const [menuId, setMenuId] = useState<string | null>(null);
   const [transcriptCall, setTranscriptCall] = useState<RecentCall | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -200,6 +202,7 @@ export default function VoiceAgentRecentCallsTable({
         <div className="border-t border-gray-100 px-5 py-3">
           <button
             type="button"
+            onClick={() => router.push("/admin/voice/calls")}
             className="text-xs font-medium text-emerald-700 hover:underline"
           >
             View All Calls →

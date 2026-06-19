@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Phone, Settings } from "lucide-react";
 
 import { getEasternYMD } from "@/components/adminEastern";
@@ -40,6 +41,7 @@ async function authHeaders(): Promise<Record<string, string>> {
 }
 
 export default function AdminVoiceAgentPage() {
+  const router = useRouter();
   const { clinicId } = useClinic();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -132,10 +134,14 @@ export default function AdminVoiceAgentPage() {
             <Settings className="mr-1.5 inline h-4 w-4" />
             Agent Settings
           </Link>
-          <a href="#recent-calls" className={DS_SECONDARY_BTN}>
+          <button
+            type="button"
+            onClick={() => router.push("/admin/voice/calls")}
+            className={DS_SECONDARY_BTN}
+          >
             <Phone className="mr-1.5 inline h-4 w-4" />
             Call Log
-          </a>
+          </button>
           <span className="flex items-center gap-1.5 rounded-full border border-green-200 bg-green-50 px-3 py-1.5 text-sm font-medium text-green-700">
             <span className="h-2 w-2 rounded-full bg-green-500" aria-hidden />
             Aria is Online
