@@ -312,6 +312,21 @@ def patient_lookup(phone: str, clinic_id: str):
             None,
         )
         if not patient:
+            try:
+                secondary_resp = (
+                    supabase.table("patients")
+                    .select("id, first_name, last_name, phone, preferred_language")
+                    .eq("phone", normalized_phone)
+                    .eq("clinic_id", clinic_id)
+                    .limit(1)
+                    .execute()
+                )
+                secondary_rows = secondary_resp.data or []
+                if secondary_rows:
+                    patient = secondary_rows[0]
+            except Exception:
+                pass
+        if not patient:
             return {"found": False}
 
         access_resp = (
@@ -325,6 +340,17 @@ def patient_lookup(phone: str, clinic_id: str):
         access_rows = access_resp.data or []
         if not access_rows:
             return {"found": False}
+
+        stored_phone = str(patient.get("phone") or "")
+        normalized_stored = re.sub(r"\D", "", stored_phone)
+        if stored_phone != normalized_stored:
+            try:
+                supabase.table("patients").update({"phone": normalized_stored}).eq(
+                    "id", patient["id"]
+                ).execute()
+                patient["phone"] = normalized_stored
+            except Exception:
+                pass
 
         patient_id = patient["id"]
         appt_resp = (

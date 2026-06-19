@@ -1123,15 +1123,11 @@ def _clinician_name_from_row(row: dict[str, Any]) -> str:
 @router.post("/reschedule")
 def reschedule_appointment(payload: RescheduleAppointmentRequest):
     """Cancel the patient's next upcoming visit and book a new one; clinician, treatment, and location carry over."""
-    patient_phone = payload.patient_phone.strip()
+    patient_phone = re.sub(r"\D", "", (payload.patient_phone or "").strip())
     if not patient_phone:
         raise HTTPException(status_code=400, detail="patient_phone is required")
 
     print(f"Looking up patient by phone: {patient_phone}")
-
-    clean_input = re.sub(r"\D", "", patient_phone)
-    if not clean_input:
-        raise HTTPException(status_code=400, detail="patient_phone has no digits")
 
     clinic_id_for_lookup = STTPDN_CLINIC_ID
     try:
@@ -1151,7 +1147,7 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
         (
             p
             for p in (all_patients.data or [])
-            if re.sub(r"\D", "", str(p.get("phone") or "")) == clean_input
+            if re.sub(r"\D", "", str(p.get("phone") or "")) == patient_phone
         ),
         None,
     )
@@ -1159,6 +1155,20 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
         raise HTTPException(status_code=404, detail="Patient not found")
     patient_id = str(patient["id"])
     print(f"Found patient: {patient_id}")
+
+    stored_phone = str(patient.get("phone") or "")
+    normalized_stored = re.sub(r"\D", "", stored_phone)
+    if stored_phone != normalized_stored:
+        try:
+            supabase.table("patients").update({"phone": normalized_stored}).eq(
+                "id", patient_id
+            ).execute()
+            patient["phone"] = normalized_stored
+        except Exception:
+            logger.exception(
+                "reschedule: failed to normalize phone patient_id=%s",
+                patient_id,
+            )
 
     if payload.preferred_language is not None:
         new_lang = str(payload.preferred_language).strip()
@@ -1453,7 +1463,7 @@ def create_appointment(payload: CreateAppointmentRequest):
     source = (payload.source or "ai").strip().lower() or "ai"
     patient_id = (payload.patient_id or "").strip()
     if not patient_id:
-        phone = (payload.patient_phone or "").strip()
+        phone = re.sub(r"\D", "", (payload.patient_phone or "").strip())
         if not phone:
             raise HTTPException(
                 status_code=400,
@@ -1462,7 +1472,7 @@ def create_appointment(payload: CreateAppointmentRequest):
         try:
             patient_lookup = (
                 supabase.table("patients")
-                .select("id")
+                .select("id, phone")
                 .eq("phone", phone)
                 .limit(1)
                 .execute()
@@ -1474,8 +1484,36 @@ def create_appointment(payload: CreateAppointmentRequest):
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
         patient_data = patient_lookup.data or []
+        if not patient_data:
+            try:
+                all_patients_resp = (
+                    supabase.table("patients")
+                    .select("id, phone")
+                    .execute()
+                )
+                _handle_supabase_error(all_patients_resp)
+                patient_data = [
+                    row
+                    for row in (all_patients_resp.data or [])
+                    if re.sub(r"\D", "", str(row.get("phone") or "")) == phone
+                ][:1]
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
         if patient_data:
             patient_id = str(patient_data[0]["id"])
+            stored_phone = str(patient_data[0].get("phone") or "")
+            if stored_phone != phone:
+                try:
+                    supabase.table("patients").update({"phone": phone}).eq(
+                        "id", patient_id
+                    ).execute()
+                except Exception:
+                    logger.exception(
+                        "create appointment: failed to normalize phone patient_id=%s",
+                        patient_id,
+                    )
         else:
             first_name = (payload.patient_first_name or "").strip()
             last_name = (payload.patient_last_name or "").strip()
@@ -1662,7 +1700,7 @@ def create_appointment(payload: CreateAppointmentRequest):
             appointment_id,
         )
 
-    phone_out: Any = payload.patient_phone
+    phone_out: Any = re.sub(r"\D", "", (payload.patient_phone or "").strip()) or None
     fname = (payload.patient_first_name or "").strip()
     pref_lang = pref_stored
     try:
@@ -1675,7 +1713,7 @@ def create_appointment(payload: CreateAppointmentRequest):
         )
         _handle_supabase_error(pt_msg)
         prow = (pt_msg.data or [{}])[0]
-        phone_out = prow.get("phone") or payload.patient_phone
+        phone_out = prow.get("phone") or phone_out
         fname = (prow.get("first_name") or payload.patient_first_name or "").strip()
         pref_lang = prow.get("preferred_language") or pref_stored
         if phone_out:
