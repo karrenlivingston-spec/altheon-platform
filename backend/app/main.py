@@ -14,6 +14,8 @@ from pydantic import BaseModel, Field, field_validator
 import os
 import re
 
+import pytz
+
 from app.db import supabase
 from app.routers import (
     slots,
@@ -387,9 +389,28 @@ def patient_lookup(phone: str, clinic_id: str):
             upcoming_rows = upcoming_resp.data or []
             if upcoming_rows:
                 ur = upcoming_rows[0]
+                eastern = pytz.timezone("America/New_York")
+                raw_start = ur.get("start_time")
+                if raw_start:
+                    try:
+                        dt = datetime.fromisoformat(str(raw_start).replace("Z", "+00:00"))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        eastern_dt = dt.astimezone(eastern)
+                        start_time_display = eastern_dt.strftime("%Y-%m-%dT%H:%M:%S")
+                        start_time_eastern = eastern_dt.strftime(
+                            "%A, %B %-d at %-I:%M %p Eastern"
+                        )
+                    except Exception:
+                        start_time_display = str(raw_start)
+                        start_time_eastern = str(raw_start)
+                else:
+                    start_time_display = None
+                    start_time_eastern = None
                 upcoming_appointment = {
                     "id": str(ur.get("id") or ""),
-                    "start_time": ur.get("start_time"),
+                    "start_time": start_time_display,
+                    "start_time_display": start_time_eastern,
                     "clinician_id": str(ur.get("clinician_id") or ""),
                     "treatment_type_id": str(ur.get("treatment_type_id") or ""),
                 }
@@ -410,6 +431,93 @@ def patient_lookup(phone: str, clinic_id: str):
         }
     except Exception:
         return {"found": False}
+
+
+def _to_e164_us(phone: str) -> str:
+    d = "".join(c for c in (phone or "") if c.isdigit())
+    if len(d) == 10:
+        return f"+1{d}"
+    if len(d) == 11 and d.startswith("1"):
+        return f"+{d}"
+    p = (phone or "").strip()
+    return p if p.startswith("+") else f"+{d}"
+
+
+@app.post("/cancel-appointment")
+def cancel_appointment(payload: dict):
+    patient_phone = re.sub(r"\D", "", str(payload.get("patient_phone") or ""))
+    clinic_id = str(payload.get("clinic_id") or "").strip()
+    appointment_id = str(payload.get("appointment_id") or "").strip()
+
+    if not patient_phone or not clinic_id:
+        raise HTTPException(status_code=400, detail="patient_phone and clinic_id are required")
+
+    try:
+        if appointment_id:
+            result = supabase.table("appointments")\
+                .update({"status": "cancelled", "updated_at": datetime.now(timezone.utc).isoformat()})\
+                .eq("id", appointment_id)\
+                .eq("clinic_id", clinic_id)\
+                .execute()
+        else:
+            all_patients = supabase.table("patients").select("id, phone").execute()
+            patient = next(
+                (p for p in (all_patients.data or [])
+                 if re.sub(r"\D", "", str(p.get("phone") or "")) == patient_phone),
+                None
+            )
+            if not patient:
+                raise HTTPException(status_code=404, detail="Patient not found")
+
+            now_iso = datetime.now(timezone.utc).isoformat()
+            upcoming = supabase.table("appointments")\
+                .select("id")\
+                .eq("patient_id", patient["id"])\
+                .eq("clinic_id", clinic_id)\
+                .in_("status", ["scheduled", "confirmed"])\
+                .gte("start_time", now_iso)\
+                .order("start_time", desc=False)\
+                .limit(1)\
+                .execute()
+
+            upcoming_rows = upcoming.data or []
+            if not upcoming_rows:
+                raise HTTPException(status_code=404, detail="No upcoming appointment found")
+
+            appt_id = upcoming_rows[0]["id"]
+            result = supabase.table("appointments")\
+                .update({"status": "cancelled", "updated_at": datetime.now(timezone.utc).isoformat()})\
+                .eq("id", appt_id)\
+                .eq("clinic_id", clinic_id)\
+                .execute()
+
+        try:
+            patient_resp = supabase.table("patients")\
+                .select("phone, first_name, preferred_language")\
+                .execute()
+            pt = next(
+                (p for p in (patient_resp.data or [])
+                 if re.sub(r"\D", "", str(p.get("phone") or "")) == patient_phone),
+                None
+            )
+            if pt and pt.get("phone"):
+                from app.sms import send_sms
+                lang = pt.get("preferred_language") or "en"
+                fname = (pt.get("first_name") or "").strip()
+                if lang == "es":
+                    body = f"Hola {fname}, tu cita en Straight To The Point Dry Needling ha sido cancelada. Llámanos al 561-772-5799 para reprogramar."
+                else:
+                    body = f"Hi {fname}, your appointment at Straight To The Point Dry Needling has been cancelled. Call us at 561-772-5799 to reschedule."
+                send_sms(clinic_id, _to_e164_us(pt["phone"]), body)
+        except Exception:
+            pass
+
+        return {"success": True, "message": "Appointment cancelled successfully"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def _handle_supabase_error(response: Any) -> None:
