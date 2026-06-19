@@ -9,11 +9,19 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Body, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.db import supabase
 from routers.fee_schedule import _resolve_bearer_user_id
+
+try:
+    from elevenlabs.client import ElevenLabs
+
+    _elevenlabs_client = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+except Exception:
+    ElevenLabs = None  # type: ignore[misc, assignment]
+    _elevenlabs_client = None
 
 router = APIRouter()
 
@@ -55,54 +63,39 @@ def _collection_value(data: dict[str, Any], key: str) -> Any:
     return val
 
 
-def _parse_iso_datetime(value: Any) -> Optional[str]:
-    if value is None:
+def _format_elevenlabs_transcript(transcript_array: Any) -> Optional[str]:
+    if not isinstance(transcript_array, list):
         return None
-    if isinstance(value, datetime):
-        dt = value
-    else:
-        s = str(value).strip().replace("Z", "+00:00")
-        if not s:
-            return None
-        try:
-            dt = datetime.fromisoformat(s)
-        except ValueError:
-            return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.isoformat()
+    parts: list[str] = []
+    for turn in transcript_array:
+        if not isinstance(turn, dict):
+            continue
+        role = str(turn.get("role") or "").strip().lower()
+        message = str(turn.get("message") or "").strip()
+        if not message:
+            continue
+        label = "Agent" if role in ("agent", "assistant", "ai") else "Patient"
+        parts.append(f"{label}: {message}")
+    combined = "\n".join(parts).strip()
+    return combined or None
 
 
-def _normalize_transcript(value: Any) -> Optional[str]:
+def _appointment_booked_from_data_collection(
+    data_collection: dict[str, Any],
+) -> bool:
+    for key in data_collection:
+        raw = _collection_value(data_collection, key)
+        if raw is None:
+            continue
+        lowered = str(raw).lower()
+        if "book" in lowered or "appointment" in lowered:
+            return True
+    return False
+
+
+def _normalize_sentiment(value: Any) -> str:
     if value is None:
-        return None
-    if isinstance(value, str):
-        text = value.strip()
-        return text or None
-    if isinstance(value, list):
-        parts: list[str] = []
-        for item in value:
-            if isinstance(item, dict):
-                role = str(item.get("role") or "").strip()
-                text = str(
-                    item.get("message")
-                    or item.get("text")
-                    or item.get("content")
-                    or ""
-                ).strip()
-                if text:
-                    parts.append(f"{role}: {text}" if role else text)
-            elif item is not None:
-                parts.append(str(item).strip())
-        combined = "\n".join(p for p in parts if p).strip()
-        return combined or None
-    text = str(value).strip()
-    return text or None
-
-
-def _normalize_sentiment(value: Any) -> Optional[str]:
-    if value is None:
-        return None
+        return "neutral"
     s = str(value).strip().lower()
     if s in ("positive", "neutral", "negative"):
         return s
@@ -111,28 +104,6 @@ def _normalize_sentiment(value: Any) -> Optional[str]:
     if "negative" in s or s in ("bad", "angry", "frustrated", "unsatisfied"):
         return "negative"
     return "neutral"
-
-
-def _extract_outcome(payload: dict[str, Any]) -> str:
-    analysis = _as_dict(payload.get("analysis"))
-    data_collection = _as_dict(analysis.get("data_collection_results"))
-
-    for key in ("call_outcome", "outcome"):
-        raw = _collection_value(data_collection, key)
-        if raw is not None and str(raw).strip():
-            return str(raw).strip()
-
-    call_successful = analysis.get("call_successful")
-    if call_successful is True:
-        return "completed"
-    if call_successful is False:
-        return "incomplete"
-    return "unknown"
-
-
-def _appointment_booked_from_outcome(outcome: str) -> bool:
-    lowered = (outcome or "").lower()
-    return "book" in lowered or "appointment" in lowered
 
 
 def _require_platform_voice_admin(
@@ -188,52 +159,49 @@ def _clinic_id_for_agent(agent_id: Optional[str]) -> Optional[str]:
     return None
 
 
-def _build_call_log_row(payload: dict[str, Any]) -> dict[str, Any]:
-    call_obj = _as_dict(payload.get("call"))
-    metadata = _as_dict(payload.get("metadata"))
-    if not metadata and call_obj:
-        metadata = _as_dict(call_obj.get("metadata"))
-    analysis = _as_dict(payload.get("analysis"))
-    conversation = _as_dict(payload.get("conversation"))
+def _build_call_log_row(event: dict[str, Any]) -> dict[str, Any]:
+    data = _as_dict(event.get("data"))
+    metadata = _as_dict(data.get("metadata"))
+    analysis = _as_dict(data.get("analysis"))
     data_collection = _as_dict(analysis.get("data_collection_results"))
+    initiation = _as_dict(data.get("conversation_initiation_client_data"))
+    dynamic_vars = _as_dict(initiation.get("dynamic_variables"))
+    transcript_array = data.get("transcript") or []
 
-    conversation_id = str(payload.get("conversation_id") or "").strip()
+    conversation_id = str(data.get("conversation_id") or "").strip()
     if not conversation_id:
         raise ValueError("conversation_id is required")
 
-    agent_id = str(payload.get("agent_id") or "").strip() or None
-    caller_phone = (
-        call_obj.get("from_number")
-        or payload.get("from_number")
-        or payload.get("caller_phone")
-    )
-    duration_seconds = _int_or_zero(
-        metadata.get("call_duration_secs")
-        or payload.get("call_duration_secs")
-        or 0
-    )
-    transcript = _normalize_transcript(
-        payload.get("transcript") or conversation.get("transcript")
-    )
-    recording_url = (
-        payload.get("recording_url")
-        or call_obj.get("recording_url")
-        or metadata.get("recording_url")
-    )
-    call_summary = (
-        analysis.get("transcript_summary")
-        or payload.get("summary")
-        or payload.get("call_summary")
-    )
-    sentiment = _normalize_sentiment(analysis.get("user_sentiment"))
-    outcome = _extract_outcome(payload)
-    appointment_booked = _appointment_booked_from_outcome(outcome)
+    agent_id = str(data.get("agent_id") or "").strip() or None
+    duration_seconds = _int_or_zero(metadata.get("call_duration_secs", 0))
+    call_summary = analysis.get("transcript_summary")
+    call_successful = str(analysis.get("call_successful") or "").strip().lower()
+    outcome = "completed" if call_successful == "success" else "incomplete"
+    appointment_booked = _appointment_booked_from_data_collection(data_collection)
     intake_completed = _as_bool(_collection_value(data_collection, "intake_completed"))
     call_reason = _collection_value(data_collection, "call_reason") or _collection_value(
         data_collection, "reason"
     )
-    started_at = _parse_iso_datetime(metadata.get("start_time"))
-    ended_at = _parse_iso_datetime(metadata.get("end_time"))
+    sentiment = _normalize_sentiment(_collection_value(data_collection, "sentiment"))
+    transcript = _format_elevenlabs_transcript(transcript_array)
+
+    started_at: Optional[str] = None
+    ended_at: Optional[str] = None
+    start_unix = metadata.get("start_time_unix_secs")
+    if start_unix is not None:
+        try:
+            started_dt = datetime.utcfromtimestamp(int(float(start_unix))).replace(
+                tzinfo=timezone.utc
+            )
+            started_at = started_dt.isoformat()
+            if duration_seconds > 0:
+                ended_at = (
+                    started_dt + timedelta(seconds=duration_seconds)
+                ).isoformat()
+        except (TypeError, ValueError):
+            pass
+
+    caller_phone = dynamic_vars.get("caller_phone") or metadata.get("from_number")
 
     row: dict[str, Any] = {
         "conversation_id": conversation_id,
@@ -242,7 +210,6 @@ def _build_call_log_row(payload: dict[str, Any]) -> dict[str, Any]:
         "caller_phone": str(caller_phone).strip() if caller_phone else None,
         "duration_seconds": duration_seconds,
         "transcript": transcript,
-        "recording_url": str(recording_url).strip() if recording_url else None,
         "call_summary": str(call_summary).strip() if call_summary else None,
         "sentiment": sentiment,
         "outcome": outcome,
@@ -344,10 +311,35 @@ def _empty_outcomes_report(
 
 
 @router.post("/webhook/elevenlabs")
-def elevenlabs_post_call_webhook(payload: dict[str, Any] = Body(...)):
+async def elevenlabs_post_call_webhook(request: Request):
     """Receive ElevenLabs post-call webhook; always returns HTTP 200."""
     try:
-        row = _build_call_log_row(payload)
+        body = await request.body()
+        sig_header = request.headers.get("ElevenLabs-Signature")
+
+        if _elevenlabs_client is None:
+            print("[webhook] ElevenLabs SDK not available")
+            return JSONResponse(status_code=200, content={"status": "ok"})
+
+        try:
+            event = _elevenlabs_client.webhooks.construct_event(
+                rawBody=body.decode("utf-8"),
+                sig_header=sig_header,
+                secret=os.getenv("ELEVENLABS_WEBHOOK_SECRET"),
+            )
+        except Exception as exc:
+            print(f"[webhook] Invalid signature: {exc}")
+            return JSONResponse(status_code=200, content={"status": "ok"})
+
+        if not isinstance(event, dict):
+            event = dict(event) if hasattr(event, "__dict__") else {}
+
+        event_type = event.get("type")
+        if event_type != "post_call_transcription":
+            print(f"[webhook] Ignoring event type: {event_type}")
+            return JSONResponse(status_code=200, content={"status": "ok"})
+
+        row = _build_call_log_row(event)
         resp = (
             supabase.table("call_logs")
             .upsert(row, on_conflict="conversation_id")

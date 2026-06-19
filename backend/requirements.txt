@@ -16,3 +16,4 @@ pymupdf
 Pillow
 pytesseract
 pillow-heif
+elevenlabs
