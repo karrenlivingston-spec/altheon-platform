@@ -58,6 +58,7 @@ from routers.dashboard import router as dashboard_router
 from routers.patient_header import router as patient_header_router
 from routers.plan_of_care import router as plan_of_care_router
 from routers.analytics_router import router as analytics_router
+from routers.voice_router import router as voice_call_logs_router
 
 load_dotenv()
 
@@ -92,6 +93,7 @@ app.include_router(
     tags=["Voice Agent"],
 )
 app.include_router(voice_router.router, prefix="/voice", tags=["Voice"])
+app.include_router(voice_call_logs_router, prefix="/voice", tags=["Voice"])
 app.include_router(
     clinics_dashboard_router.router,
     prefix="/api",
