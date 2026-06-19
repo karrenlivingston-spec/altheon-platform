@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-import traceback
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
@@ -14,8 +13,7 @@ from app.db import supabase
 
 router = APIRouter()
 
-_CLINIC_TZ = ZoneInfo("America/New_York")
-_MISSED_OUTCOMES = frozenset({"voicemail", "missed"})
+_DISPLAY_TZ = ZoneInfo("America/New_York")
 _OUTCOME_BUCKETS = (
     ("appointment_booked", "Appointments Booked", "#16a34a"),
     ("general_inquiry", "General Inquiries", "#3b82f6"),
@@ -69,6 +67,13 @@ def _empty_performance() -> dict[str, Any]:
     }
 
 
+def _empty_top_reasons() -> list[dict[str, Any]]:
+    return [
+        {"label": label, "count": 0, "pct": 0}
+        for _, label in _INTENT_REASONS
+    ]
+
+
 def _handle_supabase_error(response: Any) -> None:
     error = getattr(response, "error", None)
     if error:
@@ -84,29 +89,25 @@ def _parse_target_date(date_str: Optional[str]) -> date:
             raise HTTPException(
                 status_code=400, detail="date must be YYYY-MM-DD"
             ) from exc
-    return datetime.now(_CLINIC_TZ).date()
+    return datetime.now(timezone.utc).date()
 
 
-def _day_bounds(target: date) -> tuple[datetime, datetime]:
-    start_local = datetime.combine(target, time(0, 0), tzinfo=_CLINIC_TZ)
-    end_local = start_local + timedelta(days=1)
-    return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+def _day_bounds_utc(target: date) -> tuple[datetime, datetime]:
+    start_utc = datetime.combine(target, time(0, 0), tzinfo=timezone.utc)
+    end_utc = start_utc + timedelta(days=1)
+    return start_utc, end_utc
 
 
-def _period_bounds(days: int) -> tuple[datetime, datetime]:
-    today = datetime.now(_CLINIC_TZ).date()
-    start_date = today - timedelta(days=max(1, days) - 1)
-    start_local = datetime.combine(start_date, time(0, 0), tzinfo=_CLINIC_TZ)
-    end_local = datetime.combine(today + timedelta(days=1), time(0, 0), tzinfo=_CLINIC_TZ)
-    return start_local.astimezone(timezone.utc), end_local.astimezone(timezone.utc)
+def _period_cutoff_utc(days: int) -> datetime:
+    return datetime.now(timezone.utc) - timedelta(days=days)
 
 
-def _local_date_from_iso(iso: str) -> Optional[date]:
+def _utc_date_from_iso(iso: str) -> Optional[date]:
     try:
         dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(_CLINIC_TZ).date()
+        return dt.astimezone(timezone.utc).date()
     except ValueError:
         return None
 
@@ -116,7 +117,7 @@ def _format_time_display(iso: str) -> str:
         dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
         if dt.tzinfo is None:
             dt = dt.replace(tzinfo=timezone.utc)
-        local = dt.astimezone(_CLINIC_TZ)
+        local = dt.astimezone(_DISPLAY_TZ)
         hour = local.strftime("%I").lstrip("0") or "12"
         return (
             f"{local.strftime('%b')} {local.day}, "
@@ -149,6 +150,14 @@ def _format_phone(phone: str | None) -> str:
     return raw
 
 
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes")
+    return bool(value)
+
+
 def _normalize_outcome_bucket(outcome: str | None) -> str:
     o = (outcome or "").strip().lower()
     if o == "appointment_booked":
@@ -157,9 +166,9 @@ def _normalize_outcome_bucket(outcome: str | None) -> str:
         return "general_inquiry"
     if o == "reschedule":
         return "reschedule"
-    if o in _MISSED_OUTCOMES:
+    if o in ("voicemail", "missed", "incomplete"):
         return "voicemail"
-    if o in ("transfer", "other"):
+    if o in ("transfer", "other", "completed"):
         return "other"
     if "book" in o:
         return "appointment_booked"
@@ -167,7 +176,7 @@ def _normalize_outcome_bucket(outcome: str | None) -> str:
         return "general_inquiry"
     if "resched" in o:
         return "reschedule"
-    if "voicemail" in o or "missed" in o:
+    if "voicemail" in o or "missed" in o or "incomplete" in o:
         return "voicemail"
     if "transfer" in o:
         return "other"
@@ -190,9 +199,9 @@ def _outcome_label(outcome: str | None) -> str:
     return "Other / Transfer"
 
 
-def _normalize_intent_bucket(intent: str | None) -> str:
-    i = (intent or "").strip().lower()
-    if i == "schedule_appointment" or "schedule" in i:
+def _normalize_intent_bucket(reason: str | None) -> str:
+    i = (reason or "").strip().lower()
+    if i == "schedule_appointment" or "schedule" in i or "book" in i:
         return "schedule_appointment"
     if i == "general_inquiry" or "inquir" in i:
         return "general_inquiry"
@@ -203,36 +212,10 @@ def _normalize_intent_bucket(intent: str | None) -> str:
     return "other"
 
 
-def _clinician_display(clinician: dict[str, Any]) -> str:
-    if isinstance(clinician, list):
-        clinician = clinician[0] if clinician else {}
-    first = str(clinician.get("first_name") or "").strip()
-    last = str(clinician.get("last_name") or "").strip()
-    title = str(clinician.get("title") or "").strip()
-    name = f"{first} {last}".strip()
-    if not name:
-        return "—"
-    if title.upper() in ("DC", "MD", "DO"):
-        return f"Dr. {name}"
-    return name
-
-
-def _patient_name_from_row(row: dict[str, Any]) -> str:
-    caller = str(row.get("caller_name") or "").strip()
-    if caller:
-        return caller
-    patient = row.get("patients") or {}
-    if isinstance(patient, list):
-        patient = patient[0] if patient else {}
-    first = str(patient.get("first_name") or "").strip()
-    last = str(patient.get("last_name") or "").strip()
-    name = f"{first} {last}".strip()
-    return name or "Unknown"
-
-
-def _fetch_logs(
+def _fetch_call_logs(
     clinic_id: str,
     *,
+    select: str,
     start_utc: datetime | None = None,
     end_utc: datetime | None = None,
     limit: int | None = None,
@@ -240,21 +223,15 @@ def _fetch_logs(
 ) -> list[dict[str, Any]]:
     try:
         q = (
-            supabase.table("voice_interaction_logs")
-            .select(
-                "id, clinic_id, patient_id, call_sid, transcript, intent_detected, "
-                "outcome, duration_seconds, success_flag, error_reason, caller_name, "
-                "caller_phone, summary, appointment_id, recording_url, created_at, "
-                "patients(first_name, last_name), "
-                "appointments(start_time, clinicians(first_name, last_name, title))"
-            )
+            supabase.table("call_logs")
+            .select(select)
             .eq("clinic_id", clinic_id)
-            .order("created_at", desc=True)
+            .order("started_at", desc=True)
         )
         if start_utc is not None:
-            q = q.gte("created_at", start_utc.isoformat())
+            q = q.gte("started_at", start_utc.isoformat())
         if end_utc is not None:
-            q = q.lt("created_at", end_utc.isoformat())
+            q = q.lt("started_at", end_utc.isoformat())
         if limit is not None:
             q = q.range(offset, offset + limit - 1)
         try:
@@ -271,56 +248,25 @@ def _fetch_logs(
         return []
 
 
-def _fetch_logs_simple(
-    clinic_id: str,
-    *,
-    start_utc: datetime | None = None,
-    end_utc: datetime | None = None,
-) -> list[dict[str, Any]]:
-    try:
-        q = (
-            supabase.table("voice_interaction_logs")
-            .select(
-                "outcome, intent_detected, duration_seconds, success_flag, created_at"
-            )
-            .eq("clinic_id", clinic_id)
-        )
-        if start_utc is not None:
-            q = q.gte("created_at", start_utc.isoformat())
-        if end_utc is not None:
-            q = q.lt("created_at", end_utc.isoformat())
-        try:
-            resp = q.execute()
-        except Exception as e:
-            print(f"[voice_agent] query error: {e}")
-            return []
-        _handle_supabase_error(resp)
-        return [r for r in (resp.data or []) if isinstance(r, dict)]
-    except Exception as e:
-        print(f"[voice_agent] query error: {e}")
-        return []
-
-
 def _day_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
     calls = len(rows)
-    appointments_booked = 0
-    missed_calls = 0
+    appointments_booked = sum(
+        1 for r in rows if _as_bool(r.get("appointment_booked"))
+    )
+    missed_calls = sum(
+        1
+        for r in rows
+        if str(r.get("outcome") or "").strip().lower() == "incomplete"
+    )
     durations: list[int] = []
     for r in rows:
-        outcome = str(r.get("outcome") or "").lower()
-        if outcome == "appointment_booked":
-            appointments_booked += 1
-        if outcome in _MISSED_OUTCOMES:
-            missed_calls += 1
         try:
             d = int(r.get("duration_seconds") or 0)
             if d >= 0:
                 durations.append(d)
         except (TypeError, ValueError):
             pass
-    conversion = (
-        round(appointments_booked / calls * 100) if calls > 0 else 0
-    )
+    conversion = round(appointments_booked / calls * 100) if calls > 0 else 0
     avg_duration = round(sum(durations) / len(durations)) if durations else 0
     return {
         "calls_today": calls,
@@ -332,32 +278,23 @@ def _day_metrics(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _shape_recent_call(row: dict[str, Any]) -> dict[str, Any]:
-    appt = row.get("appointments") or {}
-    if isinstance(appt, list):
-        appt = appt[0] if appt else {}
-    appt_time = None
-    appt_clinician = None
-    if appt:
-        start = appt.get("start_time")
-        if start:
-            appt_time = _format_time_display(str(start))
-        appt_clinician = _clinician_display(appt.get("clinicians") or {})
-    created = str(row.get("created_at") or "")
+    started = str(row.get("started_at") or "")
+    outcome = str(row.get("outcome") or "")
     return {
         "id": str(row.get("id") or ""),
-        "patient_id": str(row.get("patient_id") or "") or None,
-        "time": _format_time_display(created) if created else "—",
-        "caller_name": _patient_name_from_row(row),
+        "patient_id": None,
+        "time": _format_time_display(started) if started else "—",
+        "caller_name": str(row.get("caller_name") or "").strip() or "Unknown",
         "caller_phone": _format_phone(row.get("caller_phone")),
         "duration": _format_duration(row.get("duration_seconds")),
-        "outcome": str(row.get("outcome") or ""),
-        "outcome_label": _outcome_label(row.get("outcome")),
-        "appointment_time": appt_time,
-        "appointment_clinician": appt_clinician,
-        "summary": str(row.get("summary") or "").strip() or "—",
+        "outcome": outcome,
+        "outcome_label": _outcome_label(outcome),
+        "appointment_time": None,
+        "appointment_clinician": None,
+        "summary": str(row.get("call_summary") or "").strip() or "—",
         "recording_url": row.get("recording_url"),
-        "success_flag": row.get("success_flag"),
-        "call_sid": str(row.get("call_sid") or "") or None,
+        "success_flag": outcome.strip().lower() != "incomplete",
+        "call_sid": str(row.get("conversation_id") or "") or None,
         "transcript": str(row.get("transcript") or "") or None,
     }
 
@@ -371,10 +308,20 @@ def get_voice_agent_stats(
         cid = clinic_id.strip()
         target = _parse_target_date(date_param)
         yesterday = target - timedelta(days=1)
-        today_start, today_end = _day_bounds(target)
-        y_start, y_end = _day_bounds(yesterday)
-        today_rows = _fetch_logs_simple(cid, start_utc=today_start, end_utc=today_end)
-        yesterday_rows = _fetch_logs_simple(cid, start_utc=y_start, end_utc=y_end)
+        today_start, today_end = _day_bounds_utc(target)
+        y_start, y_end = _day_bounds_utc(yesterday)
+        today_rows = _fetch_call_logs(
+            cid,
+            select="outcome, appointment_booked, duration_seconds, started_at",
+            start_utc=today_start,
+            end_utc=today_end,
+        )
+        yesterday_rows = _fetch_call_logs(
+            cid,
+            select="outcome, appointment_booked, duration_seconds, started_at",
+            start_utc=y_start,
+            end_utc=y_end,
+        )
         today = _day_metrics(today_rows)
         prev = _day_metrics(yesterday_rows)
         return {
@@ -408,16 +355,20 @@ def get_voice_call_volume(
     clinic_id: str = Query(..., min_length=1),
     days: int = Query(7, ge=1, le=90),
 ):
-    cid = clinic_id.strip()
-    today = datetime.now(_CLINIC_TZ).date()
-    start_date = today - timedelta(days=days - 1)
     try:
-        start_utc, end_utc = _period_bounds(days)
-        rows = _fetch_logs_simple(cid, start_utc=start_utc, end_utc=end_utc)
+        cid = clinic_id.strip()
+        today = datetime.now(timezone.utc).date()
+        start_date = today - timedelta(days=days - 1)
+        cutoff = _period_cutoff_utc(days)
+        rows = _fetch_call_logs(
+            cid,
+            select="started_at",
+            start_utc=cutoff,
+        )
         counts: dict[str, int] = {}
         for r in rows:
-            created = str(r.get("created_at") or "")
-            d = _local_date_from_iso(created)
+            started = str(r.get("started_at") or "")
+            d = _utc_date_from_iso(started)
             if not d:
                 continue
             counts[d.isoformat()] = counts.get(d.isoformat(), 0) + 1
@@ -434,9 +385,9 @@ def get_voice_call_volume(
         return out
     except HTTPException:
         raise
-    except Exception as exc:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as e:
+        print(f"[voice_agent] query error: {e}")
+        return []
 
 
 @router.get("/voice-agent/outcomes")
@@ -446,8 +397,12 @@ def get_voice_outcomes(
 ):
     try:
         cid = clinic_id.strip()
-        start_utc, end_utc = _period_bounds(days)
-        rows = _fetch_logs_simple(cid, start_utc=start_utc, end_utc=end_utc)
+        cutoff = _period_cutoff_utc(days)
+        rows = _fetch_call_logs(
+            cid,
+            select="outcome, started_at",
+            start_utc=cutoff,
+        )
         buckets = {k: 0 for k, _, _ in _OUTCOME_BUCKETS}
         for r in rows:
             b = _normalize_outcome_bucket(r.get("outcome"))
@@ -475,7 +430,16 @@ def get_voice_recent_calls(
     try:
         cid = clinic_id.strip()
         offset = (page - 1) * limit
-        rows = _fetch_logs(cid, limit=limit, offset=offset)
+        rows = _fetch_call_logs(
+            cid,
+            select=(
+                "id, conversation_id, caller_name, caller_phone, duration_seconds, "
+                "outcome, appointment_booked, call_summary, recording_url, "
+                "transcript, started_at"
+            ),
+            limit=limit,
+            offset=offset,
+        )
         return [_shape_recent_call(r) for r in rows]
     except Exception as e:
         print(f"[voice_agent] query error: {e}")
@@ -487,26 +451,34 @@ def get_voice_top_reasons(
     clinic_id: str = Query(..., min_length=1),
     days: int = Query(7, ge=1, le=90),
 ):
-    cid = clinic_id.strip()
     try:
-        start_utc, end_utc = _period_bounds(days)
-        rows = _fetch_logs_simple(cid, start_utc=start_utc, end_utc=end_utc)
+        cid = clinic_id.strip()
+        cutoff = _period_cutoff_utc(days)
+        rows = _fetch_call_logs(
+            cid,
+            select="call_reason, started_at",
+            start_utc=cutoff,
+        )
         buckets = {k: 0 for k, _ in _INTENT_REASONS}
         for r in rows:
-            b = _normalize_intent_bucket(r.get("intent_detected"))
+            b = _normalize_intent_bucket(r.get("call_reason"))
             buckets[b] = buckets.get(b, 0) + 1
         total = len(rows) or 1
-        out = []
+        ranked = []
         for key, label in _INTENT_REASONS:
             count = buckets.get(key, 0)
             pct = round(count / total * 100) if total > 0 else 0
-            out.append({"label": label, "count": count, "pct": pct})
-        return out
+            ranked.append({"label": label, "count": count, "pct": pct, "key": key})
+        ranked.sort(key=lambda item: (-item["count"], item["label"]))
+        return [
+            {"label": item["label"], "count": item["count"], "pct": item["pct"]}
+            for item in ranked[:5]
+        ]
     except HTTPException:
         raise
-    except Exception as exc:
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    except Exception as e:
+        print(f"[voice_agent] query error: {e}")
+        return _empty_top_reasons()
 
 
 @router.get("/voice-agent/performance")
@@ -516,20 +488,30 @@ def get_voice_performance(
 ):
     try:
         cid = clinic_id.strip()
-        start_utc, end_utc = _period_bounds(days)
-        prev_end = start_utc
-        prev_start = prev_end - timedelta(days=days)
+        cutoff = _period_cutoff_utc(days)
+        prev_cutoff = cutoff - timedelta(days=days)
 
-        current = _fetch_logs_simple(cid, start_utc=start_utc, end_utc=end_utc)
-        previous = _fetch_logs_simple(
-            cid, start_utc=prev_start, end_utc=prev_end
+        current = _fetch_call_logs(
+            cid,
+            select="outcome, started_at",
+            start_utc=cutoff,
+        )
+        previous = _fetch_call_logs(
+            cid,
+            select="outcome, started_at",
+            start_utc=prev_cutoff,
+            end_utc=cutoff,
         )
 
         def answer_rate(rows: list[dict[str, Any]]) -> int:
             if not rows:
                 return 0
-            successes = sum(1 for r in rows if r.get("success_flag") is True)
-            return round(successes / len(rows) * 100)
+            answered = sum(
+                1
+                for r in rows
+                if str(r.get("outcome") or "").strip().lower() != "incomplete"
+            )
+            return round(answered / len(rows) * 100)
 
         current_rate = answer_rate(current)
         prev_rate = answer_rate(previous)
