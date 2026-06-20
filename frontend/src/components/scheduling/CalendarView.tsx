@@ -1203,12 +1203,21 @@ export default function CalendarView({
           todayYmd={todayYmd}
           appointments={filteredAppointments}
           groupSessions={filteredGroupSessions}
+          defaultClinicianId={providerId || activeClinicians[0]?.id || ""}
           onDayHeaderClick={(ymd) => {
             setAnchorYmd(ymd);
             setView("day");
           }}
           onCardClick={handleApptCardClick}
           onGroupSessionClick={handleGroupSessionClick}
+          onSlotClick={(ctx) => {
+            setBookingPrefill({
+              date: ctx.ymd,
+              time: slotIndexToHm(ctx.slotIndex),
+              clinicianId: ctx.clinicianId,
+            });
+            setBookModalOpen(true);
+          }}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           sensors={sensors}
@@ -2743,9 +2752,11 @@ function WeekGrid({
   todayYmd,
   appointments,
   groupSessions,
+  defaultClinicianId,
   onDayHeaderClick,
   onCardClick,
   onGroupSessionClick,
+  onSlotClick,
   onDragStart,
   onDragEnd,
   sensors,
@@ -2755,46 +2766,69 @@ function WeekGrid({
   todayYmd: string;
   appointments: CalendarAppointment[];
   groupSessions: CalendarGroupSession[];
+  defaultClinicianId: string;
   onDayHeaderClick: (ymd: string) => void;
   onCardClick: (a: CalendarAppointment, anchorRect: DOMRect) => void;
   onGroupSessionClick: (session: CalendarGroupSession) => void;
+  onSlotClick: (ctx: SlotClickContext) => void;
   onDragStart: (e: DragStartEvent) => void;
   onDragEnd: (e: DragEndEvent) => void;
   sensors: ReturnType<typeof useSensors>;
   activeDrag: CalendarAppointment | null;
 }) {
+  const gridHeight = NUM_SLOTS * ROW_H;
+
   return (
     <DndContext sensors={sensors} onDragStart={onDragStart} onDragEnd={onDragEnd}>
-      <div className="grid grid-cols-7 gap-2">
-        {weekDays.map((ymd) => {
-          const isToday = ymd === todayYmd;
-          const dayAppts = appointments
-            .filter((a) => easternYmdOfIso(a.start_time) === ymd)
-            .sort((a, b) => {
-              const at = safeDate(a.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-              const bt = safeDate(b.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-              return at - bt;
-            });
-          const dayGroupSessions = groupSessions
-            .filter((s) => easternYmdOfIso(s.start_time) === ymd)
-            .sort((a, b) => {
-              const at = safeDate(a.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-              const bt = safeDate(b.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER;
-              return at - bt;
-            });
-          return (
-            <WeekDayColumn
-              key={ymd}
-              ymd={ymd}
-              isToday={isToday}
-              appointments={dayAppts}
-              groupSessions={dayGroupSessions}
-              onHeaderClick={() => onDayHeaderClick(ymd)}
-              onCardClick={onCardClick}
-              onGroupSessionClick={onGroupSessionClick}
-            />
-          );
-        })}
+      <div className="overflow-x-auto rounded-xl border border-black/10 bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+        <div className="flex min-w-max">
+          <div
+            className="sticky left-0 z-20 w-16 shrink-0 border-r border-black/10 bg-white"
+            style={{ paddingTop: 48 }}
+          >
+            {Array.from({ length: NUM_SLOTS }, (_, i) => {
+              const totalMin = GRID_START_HOUR * 60 + i * SLOT_MINUTES;
+              const h = Math.floor(totalMin / 60);
+              const m = totalMin % 60;
+              const ampm = h >= 12 ? "PM" : "AM";
+              const h12 = h % 12 || 12;
+              return (
+                <div
+                  key={i}
+                  className="box-border flex items-start justify-end pr-2 text-[11px] text-slate-500"
+                  style={{ height: ROW_H }}
+                >
+                  {m === 0 ? `${h12}:00 ${ampm}` : ""}
+                </div>
+              );
+            })}
+          </div>
+          {weekDays.map((ymd) => {
+            const isToday = ymd === todayYmd;
+            const dayAppts = appointments.filter(
+              (a) => easternYmdOfIso(a.start_time) === ymd,
+            );
+            const dayGroupSessions = groupSessions.filter(
+              (s) => easternYmdOfIso(s.start_time) === ymd,
+            );
+            return (
+              <WeekDayColumn
+                key={ymd}
+                ymd={ymd}
+                isToday={isToday}
+                todayYmd={todayYmd}
+                gridHeight={gridHeight}
+                defaultClinicianId={defaultClinicianId}
+                appointments={dayAppts}
+                groupSessions={dayGroupSessions}
+                onHeaderClick={() => onDayHeaderClick(ymd)}
+                onApptClick={onCardClick}
+                onGroupSessionClick={onGroupSessionClick}
+                onSlotClick={onSlotClick}
+              />
+            );
+          })}
+        </div>
       </div>
       <DragOverlay>
         {activeDrag ? (
@@ -2808,124 +2842,91 @@ function WeekGrid({
 function WeekDayColumn({
   ymd,
   isToday,
+  todayYmd,
+  gridHeight,
+  defaultClinicianId,
   appointments,
   groupSessions,
   onHeaderClick,
-  onCardClick,
+  onApptClick,
   onGroupSessionClick,
+  onSlotClick,
 }: {
   ymd: string;
   isToday: boolean;
+  todayYmd: string;
+  gridHeight: number;
+  defaultClinicianId: string;
   appointments: CalendarAppointment[];
   groupSessions: CalendarGroupSession[];
   onHeaderClick: () => void;
-  onCardClick: (a: CalendarAppointment, anchorRect: DOMRect) => void;
+  onApptClick: (a: CalendarAppointment, anchorRect: DOMRect) => void;
   onGroupSessionClick: (session: CalendarGroupSession) => void;
+  onSlotClick: (ctx: SlotClickContext) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: `weekday-${ymd}` });
   const label = formatInTimeZone(new Date(`${ymd}T12:00:00`), NY, "EEE d");
-
-  type WeekTimelineItem =
-    | { kind: "appointment"; startMs: number; appt: CalendarAppointment }
-    | { kind: "group"; startMs: number; session: CalendarGroupSession };
-
-  const timeline = useMemo(() => {
-    const items: WeekTimelineItem[] = [
-      ...appointments.map((appt) => ({
-        kind: "appointment" as const,
-        startMs: safeDate(appt.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER,
-        appt,
-      })),
-      ...groupSessions.map((session) => ({
-        kind: "group" as const,
-        startMs: safeDate(session.start_time)?.getTime() ?? Number.MAX_SAFE_INTEGER,
-        session,
-      })),
-    ];
-    return items.sort((a, b) => a.startMs - b.startMs);
-  }, [appointments, groupSessions]);
+  const nowLinePx = useMemo(() => {
+    if (ymd !== todayYmd) return null;
+    const now = new Date();
+    const mins = minutesFromGridStart(now.toISOString());
+    if (mins < 0 || mins > NUM_SLOTS * SLOT_MINUTES) return null;
+    return (mins / SLOT_MINUTES) * ROW_H;
+  }, [ymd, todayYmd]);
 
   return (
     <div
       ref={setNodeRef}
-      className={`min-h-[280px] rounded-xl border p-2 ${
-        isToday ? "border-[#16A34A]/40 bg-green-50/40" : "border-black/10 bg-white"
-      } ${isOver ? "ring-2 ring-[#16A34A]/30" : ""}`}
+      className={`relative min-w-[140px] shrink-0 border-r border-black/10 ${
+        isToday ? "bg-green-50/30" : "bg-white"
+      } ${isOver ? "ring-2 ring-[#16A34A]/20" : ""}`}
+      style={{ width: 140 }}
     >
       <button
         type="button"
         onClick={onHeaderClick}
-        className="mb-2 w-full text-left text-xs font-semibold text-slate-800 hover:text-[#16A34A]"
+        className={`sticky top-0 z-10 w-full border-b border-black/10 px-2 py-3 text-left text-xs font-semibold hover:text-[#16A34A] ${
+          isToday ? "bg-green-50/80 text-[#16A34A]" : "bg-white text-slate-800"
+        }`}
       >
         {label}
       </button>
-      <div className="space-y-2">
-        {timeline.map((item) =>
-          item.kind === "appointment" ? (
-            <WeekDraggableCard
-              key={item.appt.id}
-              appt={item.appt}
-              onCardClick={onCardClick}
-            />
-          ) : (
-            <CalendarGroupSessionCard
-              key={`gs-${item.session.id}`}
-              session={item.session}
-              variant="week"
-              onClick={onGroupSessionClick}
-            />
-          ),
-        )}
+      <div className="relative" style={{ height: gridHeight }}>
+        {Array.from({ length: NUM_SLOTS }, (_, slotIndex) => (
+          <DroppableSlotCell
+            key={slotIndex}
+            id={`slot|${ymd}|${defaultClinicianId}|${slotIndex}`}
+            slotIndex={slotIndex}
+            isHighlighted={false}
+            onEmptyClick={() =>
+              onSlotClick({ ymd, clinicianId: defaultClinicianId, slotIndex })
+            }
+          />
+        ))}
+        {nowLinePx !== null ? (
+          <div
+            className="pointer-events-none absolute right-0 left-0 z-30 border-t-2 border-red-500"
+            style={{ top: nowLinePx }}
+          />
+        ) : null}
+        {appointments.map((a) => (
+          <DraggableApptCard
+            key={a.id}
+            appt={a}
+            dayYmd={ymd}
+            onApptClick={onApptClick}
+          />
+        ))}
+        {groupSessions.map((s) => (
+          <CalendarGroupSessionCard
+            key={`gs-${s.id}`}
+            session={s}
+            variant="day"
+            dayYmd={ymd}
+            onClick={onGroupSessionClick}
+          />
+        ))}
       </div>
-    </div>
-  );
-}
-
-function WeekDraggableCard({
-  appt,
-  onCardClick,
-}: {
-  appt: CalendarAppointment;
-  onCardClick: (a: CalendarAppointment, anchorRect: DOMRect) => void;
-}) {
-  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
-    id: `appt-${appt.id}`,
-  });
-  const color = appt.clinician.color || "#0EA5A4";
-  const startDate = safeDate(appt.start_time);
-  if (!startDate) return null;
-  return (
-    <div
-      ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          onCardClick(appt, (e.currentTarget as HTMLElement).getBoundingClientRect());
-        }
-      }}
-      onClick={(e) => {
-        e.stopPropagation();
-        onCardClick(appt, (e.currentTarget as HTMLElement).getBoundingClientRect());
-      }}
-      className={`cursor-grab rounded-lg border border-black/10 bg-white p-2 text-left shadow-sm ${
-        isDragging ? "scale-[1.03] opacity-90" : ""
-      }`}
-      style={{
-        borderLeft: `3px solid ${color}`,
-        transform: transform ? `translate3d(${transform.x}px,${transform.y}px,0)` : undefined,
-      }}
-    >
-      <p className="text-[11px] text-slate-500">
-        {formatInTimeZone(startDate, NY, "h:mm a")}
-      </p>
-      <div className="flex items-center gap-1">
-        <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color }} />
-        <p className="truncate text-xs font-medium text-slate-900">{patientFull(appt)}</p>
-      </div>
-      <p className="truncate text-[10px] text-slate-500">{appt.treatment_type.name}</p>
     </div>
   );
 }
