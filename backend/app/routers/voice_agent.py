@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Query
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 
@@ -222,20 +223,23 @@ def _fetch_call_logs(
     offset: int = 0,
 ) -> list[dict[str, Any]]:
     try:
-        q = (
-            supabase.table("call_logs")
-            .select(select)
-            .eq("clinic_id", clinic_id)
-            .order("started_at", desc=True)
-        )
-        if start_utc is not None:
-            q = q.gte("started_at", start_utc.isoformat())
-        if end_utc is not None:
-            q = q.lt("started_at", end_utc.isoformat())
-        if limit is not None:
-            q = q.range(offset, offset + limit - 1)
+        def _run():
+            q = (
+                supabase.table("call_logs")
+                .select(select)
+                .eq("clinic_id", clinic_id)
+                .order("started_at", desc=True)
+            )
+            if start_utc is not None:
+                q = q.gte("started_at", start_utc.isoformat())
+            if end_utc is not None:
+                q = q.lt("started_at", end_utc.isoformat())
+            if limit is not None:
+                q = q.range(offset, offset + limit - 1)
+            return q.execute()
+
         try:
-            resp = q.execute()
+            resp = supabase_execute(_run)
         except Exception as e:
             print(f"[voice_agent] query error: {e}")
             return []

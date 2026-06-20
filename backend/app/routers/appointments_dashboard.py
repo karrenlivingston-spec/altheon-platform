@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Query
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 
@@ -110,23 +111,26 @@ def _fetch_day_appointments(
     clinician_id: Optional[str] = None,
 ) -> list[dict[str, Any]]:
     start_utc, end_utc = _day_bounds(target)
-    q = (
-        supabase.table("appointments")
-        .select(
-            "id,start_time,end_time,status,source,notes,is_virtual,patient_id,clinician_id,"
-            "patients(first_name,last_name),"
-            "clinicians(first_name,last_name,title,color),"
-            "treatment_types(name,requires_evaluation)"
+    def _run():
+        q = (
+            supabase.table("appointments")
+            .select(
+                "id,start_time,end_time,status,source,notes,is_virtual,patient_id,clinician_id,"
+                "patients(first_name,last_name),"
+                "clinicians(first_name,last_name,title,color),"
+                "treatment_types(name,requires_evaluation)"
+            )
+            .eq("clinic_id", clinic_id)
+            .neq("status", "cancelled")
+            .gte("start_time", start_utc.isoformat())
+            .lt("start_time", end_utc.isoformat())
+            .order("start_time")
         )
-        .eq("clinic_id", clinic_id)
-        .neq("status", "cancelled")
-        .gte("start_time", start_utc.isoformat())
-        .lt("start_time", end_utc.isoformat())
-        .order("start_time")
-    )
-    if clinician_id and clinician_id.strip():
-        q = q.eq("clinician_id", clinician_id.strip())
-    resp = q.execute()
+        if clinician_id and clinician_id.strip():
+            q = q.eq("clinician_id", clinician_id.strip())
+        return q.execute()
+
+    resp = supabase_execute(_run)
     _handle_supabase_error(resp)
     return [r for r in (resp.data or []) if isinstance(r, dict)]
 
@@ -146,8 +150,8 @@ def get_appointments_stats(
         week_start_utc, _ = _day_bounds(week_start)
         _, week_end_utc = _day_bounds(week_end + timedelta(days=1))
 
-        week_resp = (
-            supabase.table("appointments")
+        week_resp = supabase_execute(
+            lambda: supabase.table("appointments")
             .select("id,status,start_time,end_time")
             .eq("clinic_id", cid)
             .neq("status", "cancelled")
@@ -277,8 +281,8 @@ def get_appointments_tasks(clinic_id: str = Query(..., min_length=1)):
         intake_appt_ids: set[str] = set()
         if appt_ids:
             try:
-                intake_resp = (
-                    supabase.table("intake_forms")
+                intake_resp = supabase_execute(
+                    lambda: supabase.table("intake_forms")
                     .select("appointment_id")
                     .in_("appointment_id", appt_ids)
                     .execute()
@@ -291,8 +295,8 @@ def get_appointments_tasks(clinic_id: str = Query(..., min_length=1)):
                 }
             except Exception:
                 try:
-                    ci_resp = (
-                        supabase.table("clinical_intakes")
+                    ci_resp = supabase_execute(
+                        lambda: supabase.table("clinical_intakes")
                         .select("appointment_id")
                         .in_("appointment_id", appt_ids)
                         .execute()
@@ -311,8 +315,8 @@ def get_appointments_tasks(clinic_id: str = Query(..., min_length=1)):
 
         if appt_ids:
             try:
-                consent_resp = (
-                    supabase.table("intake_forms")
+                consent_resp = supabase_execute(
+                    lambda: supabase.table("intake_forms")
                     .select("appointment_id,consent_to_treatment")
                     .in_("appointment_id", appt_ids)
                     .execute()
@@ -330,8 +334,8 @@ def get_appointments_tasks(clinic_id: str = Query(..., min_length=1)):
 
         if patient_ids:
             try:
-                pat_resp = (
-                    supabase.table("patients")
+                pat_resp = supabase_execute(
+                    lambda: supabase.table("patients")
                     .select("id,insurance_carrier,insurance_status")
                     .in_("id", patient_ids)
                     .execute()
@@ -351,8 +355,8 @@ def get_appointments_tasks(clinic_id: str = Query(..., min_length=1)):
                 insurance_verifications = 0
 
         try:
-            claims_resp = (
-                supabase.table("billing_records")
+            claims_resp = supabase_execute(
+                lambda: supabase.table("billing_records")
                 .select("id", count="exact")
                 .eq("clinic_id", cid)
                 .eq("status", "ready_to_submit")
@@ -364,8 +368,8 @@ def get_appointments_tasks(clinic_id: str = Query(..., min_length=1)):
                 claims_ready = len(claims_resp.data)
         except Exception:
             try:
-                draft_resp = (
-                    supabase.table("billing_records")
+                draft_resp = supabase_execute(
+                    lambda: supabase.table("billing_records")
                     .select("id", count="exact")
                     .eq("clinic_id", cid)
                     .eq("status", "draft")
@@ -398,8 +402,8 @@ def get_appointments_utilization(
     target = _parse_target_date(date_param)
 
     try:
-        clinicians_resp = (
-            supabase.table("clinicians")
+        clinicians_resp = supabase_execute(
+            lambda: supabase.table("clinicians")
             .select("id,first_name,last_name,title")
             .eq("clinic_id", cid)
             .eq("is_active", True)
@@ -462,8 +466,8 @@ def get_appointments_aria_stats(
     }
 
     try:
-        voice_resp = (
-            supabase.table("voice_interaction_logs")
+        voice_resp = supabase_execute(
+            lambda: supabase.table("voice_interaction_logs")
             .select("outcome,intent_detected,success_flag,created_at")
             .eq("clinic_id", cid)
             .gte("created_at", start_utc.isoformat())
@@ -505,8 +509,8 @@ def get_appointments_day_list(
 
         appt_count_by_patient: dict[str, int] = {}
         if patient_ids:
-            hist = (
-                supabase.table("appointments")
+            hist = supabase_execute(
+                lambda: supabase.table("appointments")
                 .select("patient_id")
                 .eq("clinic_id", cid)
                 .in_("patient_id", patient_ids)
@@ -520,8 +524,8 @@ def get_appointments_day_list(
         appt_ids = [str(r.get("id") or "") for r in rows if r.get("id")]
         if appt_ids:
             try:
-                intake_resp = (
-                    supabase.table("intake_forms")
+                intake_resp = supabase_execute(
+                    lambda: supabase.table("intake_forms")
                     .select("appointment_id")
                     .in_("appointment_id", appt_ids)
                     .execute()
@@ -536,8 +540,8 @@ def get_appointments_day_list(
         verified_patients: set[str] = set()
         if patient_ids:
             try:
-                pat_resp = (
-                    supabase.table("patients")
+                pat_resp = supabase_execute(
+                    lambda: supabase.table("patients")
                     .select("id,insurance_status,insurance_carrier")
                     .in_("id", patient_ids)
                     .execute()
@@ -553,8 +557,8 @@ def get_appointments_day_list(
         copay_appt_ids: set[str] = set()
         if appt_ids:
             try:
-                bill_resp = (
-                    supabase.table("billing_records")
+                bill_resp = supabase_execute(
+                    lambda: supabase.table("billing_records")
                     .select("appointment_id,copay_collected,amount_paid_cents")
                     .in_("appointment_id", appt_ids)
                     .execute()
@@ -630,8 +634,8 @@ def get_appointments_day_list(
         if clinician_id and clinician_id.strip():
             clinician_ids = [clinician_id.strip()]
         else:
-            clin_resp = (
-                supabase.table("clinicians")
+            clin_resp = supabase_execute(
+                lambda: supabase.table("clinicians")
                 .select("id")
                 .eq("clinic_id", cid)
                 .eq("is_active", True)
@@ -644,8 +648,8 @@ def get_appointments_day_list(
         date_iso = target.isoformat()
         for cid_key in clinician_ids:
             try:
-                block_resp = (
-                    supabase.table("blocked_time")
+                block_resp = supabase_execute(
+                    lambda: supabase.table("blocked_time")
                     .select(
                         "id,clinician_id,start_time,end_time,"
                         "start_time_of_day,end_time_of_day,reason"
@@ -665,8 +669,8 @@ def get_appointments_day_list(
                         {},
                     )
                     if not clin_row:
-                        cr = (
-                            supabase.table("clinicians")
+                        cr = supabase_execute(
+                            lambda: supabase.table("clinicians")
                             .select("first_name,last_name,title,color")
                             .eq("id", cid_key)
                             .limit(1)
@@ -730,8 +734,8 @@ def get_upcoming_appointments(
     cid = clinic_id.strip()
     now_utc = datetime.now(timezone.utc)
     try:
-        resp = (
-            supabase.table("appointments")
+        resp = supabase_execute(
+            lambda: supabase.table("appointments")
             .select(
                 "id,start_time,end_time,status,"
                 "patients(first_name,last_name),"

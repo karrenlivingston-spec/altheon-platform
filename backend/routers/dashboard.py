@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.routers.voice_agent import compute_voice_agent_stats
 from routers.fee_schedule import ClinicUserDep
 
@@ -145,8 +146,8 @@ def _enrich_tasks_with_eob_ids(
     if not rows:
         return rows
     try:
-        eob_resp = (
-            supabase.table("eob_extractions")
+        eob_resp = supabase_execute(
+            lambda: supabase.table("eob_extractions")
             .select("id, claim_id, task_id")
             .eq("clinic_id", cid)
             .execute()
@@ -190,8 +191,8 @@ def _sort_clinic_tasks(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _fetch_open_clinic_tasks(cid: str) -> list[dict[str, Any]]:
-    resp = (
-        supabase.table("clinic_tasks")
+    resp = supabase_execute(
+        lambda: supabase.table("clinic_tasks")
         .select(
             "id, title, description, priority, patient_id, task_type, "
             "claim_id, status, created_at, resubmission_generated_at"
@@ -246,8 +247,8 @@ def dashboard_summary(clinic: ClinicUserDep):
             "patients(first_name, last_name), treatment_types(name), "
             "clinicians(first_name, last_name)"
         )
-        appt_resp = (
-            supabase.table("appointments")
+        appt_resp = supabase_execute(
+            lambda: supabase.table("appointments")
             .select(appt_select)
             .eq("clinic_id", cid)
             .gte("start_time", _eastern_day_start_utc(last_week_start).isoformat())
@@ -288,8 +289,8 @@ def dashboard_summary(clinic: ClinicUserDep):
             if today_appts:
                 ids = [str(a.get("id") or "") for a in today_appts if a.get("id")]
                 if ids:
-                    forms_resp = (
-                        supabase.table("intake_forms")
+                    forms_resp = supabase_execute(
+                        lambda: supabase.table("intake_forms")
                         .select("appointment_id")
                         .eq("clinic_id", cid)
                         .in_("appointment_id", ids)
@@ -314,8 +315,8 @@ def dashboard_summary(clinic: ClinicUserDep):
         ]
 
         # --- Billing records ---
-        billing_resp = (
-            supabase.table("billing_records")
+        billing_resp = supabase_execute(
+            lambda: supabase.table("billing_records")
             .select(
                 "id, status, total_billed_cents, amount_paid_cents, "
                 "date_of_service, appointment_id"
@@ -358,8 +359,8 @@ def dashboard_summary(clinic: ClinicUserDep):
         record_ids = [str(r.get("id") or "") for r in billing_rows if r.get("id")]
         collections_mtd_cents = 0
         if record_ids:
-            pay_resp = (
-                supabase.table("billing_payments")
+            pay_resp = supabase_execute(
+                lambda: supabase.table("billing_payments")
                 .select("amount_cents, payment_date, billing_record_id")
                 .gte("payment_date", month_start_iso)
                 .execute()
@@ -380,8 +381,8 @@ def dashboard_summary(clinic: ClinicUserDep):
         }
         unbilled_rows: list[dict[str, Any]] = []
         try:
-            completed_resp = (
-                supabase.table("appointments")
+            completed_resp = supabase_execute(
+                lambda: supabase.table("appointments")
                 .select("id, start_time, status")
                 .eq("clinic_id", cid)
                 .eq("status", "completed")
@@ -424,8 +425,8 @@ def dashboard_summary(clinic: ClinicUserDep):
         # --- Tasks ---
         incomplete_intakes = 0
         try:
-            token_resp = (
-                supabase.table("intake_tokens")
+            token_resp = supabase_execute(
+                lambda: supabase.table("intake_tokens")
                 .select("id")
                 .eq("clinic_id", cid)
                 .eq("used", False)
@@ -439,8 +440,8 @@ def dashboard_summary(clinic: ClinicUserDep):
 
         notes_review = 0
         try:
-            notes_resp = (
-                supabase.table("clinical_notes")
+            notes_resp = supabase_execute(
+                lambda: supabase.table("clinical_notes")
                 .select("id", count="exact")
                 .eq("clinic_id", cid)
                 .in_("status", ["draft", "ai_flagged", "needs_correction", "ready_for_review"])
@@ -455,8 +456,8 @@ def dashboard_summary(clinic: ClinicUserDep):
 
         legal_in_progress = 0
         try:
-            legal_resp = (
-                supabase.table("legal_requests")
+            legal_resp = supabase_execute(
+                lambda: supabase.table("legal_requests")
                 .select("id", count="exact")
                 .eq("clinic_id", cid)
                 .not_.in_("status", ["delivered", "archived"])
@@ -497,8 +498,8 @@ def dashboard_summary(clinic: ClinicUserDep):
         activities: list[dict[str, Any]] = []
 
         try:
-            signed_resp = (
-                supabase.table("clinical_notes")
+            signed_resp = supabase_execute(
+                lambda: supabase.table("clinical_notes")
                 .select("id, signed_at, patients(first_name, last_name)")
                 .eq("clinic_id", cid)
                 .not_.is_("signed_at", "null")
@@ -525,8 +526,8 @@ def dashboard_summary(clinic: ClinicUserDep):
 
         try:
             if record_ids:
-                recent_pay = (
-                    supabase.table("billing_payments")
+                recent_pay = supabase_execute(
+                    lambda: supabase.table("billing_payments")
                     .select("amount_cents, payment_date, billing_record_id")
                     .order("payment_date", desc=True)
                     .limit(15)
@@ -550,8 +551,8 @@ def dashboard_summary(clinic: ClinicUserDep):
             traceback.print_exc()
 
         try:
-            intake_act = (
-                supabase.table("intake_forms")
+            intake_act = supabase_execute(
+                lambda: supabase.table("intake_forms")
                 .select("id, submitted_at, patients(first_name, last_name)")
                 .eq("clinic_id", cid)
                 .order("submitted_at", desc=True)
@@ -576,8 +577,8 @@ def dashboard_summary(clinic: ClinicUserDep):
             traceback.print_exc()
 
         try:
-            legal_act = (
-                supabase.table("legal_requests")
+            legal_act = supabase_execute(
+                lambda: supabase.table("legal_requests")
                 .select("id, created_at, requesting_party_name")
                 .eq("clinic_id", cid)
                 .order("created_at", desc=True)
@@ -602,8 +603,8 @@ def dashboard_summary(clinic: ClinicUserDep):
             traceback.print_exc()
 
         try:
-            claims_resp = (
-                supabase.table("insurance_claims")
+            claims_resp = supabase_execute(
+                lambda: supabase.table("insurance_claims")
                 .select("id")
                 .eq("clinic_id", cid)
                 .execute()
@@ -611,8 +612,8 @@ def dashboard_summary(clinic: ClinicUserDep):
             _handle_supabase_error(claims_resp)
             claim_ids = [str(c.get("id") or "") for c in (claims_resp.data or []) if c.get("id")]
             if claim_ids:
-                audit_resp = (
-                    supabase.table("claim_audit_log")
+                audit_resp = supabase_execute(
+                    lambda: supabase.table("claim_audit_log")
                     .select("action, created_at, claim_id")
                     .in_("claim_id", claim_ids)
                     .order("created_at", desc=True)
@@ -721,7 +722,7 @@ def list_clinic_tasks(
             q = q.eq("priority", priority.strip().lower())
         if task_type:
             q = q.eq("task_type", task_type.strip().lower())
-        resp = q.execute()
+        resp = supabase_execute(lambda: q.execute())
         _handle_supabase_error(resp)
         rows = _sort_clinic_tasks(
             [r for r in (resp.data or []) if isinstance(r, dict)]
@@ -746,8 +747,8 @@ def patch_clinic_task(task_id: str, body: PatchClinicTaskBody, clinic: ClinicUse
 
     cid = clinic.clinic_id
     try:
-        upd = (
-            supabase.table("clinic_tasks")
+        upd = supabase_execute(
+            lambda: supabase.table("clinic_tasks")
             .update({"status": new_status, "updated_at": _now_iso()})
             .eq("id", tid)
             .eq("clinic_id", cid)
