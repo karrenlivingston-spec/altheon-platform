@@ -377,6 +377,10 @@ function overlapsRange(
 
 type CalendarViewProps = {
   clinicId: string;
+  /** When provided, skips fetching clinicians in loadData (parent owns the request). */
+  sharedClinicians?: ClinicianRow[];
+  /** When provided, skips fetching locations in loadData (parent owns the request). */
+  sharedLocations?: LocationRow[];
   openBookingNonce?: number;
   openBlockNonce?: number;
   hideToolbar?: boolean;
@@ -403,6 +407,8 @@ type CalendarViewProps = {
 
 export default function CalendarView({
   clinicId,
+  sharedClinicians,
+  sharedLocations,
   openBookingNonce = 0,
   openBlockNonce = 0,
   hideToolbar = false,
@@ -463,8 +469,10 @@ export default function CalendarView({
     [onLocationIdChange],
   );
 
-  const [clinicians, setClinicians] = useState<ClinicianRow[]>([]);
-  const [locations, setLocations] = useState<LocationRow[]>([]);
+  const [fetchedClinicians, setFetchedClinicians] = useState<ClinicianRow[]>([]);
+  const [fetchedLocations, setFetchedLocations] = useState<LocationRow[]>([]);
+  const clinicians = sharedClinicians ?? fetchedClinicians;
+  const locations = sharedLocations ?? fetchedLocations;
   const [appointments, setAppointments] = useState<CalendarAppointment[]>([]);
   const [groupSessions, setGroupSessions] = useState<CalendarGroupSession[]>([]);
   const [blocked, setBlocked] = useState<BlockedRow[]>([]);
@@ -555,8 +563,12 @@ export default function CalendarView({
         setCalendarError("Sign in is required to load the calendar.");
         setAppointments([]);
         setGroupSessions([]);
-        setClinicians([]);
-        setLocations([]);
+        if (sharedClinicians === undefined) {
+          setFetchedClinicians([]);
+        }
+        if (sharedLocations === undefined) {
+          setFetchedLocations([]);
+        }
         setBlocked([]);
         return;
       }
@@ -573,11 +585,24 @@ export default function CalendarView({
       if (locationId) {
         gsUrl += `&location_id=${encodeURIComponent(locationId)}`;
       }
+
+      const fetchClinicians = sharedClinicians === undefined;
+      const fetchLocations = sharedLocations === undefined;
       const [calRes, gsRes, clinRes, locRes] = await Promise.all([
         fetch(calUrl, { headers: h }),
         fetch(gsUrl, { headers: h }),
-        fetch(`${API_BASE}/clinicians?clinic_id=${encodeURIComponent(clinicId)}`, { headers: h }),
-        supabase.from("locations").select("id,name").eq("clinic_id", clinicId).eq("is_active", true),
+        fetchClinicians
+          ? fetch(`${API_BASE}/clinicians?clinic_id=${encodeURIComponent(clinicId)}`, {
+              headers: h,
+            })
+          : Promise.resolve(null),
+        fetchLocations
+          ? supabase
+              .from("locations")
+              .select("id,name")
+              .eq("clinic_id", clinicId)
+              .eq("is_active", true)
+          : Promise.resolve(null),
       ]);
 
       if (!calRes.ok) {
@@ -600,18 +625,24 @@ export default function CalendarView({
         setGroupSessions([]);
       }
 
-      const clinJson = clinRes.ok ? await clinRes.json() : [];
-      setClinicians(Array.isArray(clinJson) ? clinJson : []);
-      setLocations((locRes.data as LocationRow[]) || []);
+      let clinJson: ClinicianRow[] = sharedClinicians ?? [];
+      if (fetchClinicians && clinRes) {
+        clinJson = clinRes.ok ? await clinRes.json() : [];
+        setFetchedClinicians(Array.isArray(clinJson) ? clinJson : []);
+      }
+      if (fetchLocations && locRes) {
+        setFetchedLocations((locRes.data as LocationRow[]) || []);
+      }
 
       if (!calRes.ok) {
         return;
       }
 
       if (view === "day") {
+        const clinicianRows = fetchClinicians ? clinJson : clinicians;
         const ids = providerId
           ? [providerId]
-          : (Array.isArray(clinJson) ? clinJson : []).map((c: ClinicianRow) => c.id);
+          : clinicianRows.map((c) => c.id);
         const blocks: BlockedRow[] = [];
         for (const cid of ids) {
           const br = await fetch(
@@ -635,7 +666,17 @@ export default function CalendarView({
     } finally {
       setLoading(false);
     }
-  }, [clinicId, range.start, range.end, view, anchorYmd, providerId, locationId]);
+  }, [
+    clinicId,
+    range.start,
+    range.end,
+    view,
+    anchorYmd,
+    providerId,
+    locationId,
+    sharedClinicians,
+    sharedLocations,
+  ]);
 
   useEffect(() => {
     void loadData();

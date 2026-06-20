@@ -53,9 +53,10 @@ const API_BASE =
 
 type ClinicianOption = {
   id: string;
-  first_name?: string;
-  last_name?: string;
-  title?: string;
+  first_name?: string | null;
+  last_name?: string | null;
+  title?: string | null;
+  color?: string | null;
 };
 
 type LocationOption = { id: string; name?: string };
@@ -100,6 +101,7 @@ export default function AdminAppointmentsPage() {
   const [upcoming, setUpcoming] = useState<UpcomingItem[]>([]);
   const [weekItems, setWeekItems] = useState<Record<string, DayListItem[]>>({});
   const [dashLoading, setDashLoading] = useState(true);
+  const [dayListLoading, setDayListLoading] = useState(false);
 
   const [openBookingNonce, setOpenBookingNonce] = useState(0);
   const [openBlockNonce, setOpenBlockNonce] = useState(0);
@@ -126,6 +128,7 @@ export default function AdminAppointmentsPage() {
   );
 
   const loadMeta = useCallback(async () => {
+    if (!clinicId) return;
     const h = await authHeaders();
     const [clinRes, locRes] = await Promise.all([
       fetch(`${API_BASE}/clinicians?clinic_id=${encodeURIComponent(clinicId)}`, {
@@ -165,50 +168,48 @@ export default function AdminAppointmentsPage() {
         clinic_id: clinicId,
         date: anchorYmd,
       });
-      const dayParams = new URLSearchParams({
-        clinic_id: clinicId,
-        date: anchorYmd,
-      });
-      if (providerId) dayParams.set("clinician_id", providerId);
 
-      const weekDays = Array.from({ length: 7 }, (_, i) =>
-        addDaysToYmd(weekMonday, i),
-      );
-
-      const [
-        statsRes,
-        tasksRes,
-        utilRes,
-        ariaRes,
-        dayRes,
-        upcomingRes,
-        ...weekResList
-      ] = await Promise.all([
-        fetch(`${API_BASE}/api/appointments/stats?${params}`, { headers: h }),
-        fetch(`${API_BASE}/api/appointments/tasks?clinic_id=${encodeURIComponent(clinicId)}`, {
-          headers: h,
-        }),
-        fetch(`${API_BASE}/api/appointments/utilization?${params}`, { headers: h }),
-        fetch(`${API_BASE}/api/appointments/aria-stats?${params}`, { headers: h }),
-        fetch(`${API_BASE}/api/appointments/day-list?${dayParams}`, { headers: h }),
-        fetch(
-          `${API_BASE}/api/appointments/upcoming?clinic_id=${encodeURIComponent(clinicId)}&limit=4`,
-          { headers: h },
-        ),
-        ...weekDays.map((d) =>
+      const [statsRes, tasksRes, utilRes, ariaRes, upcomingRes] =
+        await Promise.all([
+          fetch(`${API_BASE}/api/appointments/stats?${params}`, { headers: h }),
           fetch(
-            `${API_BASE}/api/appointments/day-list?clinic_id=${encodeURIComponent(clinicId)}&date=${d}${providerId ? `&clinician_id=${encodeURIComponent(providerId)}` : ""}`,
+            `${API_BASE}/api/appointments/tasks?clinic_id=${encodeURIComponent(clinicId)}`,
             { headers: h },
           ),
-        ),
-      ]);
+          fetch(`${API_BASE}/api/appointments/utilization?${params}`, { headers: h }),
+          fetch(`${API_BASE}/api/appointments/aria-stats?${params}`, { headers: h }),
+          fetch(
+            `${API_BASE}/api/appointments/upcoming?clinic_id=${encodeURIComponent(clinicId)}&limit=4`,
+            { headers: h },
+          ),
+        ]);
 
       setStats(statsRes.ok ? await statsRes.json() : null);
       setTasks(tasksRes.ok ? await tasksRes.json() : null);
       setUtilization(utilRes.ok ? await utilRes.json() : []);
       setAria(ariaRes.ok ? await ariaRes.json() : null);
-      setDayList(dayRes.ok ? await dayRes.json() : []);
       setUpcoming(upcomingRes.ok ? await upcomingRes.json() : []);
+    } finally {
+      setDashLoading(false);
+    }
+  }, [clinicId, anchorYmd]);
+
+  const loadDayList = useCallback(async () => {
+    if (!clinicId || view !== "day") return;
+    setDayListLoading(true);
+    try {
+      const h = await authHeaders();
+      const weekDays = Array.from({ length: 7 }, (_, i) =>
+        addDaysToYmd(weekMonday, i),
+      );
+      const weekResList = await Promise.all(
+        weekDays.map((d) =>
+          fetch(
+            `${API_BASE}/api/appointments/day-list?clinic_id=${encodeURIComponent(clinicId)}&date=${d}${providerId ? `&clinician_id=${encodeURIComponent(providerId)}` : ""}`,
+            { headers: h },
+          ),
+        ),
+      );
 
       const weekMap: Record<string, DayListItem[]> = {};
       await Promise.all(
@@ -217,10 +218,11 @@ export default function AdminAppointmentsPage() {
         }),
       );
       setWeekItems(weekMap);
+      setDayList(weekMap[anchorYmd] ?? []);
     } finally {
-      setDashLoading(false);
+      setDayListLoading(false);
     }
-  }, [clinicId, anchorYmd, providerId, weekMonday]);
+  }, [clinicId, anchorYmd, providerId, weekMonday, view]);
 
   useEffect(() => {
     void loadMeta();
@@ -233,6 +235,12 @@ export default function AdminAppointmentsPage() {
   useEffect(() => {
     void loadDashboard();
   }, [loadDashboard]);
+
+  useEffect(() => {
+    void loadDayList();
+  }, [loadDayList]);
+
+  const dayViewLoading = dashLoading || dayListLoading;
 
   function handleWaitlistBookNow(request: WaitlistBookRequest) {
     setWaitlistViewOpen(false);
@@ -502,7 +510,7 @@ export default function AdminAppointmentsPage() {
             <>
               <AppointmentsDaySchedule
                 items={dayList}
-                loading={dashLoading}
+                loading={dayViewLoading}
                 dateLabel={formatDayTitle(anchorYmd)}
                 onView={(id) => setOpenAppointmentId(id)}
                 onEdit={(id) => setOpenAppointmentId(id)}
@@ -510,7 +518,7 @@ export default function AdminAppointmentsPage() {
               <AppointmentsWeekStrip
                 anchorYmd={anchorYmd}
                 weekItems={weekItems}
-                loading={dashLoading}
+                loading={dayViewLoading}
                 onDayClick={setAnchorYmd}
                 onViewFullCalendar={() => setView("week")}
               />
@@ -519,6 +527,8 @@ export default function AdminAppointmentsPage() {
 
           <CalendarView
             clinicId={clinicId}
+            sharedClinicians={clinicians}
+            sharedLocations={locations}
             openBookingNonce={openBookingNonce}
             openBlockNonce={openBlockNonce}
             hideToolbar
