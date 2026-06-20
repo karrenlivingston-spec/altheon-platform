@@ -309,7 +309,7 @@ export default function AdminAppointmentsPage() {
   );
 
   return (
-    <div className={DS_PAGE_ROOT}>
+    <div className={`${DS_PAGE_ROOT} !py-6 !pb-8`}>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <h1 className={DS_PAGE_TITLE}>Appointments</h1>
@@ -486,18 +486,18 @@ export default function AdminAppointmentsPage() {
         </div>
       </div>
 
-      <div className="mt-6">
+      <div className="mt-4">
         <AppointmentsStatCards stats={stats} loading={dashLoading} />
       </div>
 
       {patientFlowOpen ? (
-        <section className="mt-6">
+        <section className="mt-4">
           <PatientFlow />
         </section>
       ) : null}
 
-      <div className="mt-6 flex flex-col gap-6 xl:flex-row xl:items-start">
-        <div className="min-w-0 flex-1 xl:w-[65%]">
+      <div className="mt-4 flex flex-col gap-4 xl:flex-row xl:items-start">
+        <div className="min-w-0 flex-1 xl:w-[78%]">
           {view === "day" ? (
             <>
               <AppointmentsDaySchedule
@@ -541,7 +541,7 @@ export default function AdminAppointmentsPage() {
           />
         </div>
 
-        <div className="w-full shrink-0 xl:w-[35%]">
+        <div className="w-full shrink-0 xl:w-[22%] xl:max-w-[272px]">
           <AppointmentsSidePanels
             tasks={tasks}
             utilization={utilization}
