@@ -299,50 +299,64 @@ def _shape_recent_call(row: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def compute_voice_agent_stats(clinic_id: str, date_str: str) -> dict[str, Any]:
+    """
+    Compute voice-agent daily stats from call_logs for a clinic and calendar date.
+
+    ``date_str`` is YYYY-MM-DD (same value the Voice Agent page sends via getEasternYMD).
+    Returns the same dict shape as GET /api/voice-agent/stats.
+    """
+    cid = clinic_id.strip()
+    target = _parse_target_date(date_str)
+    yesterday = target - timedelta(days=1)
+    today_start, today_end = _day_bounds_utc(target)
+    y_start, y_end = _day_bounds_utc(yesterday)
+    select = "outcome, appointment_booked, duration_seconds, started_at"
+    today_rows = _fetch_call_logs(
+        cid,
+        select=select,
+        start_utc=today_start,
+        end_utc=today_end,
+    )
+    yesterday_rows = _fetch_call_logs(
+        cid,
+        select=select,
+        start_utc=y_start,
+        end_utc=y_end,
+    )
+    today = _day_metrics(today_rows)
+    prev = _day_metrics(yesterday_rows)
+    return {
+        "calls_today": today["calls_today"],
+        "calls_today_vs_yesterday": today["calls_today"] - prev["calls_today"],
+        "appointments_booked": today["appointments_booked"],
+        "appointments_booked_vs_yesterday": (
+            today["appointments_booked"] - prev["appointments_booked"]
+        ),
+        "missed_calls": today["missed_calls"],
+        "missed_vs_yesterday": today["missed_calls"] - prev["missed_calls"],
+        "booking_conversion_pct": today["booking_conversion_pct"],
+        "conversion_vs_yesterday": (
+            today["booking_conversion_pct"] - prev["booking_conversion_pct"]
+        ),
+        "avg_duration_seconds": today["avg_duration_seconds"],
+        "avg_duration_vs_yesterday": (
+            today["avg_duration_seconds"] - prev["avg_duration_seconds"]
+        ),
+        "is_online": True,
+    }
+
+
 @router.get("/voice-agent/stats")
 def get_voice_agent_stats(
     clinic_id: str = Query(..., min_length=1),
     date_param: Optional[str] = Query(default=None, alias="date"),
 ):
     try:
-        cid = clinic_id.strip()
-        target = _parse_target_date(date_param)
-        yesterday = target - timedelta(days=1)
-        today_start, today_end = _day_bounds_utc(target)
-        y_start, y_end = _day_bounds_utc(yesterday)
-        today_rows = _fetch_call_logs(
-            cid,
-            select="outcome, appointment_booked, duration_seconds, started_at",
-            start_utc=today_start,
-            end_utc=today_end,
-        )
-        yesterday_rows = _fetch_call_logs(
-            cid,
-            select="outcome, appointment_booked, duration_seconds, started_at",
-            start_utc=y_start,
-            end_utc=y_end,
-        )
-        today = _day_metrics(today_rows)
-        prev = _day_metrics(yesterday_rows)
-        return {
-            "calls_today": today["calls_today"],
-            "calls_today_vs_yesterday": today["calls_today"] - prev["calls_today"],
-            "appointments_booked": today["appointments_booked"],
-            "appointments_booked_vs_yesterday": (
-                today["appointments_booked"] - prev["appointments_booked"]
-            ),
-            "missed_calls": today["missed_calls"],
-            "missed_vs_yesterday": today["missed_calls"] - prev["missed_calls"],
-            "booking_conversion_pct": today["booking_conversion_pct"],
-            "conversion_vs_yesterday": (
-                today["booking_conversion_pct"] - prev["booking_conversion_pct"]
-            ),
-            "avg_duration_seconds": today["avg_duration_seconds"],
-            "avg_duration_vs_yesterday": (
-                today["avg_duration_seconds"] - prev["avg_duration_seconds"]
-            ),
-            "is_online": True,
-        }
+        date_str = str(date_param or "").strip()
+        if not date_str:
+            date_str = datetime.now(_DISPLAY_TZ).date().isoformat()
+        return compute_voice_agent_stats(clinic_id, date_str)
     except HTTPException:
         raise
     except Exception as e:

@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.routers.voice_agent import compute_voice_agent_stats
 from routers.fee_schedule import ClinicUserDep
 
 router = APIRouter()
@@ -398,7 +399,7 @@ def dashboard_summary(clinic: ClinicUserDep):
         except Exception:
             traceback.print_exc()
 
-        # --- Voice interaction logs (Aria) ---
+        # --- Aria voice agent (call_logs, shared with /api/voice-agent/stats) ---
         aria = {
             "calls_today": 0,
             "booked_today": 0,
@@ -408,47 +409,15 @@ def dashboard_summary(clinic: ClinicUserDep):
             "is_online": True,
         }
         try:
-            voice_resp = (
-                supabase.table("voice_interaction_logs")
-                .select(
-                    "outcome, intent_detected, duration_seconds, "
-                    "success_flag, created_at"
-                )
-                .eq("clinic_id", cid)
-                .gte("created_at", today_start.isoformat())
-                .execute()
-            )
-            _handle_supabase_error(voice_resp)
-            today_calls = voice_resp.data or []
-            aria["calls_today"] = len(today_calls)
-            durations: list[int] = []
-            for c in today_calls:
-                outcome = str(c.get("outcome") or "").lower()
-                intent = str(c.get("intent_detected") or "").lower()
-                if "book" in outcome or "appointment" in outcome or "book" in intent:
-                    aria["booked_today"] += 1
-                if c.get("success_flag") is False:
-                    aria["missed_today"] += 1
-                try:
-                    d = int(c.get("duration_seconds") or 0)
-                    if d >= 0:
-                        durations.append(d)
-                except (TypeError, ValueError):
-                    pass
-            if durations:
-                aria["avg_duration_seconds"] = round(sum(durations) / len(durations))
-
-            all_voice_resp = (
-                supabase.table("voice_interaction_logs")
-                .select("success_flag")
-                .eq("clinic_id", cid)
-                .execute()
-            )
-            _handle_supabase_error(all_voice_resp)
-            all_voice = all_voice_resp.data or []
-            if all_voice:
-                successes = sum(1 for v in all_voice if v.get("success_flag") is True)
-                aria["success_rate"] = round(successes / len(all_voice) * 100)
+            voice_stats = compute_voice_agent_stats(cid, _eastern_ymd(now_et))
+            aria = {
+                "calls_today": voice_stats["calls_today"],
+                "booked_today": voice_stats["appointments_booked"],
+                "missed_today": voice_stats["missed_calls"],
+                "avg_duration_seconds": voice_stats["avg_duration_seconds"],
+                "success_rate": voice_stats["booking_conversion_pct"],
+                "is_online": voice_stats.get("is_online", True),
+            }
         except Exception:
             traceback.print_exc()
 
