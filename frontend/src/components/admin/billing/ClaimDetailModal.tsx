@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 
 import { useClinic } from "@/app/admin/ClinicContext";
-import { DS_SECONDARY_BTN } from "@/app/admin/designSystem";
+import { DS_PRIMARY_BTN, DS_SECONDARY_BTN } from "@/app/admin/designSystem";
 import {
   InsuranceClaimDetail,
   claimStatusBadgeClass,
@@ -73,11 +73,53 @@ export default function ClaimDetailModal({
     patientName ?? "",
   );
   const [loading, setLoading] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
+
+  const canViewCms1500 =
+    !!claim &&
+    String(claim.status ?? "").trim().toLowerCase() !== "draft" &&
+    !!String(claim.reference_number ?? "").trim();
+
+  async function openCms1500Pdf() {
+    if (!claimId) return;
+    setPdfLoading(true);
+    setPdfError(null);
+    try {
+      const h = await authHeaders();
+      const res = await fetch(
+        `${API_BASE}/billing/claims/${encodeURIComponent(claimId)}/cms1500-pdf`,
+        { headers: h },
+      );
+      if (!res.ok) {
+        let message = "Could not load CMS-1500 PDF.";
+        try {
+          const json = (await res.json()) as { detail?: unknown };
+          if (typeof json.detail === "string" && json.detail.trim()) {
+            message = json.detail;
+          }
+        } catch {
+          /* ignore */
+        }
+        setPdfError(message);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      setPdfError("Could not load CMS-1500 PDF.");
+    } finally {
+      setPdfLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!isOpen || !claimId) {
       setClaim(null);
       setResolvedPatientName(patientName ?? "");
+      setPdfError(null);
       return;
     }
 
@@ -204,6 +246,21 @@ export default function ClaimDetailModal({
             {claim.notes ? (
               <div className="sm:col-span-2">
                 <Field label="Notes" value={claim.notes} />
+              </div>
+            ) : null}
+            {canViewCms1500 ? (
+              <div className="sm:col-span-2">
+                <button
+                  type="button"
+                  className={`${DS_PRIMARY_BTN} w-full sm:w-auto`}
+                  disabled={pdfLoading}
+                  onClick={() => void openCms1500Pdf()}
+                >
+                  {pdfLoading ? "Loading CMS-1500…" : "View CMS-1500 Claim Form"}
+                </button>
+                {pdfError ? (
+                  <p className="mt-2 text-sm text-amber-800">{pdfError}</p>
+                ) : null}
               </div>
             ) : null}
           </dl>

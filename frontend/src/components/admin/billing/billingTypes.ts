@@ -34,6 +34,8 @@ export type InsuranceClaimDetail = {
   notes?: string | null;
   status?: string | null;
   claim_number?: string | null;
+  reference_number?: string | null;
+  submission_date?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
   filing_deadline?: string | null;

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -46,6 +47,7 @@ STEDI_ELIGIBILITY_URL = (
     "https://healthcare.us.stedi.com/2024-04-01"
     "/change/medicalnetwork/eligibility/v3"
 )
+STEDI_PDF_URL = "https://healthcare.us.stedi.com/2024-04-01/export/pdf"
 
 BILLING_PROVIDER_NPI = "1234567890"
 BILLING_PROVIDER_TAX_ID = "123456789"
@@ -189,6 +191,72 @@ def _extract_claim_reference(response_data: dict[str, Any]) -> Optional[str]:
     if isinstance(ref, str) and ref.strip():
         return ref.strip()
     return None
+
+
+async def _fetch_stedi_cms1500_pdf_bytes(business_id: str) -> bytes:
+    """Retrieve CMS-1500 PDF bytes from Stedi using claimReference.correlationId."""
+    api_key = _stedi_api_key()
+    if not api_key:
+        raise HTTPException(status_code=503, detail="Stedi API key not configured")
+
+    headers = _stedi_headers(api_key)
+    try:
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            response = await client.get(
+                STEDI_PDF_URL,
+                params={"businessId": business_id, "background": False},
+                headers=headers,
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=_stedi_error_detail(response))
+
+    try:
+        data = response.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Invalid JSON response from Stedi",
+        ) from exc
+
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="Unexpected Stedi response format")
+
+    pdfs = data.get("pdfs") or []
+    if isinstance(pdfs, list):
+        for item in pdfs:
+            if not isinstance(item, dict):
+                continue
+            raw = item.get("data")
+            if not raw:
+                continue
+            try:
+                return base64.b64decode(str(raw))
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=502,
+                    detail="Failed to decode CMS-1500 PDF",
+                ) from exc
+
+    error_msgs: list[str] = []
+    errors = data.get("errors") or []
+    if isinstance(errors, list):
+        for err in errors:
+            if isinstance(err, dict) and err.get("error"):
+                error_msgs.append(str(err["error"]))
+    if error_msgs:
+        logger.info(
+            "Stedi CMS-1500 PDF not ready business_id=%s errors=%s",
+            business_id,
+            error_msgs,
+        )
+
+    raise HTTPException(
+        status_code=404,
+        detail="PDF not yet available, try again shortly",
+    )
 
 
 def _normalize_diagnosis_code(code: str) -> str:
@@ -984,6 +1052,35 @@ async def check_claim_status(claim_id: str):
     out = _shape_claim(rows[0] if rows else {**claim, "status": new_status})
     out["payer_status_response"] = data
     return out
+
+
+@router.get("/claims/{claim_id}/cms1500-pdf")
+async def get_claim_cms1500_pdf(claim_id: str):
+    """Return the Stedi-generated CMS-1500 PDF for a submitted claim."""
+    claim = _fetch_claim(claim_id)
+    status = str(claim.get("status") or "").strip().lower()
+    if status == "draft":
+        raise HTTPException(
+            status_code=400,
+            detail="Claim has not been submitted yet",
+        )
+
+    reference_number = str(claim.get("reference_number") or "").strip()
+    if not reference_number:
+        raise HTTPException(
+            status_code=400,
+            detail="Claim has not been submitted yet",
+        )
+
+    pdf_bytes = await _fetch_stedi_cms1500_pdf_bytes(reference_number)
+    claim_label = resolve_claim_number(claim) or str(claim_id)[:8]
+    filename = f"cms1500-{claim_label}.pdf"
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.delete("/claims/{claim_id}", status_code=204)
