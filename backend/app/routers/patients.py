@@ -1,8 +1,10 @@
+import re
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi.responses import JSONResponse
 
 from app.constants import STTPDN_CLINIC_ID
 from app.db import supabase
@@ -74,6 +76,62 @@ _REFERRAL_SOURCE_LABELS: dict[Optional[str], str] = {
     "other": "Other",
     None: "Unknown",
 }
+
+
+def _normalize_phone_digits(value: Any) -> str:
+    return re.sub(r"\D", "", str(value or "").strip())
+
+
+def _format_dob_for_match(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    return s[:10] if len(s) >= 10 else s
+
+
+def _shape_duplicate_match(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(row.get("id") or ""),
+        "first_name": str(row.get("first_name") or "").strip(),
+        "last_name": str(row.get("last_name") or "").strip(),
+        "date_of_birth": _format_dob_for_match(row.get("date_of_birth")),
+    }
+
+
+def _find_clinic_phone_matches(
+    clinic_id: str, normalized_phone: str
+) -> list[dict[str, Any]]:
+    if not normalized_phone:
+        return []
+    try:
+        resp = (
+            supabase.table("patients")
+            .select("id, first_name, last_name, date_of_birth, phone")
+            .eq("clinic_id", clinic_id)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    matches: list[dict[str, Any]] = []
+    for row in resp.data or []:
+        if not isinstance(row, dict):
+            continue
+        if _normalize_phone_digits(row.get("phone")) != normalized_phone:
+            continue
+        matches.append(_shape_duplicate_match(row))
+    matches.sort(
+        key=lambda m: (
+            str(m.get("last_name") or "").lower(),
+            str(m.get("first_name") or "").lower(),
+        )
+    )
+    return matches
 
 
 def _normalize_referral_source(value: Any) -> Optional[str]:
@@ -419,7 +477,7 @@ def list_patients(clinic_id: str = Query(...), search: Optional[str] = Query(def
     return resp.data or []
 
 
-@router.post("", status_code=201)
+@router.post("")
 def create_patient(body: dict = Body(...)):
     """Create a patient row for the requested clinic (defaults to STTPDN if omitted)."""
     first_name = (body.get("first_name") or "").strip()
@@ -430,6 +488,16 @@ def create_patient(body: dict = Body(...)):
         )
 
     clinic_id = (body.get("clinic_id") or "").strip() or STTPDN_CLINIC_ID
+    confirm_duplicate = bool(body.get("confirm_duplicate"))
+
+    normalized_phone = _normalize_phone_digits(body.get("phone"))
+    if normalized_phone and not confirm_duplicate:
+        matches = _find_clinic_phone_matches(clinic_id, normalized_phone)
+        if matches:
+            return JSONResponse(
+                status_code=200,
+                content={"status": "possible_duplicate", "matches": matches},
+            )
 
     insert_data: dict[str, Any] = {
         "first_name": first_name,
@@ -443,6 +511,9 @@ def create_patient(body: dict = Body(...)):
             continue
         if key == "referral_source":
             insert_data[key] = _normalize_referral_source(body[key])
+        elif key == "phone":
+            if normalized_phone:
+                insert_data[key] = normalized_phone
         elif body[key] is not None:
             insert_data[key] = body[key]
 
@@ -474,7 +545,7 @@ def create_patient(body: dict = Body(...)):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    return _normalize_patient_row(new_row)
+    return JSONResponse(status_code=201, content=_normalize_patient_row(new_row))
 
 
 @router.get("/{patient_id}")

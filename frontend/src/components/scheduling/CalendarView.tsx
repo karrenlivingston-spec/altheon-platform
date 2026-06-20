@@ -29,6 +29,11 @@ import AppointmentPopup, {
   type AppointmentPopupData,
 } from "@/components/calendar/AppointmentPopup";
 import GroupSessionDetailModal from "@/components/admin/appointments/GroupSessionDetailModal";
+import {
+  postCreatePatient,
+  type PossibleDuplicateMatch,
+} from "@/components/admin/patients/createPatientApi";
+import DuplicatePhoneWarning from "@/components/admin/patients/DuplicatePhoneWarning";
 import CalendarGroupSessionCard, {
   type CalendarGroupSession,
 } from "@/components/scheduling/CalendarGroupSessionCard";
@@ -2317,6 +2322,9 @@ const BookPatientModal = memo(function BookPatientModal({
   });
   const [creatingPatient, setCreatingPatient] = useState(false);
   const [showNewPatient, setShowNewPatient] = useState(false);
+  const [duplicateMatches, setDuplicateMatches] = useState<
+    PossibleDuplicateMatch[] | null
+  >(null);
   const [treatmentTypes, setTreatmentTypes] = useState<TreatmentTypeOption[]>([]);
   const [loadingTreatmentTypes, setLoadingTreatmentTypes] = useState(false);
   const [treatmentTypeId, setTreatmentTypeId] = useState("");
@@ -2408,7 +2416,29 @@ const BookPatientModal = memo(function BookPatientModal({
     };
   }, [clinicId, search]);
 
-  async function continueWithNewPatient() {
+  function buildNewPatientBody(): Record<string, string> {
+    return {
+      clinic_id: clinicId,
+      first_name: newPatient.first_name.trim(),
+      last_name: newPatient.last_name.trim(),
+      phone: newPatient.phone.trim(),
+      date_of_birth: newPatient.date_of_birth.trim(),
+    };
+  }
+
+  function selectExistingPatient(match: PossibleDuplicateMatch) {
+    setSelectedPatient({
+      id: match.id,
+      first_name: match.first_name,
+      last_name: match.last_name,
+      phone: newPatient.phone.trim(),
+    });
+    setShowNewPatient(false);
+    setDuplicateMatches(null);
+    setStep(2);
+  }
+
+  async function continueWithNewPatient(confirmDuplicate = false) {
     if (
       !newPatient.first_name.trim() ||
       !newPatient.last_name.trim() ||
@@ -2419,29 +2449,22 @@ const BookPatientModal = memo(function BookPatientModal({
       return;
     }
     setCreatingPatient(true);
+    if (!confirmDuplicate) {
+      setDuplicateMatches(null);
+    }
     try {
-      const h = await authHeaders();
-      const res = await fetch(
-        `${API_BASE}/patients`,
-        {
-          method: "POST",
-          headers: h,
-          body: JSON.stringify({
-            clinic_id: clinicId,
-            first_name: newPatient.first_name.trim(),
-            last_name: newPatient.last_name.trim(),
-            phone: newPatient.phone.trim(),
-            date_of_birth: newPatient.date_of_birth.trim(),
-          }),
-        },
-      );
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.id) {
-        onError(typeof json?.detail === "string" ? json.detail : `Error ${res.status}`);
+      const result = await postCreatePatient(buildNewPatientBody(), confirmDuplicate);
+      if (result.kind === "possible_duplicate") {
+        setDuplicateMatches(result.matches);
         return;
       }
-      setSelectedPatient(json as PatientOption);
+      if (result.kind === "error") {
+        onError(result.message);
+        return;
+      }
+      setSelectedPatient(result.patient as PatientOption);
       setShowNewPatient(false);
+      setDuplicateMatches(null);
       setStep(2);
     } catch {
       onError("Could not create patient.");
@@ -2595,7 +2618,10 @@ const BookPatientModal = memo(function BookPatientModal({
               <button
                 type="button"
                 className="w-full px-3 py-2 text-left text-sm font-medium text-[#16A34A] hover:bg-green-50"
-                onClick={() => setShowNewPatient(true)}
+                onClick={() => {
+                  setShowNewPatient(true);
+                  setDuplicateMatches(null);
+                }}
               >
                 + New Patient
               </button>
@@ -2635,11 +2661,26 @@ const BookPatientModal = memo(function BookPatientModal({
                     setNewPatient((p) => ({ ...p, date_of_birth: e.target.value }))
                   }
                 />
+                {duplicateMatches?.length ? (
+                  <div className="sm:col-span-2">
+                    <DuplicatePhoneWarning
+                      matches={duplicateMatches}
+                      busy={creatingPatient}
+                      allowSelectExisting
+                      onSelectExisting={selectExistingPatient}
+                      onCreateAnyway={() => void continueWithNewPatient(true)}
+                    />
+                  </div>
+                ) : null}
+                {!duplicateMatches?.length ? (
                 <div className="sm:col-span-2 flex justify-end gap-2">
                   <button
                     type="button"
                     className="rounded-lg border border-black/10 px-3 py-2 text-sm"
-                    onClick={() => setShowNewPatient(false)}
+                    onClick={() => {
+                      setShowNewPatient(false);
+                      setDuplicateMatches(null);
+                    }}
                     disabled={creatingPatient}
                   >
                     Cancel
@@ -2647,12 +2688,13 @@ const BookPatientModal = memo(function BookPatientModal({
                   <button
                     type="button"
                     className="rounded-lg bg-[#16A34A] px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
-                    onClick={() => void continueWithNewPatient()}
+                    onClick={() => void continueWithNewPatient(false)}
                     disabled={creatingPatient}
                   >
                     {creatingPatient ? "Creating…" : "Continue"}
                   </button>
                 </div>
+                ) : null}
               </div>
             ) : null}
           </div>

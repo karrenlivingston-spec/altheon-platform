@@ -8,32 +8,21 @@ import {
   DS_PRIMARY_BTN,
   DS_SECONDARY_BTN,
 } from "@/app/admin/designSystem";
+import {
+  postCreatePatient,
+  type CreatedPatient,
+  type PossibleDuplicateMatch,
+} from "@/components/admin/patients/createPatientApi";
+import DuplicatePhoneWarning from "@/components/admin/patients/DuplicatePhoneWarning";
 import { REFERRAL_SOURCE_OPTIONS } from "@/components/admin/patients/patientTypes";
-import { supabase } from "@/lib/supabase";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
-
-export type CreatedPatient = {
-  id: string;
-  first_name: string;
-  last_name: string;
-  [key: string]: unknown;
-};
+export type { CreatedPatient } from "@/components/admin/patients/createPatientApi";
 
 export type NewPatientModalProps = {
   open: boolean;
   onClose: () => void;
   onCreated?: (patient: CreatedPatient) => void;
 };
-
-async function authHeaders(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token ?? "";
-  const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) h.Authorization = `Bearer ${token}`;
-  return h;
-}
 
 export default function NewPatientModal({
   open,
@@ -50,6 +39,10 @@ export default function NewPatientModal({
   const [referralSource, setReferralSource] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [info, setInfo] = useState<string | null>(null);
+  const [duplicateMatches, setDuplicateMatches] = useState<
+    PossibleDuplicateMatch[] | null
+  >(null);
 
   useEffect(() => {
     if (!open) return;
@@ -61,6 +54,8 @@ export default function NewPatientModal({
     setAddress("");
     setReferralSource("");
     setError(null);
+    setInfo(null);
+    setDuplicateMatches(null);
     setBusy(false);
   }, [open]);
 
@@ -69,7 +64,21 @@ export default function NewPatientModal({
     onClose();
   }
 
-  async function handleSubmit() {
+  function buildBody(): Record<string, string> {
+    const body: Record<string, string> = {
+      clinic_id: clinicId,
+      first_name: firstName.trim(),
+      last_name: lastName.trim(),
+      phone: phone.trim(),
+      date_of_birth: dateOfBirth.trim(),
+    };
+    if (email.trim()) body.email = email.trim();
+    if (address.trim()) body.address_line1 = address.trim();
+    if (referralSource.trim()) body.referral_source = referralSource.trim();
+    return body;
+  }
+
+  async function submitCreate(confirmDuplicate = false) {
     if (!firstName.trim() || !lastName.trim() || !phone.trim() || !dateOfBirth.trim()) {
       setError("First name, last name, phone, and date of birth are required.");
       return;
@@ -77,51 +86,35 @@ export default function NewPatientModal({
 
     setBusy(true);
     setError(null);
-    try {
-      const body: Record<string, string> = {
-        clinic_id: clinicId,
-        first_name: firstName.trim(),
-        last_name: lastName.trim(),
-        phone: phone.trim(),
-        date_of_birth: dateOfBirth.trim(),
-      };
-      if (email.trim()) body.email = email.trim();
-      if (address.trim()) body.address_line1 = address.trim();
-      if (referralSource.trim()) body.referral_source = referralSource.trim();
-
-      const res = await fetch(`${API_BASE}/patients`, {
-        method: "POST",
-        headers: await authHeaders(),
-        body: JSON.stringify(body),
-      });
-      const json: unknown = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        const detail =
-          json &&
-          typeof json === "object" &&
-          "detail" in json &&
-          typeof (json as { detail: unknown }).detail === "string"
-            ? (json as { detail: string }).detail
-            : `Error ${res.status}`;
-        setError(detail);
-        return;
-      }
-      if (
-        !json ||
-        typeof json !== "object" ||
-        !("id" in json) ||
-        typeof (json as { id: unknown }).id !== "string"
-      ) {
-        setError("Patient created but response was invalid.");
-        return;
-      }
-      onCreated?.(json as CreatedPatient);
-      onClose();
-    } catch {
-      setError("Could not create patient. Please try again.");
-    } finally {
-      setBusy(false);
+    setInfo(null);
+    if (!confirmDuplicate) {
+      setDuplicateMatches(null);
     }
+
+    const result = await postCreatePatient(buildBody(), confirmDuplicate);
+
+    if (result.kind === "possible_duplicate") {
+      setDuplicateMatches(result.matches);
+      setBusy(false);
+      return;
+    }
+
+    if (result.kind === "error") {
+      setError(result.message);
+      setBusy(false);
+      return;
+    }
+
+    onCreated?.(result.patient);
+    onClose();
+    setBusy(false);
+  }
+
+  function handleSamePersonAcknowledged() {
+    setDuplicateMatches(null);
+    setInfo(
+      "This patient already exists. Find and select them in the patient list instead of creating a new record.",
+    );
   }
 
   if (!open) return null;
@@ -151,6 +144,23 @@ export default function NewPatientModal({
         {error ? (
           <div className="mt-4 rounded-xl border border-red-100 bg-red-50/80 px-4 py-3 text-sm text-red-800">
             {error}
+          </div>
+        ) : null}
+
+        {info ? (
+          <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/80 px-4 py-3 text-sm text-blue-900">
+            {info}
+          </div>
+        ) : null}
+
+        {duplicateMatches?.length ? (
+          <div className="mt-4">
+            <DuplicatePhoneWarning
+              matches={duplicateMatches}
+              busy={busy}
+              onSamePersonWithoutSelect={handleSamePersonAcknowledged}
+              onCreateAnyway={() => void submitCreate(true)}
+            />
           </div>
         ) : null}
 
@@ -232,24 +242,26 @@ export default function NewPatientModal({
           </label>
         </div>
 
-        <div className="mt-6 flex justify-end gap-2 border-t border-gray-100 pt-4">
-          <button
-            type="button"
-            onClick={handleClose}
-            disabled={busy}
-            className={DS_SECONDARY_BTN}
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            onClick={() => void handleSubmit()}
-            disabled={busy}
-            className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
-          >
-            {busy ? "Creating…" : "Create Patient"}
-          </button>
-        </div>
+        {!duplicateMatches?.length ? (
+          <div className="mt-6 flex justify-end gap-2 border-t border-gray-100 pt-4">
+            <button
+              type="button"
+              onClick={handleClose}
+              disabled={busy}
+              className={DS_SECONDARY_BTN}
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={() => void submitCreate(false)}
+              disabled={busy}
+              className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
+            >
+              {busy ? "Creating…" : "Create Patient"}
+            </button>
+          </div>
+        ) : null}
       </div>
     </div>
   );
