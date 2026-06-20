@@ -87,6 +87,9 @@ export default function AdminBillingPage() {
   const [editingClaim, setEditingClaim] = useState<{ id: string } | null>(null);
   const [detailClaim, setDetailClaim] = useState<BillingClaimRow | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [submittingClaimId, setSubmittingClaimId] = useState<string | null>(
+    null,
+  );
   const [toast, setToast] = useState<{
     kind: "success" | "error";
     message: string;
@@ -178,7 +181,7 @@ export default function AdminBillingPage() {
     return () => clearTimeout(t);
   }, [toast]);
 
-  function handleStatusFilter(status: string) {
+  function handleStatusFilter(status: string, opts?: { widenDates?: boolean }) {
     const map: Record<string, ClaimsFilter> = {
       all: "all",
       draft: "draft",
@@ -189,6 +192,19 @@ export default function AdminBillingPage() {
     };
     setStatusFilter(map[status] ?? "all");
     setPage(0);
+    if (opts?.widenDates) {
+      setDateFrom("2020-01-01");
+      setDateTo(todayYmd());
+    }
+    requestAnimationFrame(() => {
+      document
+        .getElementById("billing-claims-list")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
+  }
+
+  function handleClaimsActionFilter(status: string) {
+    handleStatusFilter(status, { widenDates: status === "draft" });
   }
 
   function showSuccess(message: string) {
@@ -242,6 +258,37 @@ export default function AdminBillingPage() {
       void fetchDashboard({ silent: true });
     } catch {
       showError("Could not delete claim");
+    }
+  }
+
+  async function handleSubmitClaimToStedi(claimId: string): Promise<boolean> {
+    if (submittingClaimId) return false;
+    setSubmittingClaimId(claimId);
+    try {
+      const res = await fetch(
+        `${API_BASE}/billing/claims/${encodeURIComponent(claimId)}/submit`,
+        { method: "POST", headers: await authHeaders() },
+      );
+      if (!res.ok) {
+        const json: unknown = await res.json().catch(() => ({}));
+        const detail =
+          json &&
+          typeof json === "object" &&
+          "detail" in json &&
+          typeof (json as { detail: unknown }).detail === "string"
+            ? (json as { detail: string }).detail
+            : `Submit failed (${res.status})`;
+        showError(detail);
+        return false;
+      }
+      showSuccess("Claim submitted to Stedi");
+      void fetchDashboard({ silent: true });
+      return true;
+    } catch {
+      showError("Could not submit claim to Stedi");
+      return false;
+    } finally {
+      setSubmittingClaimId(null);
     }
   }
 
@@ -401,7 +448,10 @@ export default function AdminBillingPage() {
       <div className="mt-6 grid grid-cols-1 gap-6 xl:grid-cols-12">
         <div className="space-y-6 xl:col-span-5">
           {data ? (
-            <ClaimsAction action={data.claims_action} onFilter={handleStatusFilter} />
+            <ClaimsAction
+              action={data.claims_action}
+              onFilter={handleClaimsActionFilter}
+            />
           ) : (
             <div className="h-80 animate-pulse rounded-xl border border-gray-200 bg-white" />
           )}
@@ -470,6 +520,8 @@ export default function AdminBillingPage() {
             }}
             onView={openEditClaim}
             onSuperbill={(claim) => void handleSuperbillForClaim(claim)}
+            onSubmit={(claim) => void handleSubmitClaimToStedi(claim.id)}
+            submittingClaimId={submittingClaimId}
             onDelete={(claim) => void handleDeleteClaim(claim)}
           />
         </div>
@@ -495,6 +547,10 @@ export default function AdminBillingPage() {
         }}
         onError={showError}
         existingClaim={editingClaim}
+        onSubmitToStedi={handleSubmitClaimToStedi}
+        submittingToStedi={
+          editingClaim?.id != null && submittingClaimId === editingClaim.id
+        }
       />
 
       <ClaimDetailModal

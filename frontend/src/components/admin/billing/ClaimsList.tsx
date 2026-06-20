@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, FileText, Trash2 } from "lucide-react";
+import { Eye, FileText, Loader2, Send, Trash2 } from "lucide-react";
 
 import {
   DS_CARD,
@@ -43,11 +43,14 @@ type ClaimsListProps = {
   onPageSizeChange: (size: number) => void;
   onView: (claim: BillingClaimRow) => void;
   onSuperbill: (claim: BillingClaimRow) => void;
+  onSubmit?: (claim: BillingClaimRow) => void;
+  submittingClaimId?: string | null;
   onDelete: (claim: BillingClaimRow) => void;
 };
 
 const TABS: { key: ClaimsFilter; label: string; countKey: string }[] = [
   { key: "all", label: "All", countKey: "all" },
+  { key: "draft", label: "Draft", countKey: "draft" },
   { key: "submitted", label: "Submitted", countKey: "submitted" },
   { key: "pending", label: "Pended", countKey: "pending" },
   { key: "denied", label: "Denied", countKey: "denied" },
@@ -84,12 +87,14 @@ export default function ClaimsList({
   onPageSizeChange,
   onView,
   onSuperbill,
+  onSubmit,
+  submittingClaimId,
   onDelete,
 }: ClaimsListProps) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   return (
-    <div className={DS_CARD}>
+    <div id="billing-claims-list" className={DS_CARD}>
       <div className="mb-4 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <h2 className="text-base font-semibold text-gray-900">Claims List</h2>
         <div className="flex flex-wrap items-center gap-2">
@@ -142,7 +147,7 @@ export default function ClaimsList({
               <th className={`${DS_TH} whitespace-nowrap`}>Paid/Adjusted</th>
               <th className={`${DS_TH} whitespace-nowrap`}>Balance</th>
               <th
-                className={`${DS_TH} w-24 min-w-24 whitespace-nowrap text-right`}
+                className={`${DS_TH} w-32 min-w-32 whitespace-nowrap text-right`}
               >
                 Actions
               </th>
@@ -202,9 +207,26 @@ export default function ClaimsList({
                     {formatUsdFromCentsPrecise(claim.amount_remaining_cents)}
                   </td>
                   <td
-                    className={`${DS_TD_PRIMARY} w-24 min-w-24 whitespace-nowrap`}
+                    className={`${DS_TD_PRIMARY} w-32 min-w-32 whitespace-nowrap`}
                   >
                     <div className="flex items-center justify-end gap-0.5">
+                      {String(claim.status ?? "").toLowerCase() === "draft" &&
+                      onSubmit ? (
+                        <button
+                          type="button"
+                          onClick={() => onSubmit(claim)}
+                          disabled={submittingClaimId === claim.id}
+                          className={`${iconBtn} text-teal-700 hover:bg-teal-50 disabled:opacity-50`}
+                          aria-label="Submit to Stedi"
+                          title="Submit to Stedi"
+                        >
+                          {submittingClaimId === claim.id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Send className="h-4 w-4" />
+                          )}
+                        </button>
+                      ) : null}
                       <button
                         type="button"
                         onClick={() => onView(claim)}
@@ -226,9 +248,12 @@ export default function ClaimsList({
                       <button
                         type="button"
                         onClick={() => onDelete(claim)}
-                        className="rounded p-1.5 text-red-600 transition-colors hover:bg-red-50"
+                        className="rounded p-1.5 text-red-600 transition-colors hover:bg-red-50 disabled:opacity-40"
                         aria-label="Delete claim"
                         title="Delete"
+                        disabled={
+                          String(claim.status ?? "").toLowerCase() !== "draft"
+                        }
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>

@@ -48,6 +48,8 @@ export type NewClaimModalProps = {
   onError?: (message: string) => void;
   existingClaim?: InsuranceClaimDetail | { id: string } | null;
   prefill?: NewClaimPrefill | null;
+  onSubmitToStedi?: (claimId: string) => Promise<boolean>;
+  submittingToStedi?: boolean;
 };
 
 type FieldErrors = {
@@ -153,6 +155,8 @@ export default function NewClaimModal({
   onError,
   existingClaim,
   prefill,
+  onSubmitToStedi,
+  submittingToStedi = false,
 }: NewClaimModalProps) {
   const { clinicId } = useClinic();
   const isEdit = Boolean(existingClaim?.id);
@@ -180,6 +184,9 @@ export default function NewClaimModal({
   const [appointments, setAppointments] = useState<AppointmentOption[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [loadingClaim, setLoadingClaim] = useState(false);
+  const [loadedClaimStatus, setLoadedClaimStatus] = useState<string | null>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitAttempted, setSubmitAttempted] = useState(false);
@@ -202,6 +209,7 @@ export default function NewClaimModal({
 
   const prefillFromClaim = useCallback(
     async (claim: InsuranceClaimDetail) => {
+      setLoadedClaimStatus(String(claim.status ?? "draft").toLowerCase());
       setFirstTreatmentDate(
         claim.first_treatment_date ? String(claim.first_treatment_date).slice(0, 10) : "",
       );
@@ -263,6 +271,7 @@ export default function NewClaimModal({
     setSubmitAttempted(false);
     setBusy(false);
     setLoadingClaim(false);
+    setLoadedClaimStatus(null);
   }, [isOpen]);
 
   useEffect(() => {
@@ -511,6 +520,14 @@ export default function NewClaimModal({
     }
   }
 
+  async function handleSubmitToStedi() {
+    if (!existingClaim?.id || !onSubmitToStedi) return;
+    const ok = await onSubmitToStedi(existingClaim.id);
+    if (ok) {
+      onClose();
+    }
+  }
+
   if (!isOpen) return null;
 
   const showErr = (key: keyof FieldErrors) =>
@@ -739,11 +756,24 @@ export default function NewClaimModal({
           </div>
         )}
 
-        <div className="mt-6 flex justify-end gap-2 border-t border-gray-100 pt-4">
+        <div className="mt-6 flex flex-wrap items-center justify-end gap-2 border-t border-gray-100 pt-4">
+          {isEdit &&
+          loadedClaimStatus === "draft" &&
+          onSubmitToStedi &&
+          existingClaim?.id ? (
+            <button
+              type="button"
+              onClick={() => void handleSubmitToStedi()}
+              disabled={busy || loadingClaim || submittingToStedi}
+              className={`${DS_SECONDARY_BTN} mr-auto text-teal-800 disabled:opacity-50`}
+            >
+              {submittingToStedi ? "Submitting to Stedi…" : "Submit to Stedi"}
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={handleClose}
-            disabled={busy}
+            disabled={busy || submittingToStedi}
             className={DS_SECONDARY_BTN}
           >
             Cancel
@@ -751,7 +781,7 @@ export default function NewClaimModal({
           <button
             type="button"
             onClick={() => void handleSubmit()}
-            disabled={busy || loadingClaim || !isFormValid}
+            disabled={busy || loadingClaim || submittingToStedi || !isFormValid}
             className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
           >
             {busy ? "Saving…" : isEdit ? "Save Changes" : "Create Claim"}
