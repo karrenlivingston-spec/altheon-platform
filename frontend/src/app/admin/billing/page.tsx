@@ -563,6 +563,7 @@ export default function AdminBillingPage() {
         patientName={detailClaim?.patient_name}
         onClose={() => setDetailClaim(null)}
         onError={showError}
+        onStatusUpdated={() => void fetchDashboard({ silent: true })}
       />
 
       <SuperbillModal

@@ -1,5 +1,6 @@
 "use client";
 
+import { Loader2 } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 
 import { useClinic } from "@/app/admin/ClinicContext";
@@ -20,6 +21,7 @@ export type ClaimDetailModalProps = {
   isOpen: boolean;
   onClose: () => void;
   onError?: (message: string) => void;
+  onStatusUpdated?: () => void;
 };
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -66,6 +68,7 @@ export default function ClaimDetailModal({
   isOpen,
   onClose,
   onError,
+  onStatusUpdated,
 }: ClaimDetailModalProps) {
   const { clinicId } = useClinic();
   const [claim, setClaim] = useState<InsuranceClaimDetail | null>(null);
@@ -75,11 +78,48 @@ export default function ClaimDetailModal({
   const [loading, setLoading] = useState(false);
   const [pdfLoading, setPdfLoading] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [statusChecking, setStatusChecking] = useState(false);
+  const [statusError, setStatusError] = useState<string | null>(null);
 
   const canViewCms1500 =
     !!claim &&
     String(claim.status ?? "").trim().toLowerCase() !== "draft" &&
     !!String(claim.reference_number ?? "").trim();
+
+  const canCheckStatus =
+    !!claim && !!String(claim.reference_number ?? "").trim();
+
+  async function handleCheckStatus() {
+    if (!claimId) return;
+    setStatusChecking(true);
+    setStatusError(null);
+    try {
+      const h = await authHeaders();
+      const res = await fetch(
+        `${API_BASE}/billing/claims/${encodeURIComponent(claimId)}/status`,
+        { headers: h },
+      );
+      if (!res.ok) {
+        const err = (await res.json().catch(() => null)) as {
+          detail?: string;
+        } | null;
+        throw new Error(
+          typeof err?.detail === "string"
+            ? err.detail
+            : "Could not check claim status",
+        );
+      }
+      const data = (await res.json()) as InsuranceClaimDetail;
+      setClaim(data);
+      onStatusUpdated?.();
+    } catch (e) {
+      setStatusError(
+        e instanceof Error ? e.message : "Could not check claim status",
+      );
+    } finally {
+      setStatusChecking(false);
+    }
+  }
 
   async function openCms1500Pdf() {
     if (!claimId) return;
@@ -120,6 +160,7 @@ export default function ClaimDetailModal({
       setClaim(null);
       setResolvedPatientName(patientName ?? "");
       setPdfError(null);
+      setStatusError(null);
       return;
     }
 
@@ -217,6 +258,12 @@ export default function ClaimDetailModal({
           ) : null}
         </div>
 
+        {statusError ? (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {statusError}
+          </div>
+        ) : null}
+
         {loading ? (
           <p className="mt-6 text-sm text-gray-500">Loading…</p>
         ) : claim ? (
@@ -248,18 +295,39 @@ export default function ClaimDetailModal({
                 <Field label="Notes" value={claim.notes} />
               </div>
             ) : null}
-            {canViewCms1500 ? (
-              <div className="sm:col-span-2">
-                <button
-                  type="button"
-                  className={`${DS_PRIMARY_BTN} w-full sm:w-auto`}
-                  disabled={pdfLoading}
-                  onClick={() => void openCms1500Pdf()}
-                >
-                  {pdfLoading ? "Loading CMS-1500…" : "View CMS-1500 Claim Form"}
-                </button>
-                {pdfError ? (
-                  <p className="mt-2 text-sm text-amber-800">{pdfError}</p>
+            {canCheckStatus || canViewCms1500 ? (
+              <div className="sm:col-span-2 flex flex-wrap gap-3">
+                {canCheckStatus ? (
+                  <button
+                    type="button"
+                    className={`${DS_SECONDARY_BTN} inline-flex items-center gap-2 disabled:opacity-60`}
+                    disabled={statusChecking}
+                    onClick={() => void handleCheckStatus()}
+                  >
+                    {statusChecking ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                        Checking status…
+                      </>
+                    ) : (
+                      "Check Status"
+                    )}
+                  </button>
+                ) : null}
+                {canViewCms1500 ? (
+                  <>
+                    <button
+                      type="button"
+                      className={`${DS_PRIMARY_BTN} disabled:opacity-60`}
+                      disabled={pdfLoading}
+                      onClick={() => void openCms1500Pdf()}
+                    >
+                      {pdfLoading ? "Loading CMS-1500…" : "View CMS-1500 Claim Form"}
+                    </button>
+                    {pdfError ? (
+                      <p className="w-full text-sm text-amber-800">{pdfError}</p>
+                    ) : null}
+                  </>
                 ) : null}
               </div>
             ) : null}
