@@ -49,7 +49,7 @@ STEDI_ELIGIBILITY_URL = (
 )
 STEDI_PDF_URL = "https://healthcare.us.stedi.com/2024-04-01/export/pdf"
 
-BILLING_PROVIDER_NPI = "1234567890"
+BILLING_PROVIDER_NPI = "1234567893"
 BILLING_PROVIDER_TAX_ID = "123456789"
 BILLING_PROVIDER_ORG_NAME = "Straight To The Point Dry Needling"
 BILLING_PROVIDER_CITY = "Port St Lucie"
@@ -314,6 +314,7 @@ def _build_stedi_837p_payload(
 
     per_line = round(total_amount / len(cpt_codes), 2) if cpt_codes else total_amount
     claim_id = str(claim.get("id") or "")
+    claim_key = claim_id.replace("-", "")[:8]
     service_lines: list[dict[str, Any]] = []
     for idx, procedure_code in enumerate(cpt_codes):
         service_lines.append(
@@ -328,7 +329,7 @@ def _build_stedi_837p_payload(
                     "procedureIdentifier": "HC",
                     "serviceUnitCount": "1",
                 },
-                "providerControlNumber": f"{claim_id}-{idx + 1}"[:50],
+                "providerControlNumber": f"{claim_key}-{idx + 1}"[:30],
                 "serviceDate": service_date,
             }
         )
