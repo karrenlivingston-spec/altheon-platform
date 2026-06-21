@@ -204,7 +204,7 @@ async def _fetch_stedi_cms1500_pdf_bytes(business_id: str) -> bytes:
         async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.get(
                 STEDI_PDF_URL,
-                params={"businessId": business_id, "background": False},
+                params={"businessId": business_id},
                 headers=headers,
             )
     except httpx.HTTPError as exc:
