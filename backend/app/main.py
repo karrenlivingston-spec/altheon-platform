@@ -25,6 +25,7 @@ from app.routers import (
     patients,
     legal_requests,
     memberships,
+    patient_packages,
     billing as billing_claims_router,
     billing_payments as billing_payments_router,
     surveys,
@@ -129,6 +130,7 @@ app.include_router(
 )
 app.include_router(next_available.router, prefix="/next-available", tags=["next-available"])
 app.include_router(memberships.router, tags=["Memberships"])
+app.include_router(patient_packages.router, tags=["Patient Packages"])
 app.include_router(
     billing_payments_router.router,
     prefix="/billing-records",

@@ -758,6 +758,51 @@ def swap_appointment_times(
     return {"appointments": formatted}
 
 
+def _maybe_decrement_patient_package(patient_id: str, clinic_id: str) -> None:
+    """Consume one visit from the patient's oldest active package, if any."""
+    pkg_resp = (
+        supabase.table("patient_packages")
+        .select("id, total_visits, visits_used")
+        .eq("patient_id", patient_id)
+        .eq("clinic_id", clinic_id)
+        .eq("status", "active")
+        .order("purchase_date", desc=False)
+        .limit(1)
+        .execute()
+    )
+    err = getattr(pkg_resp, "error", None)
+    if err:
+        raise RuntimeError(getattr(err, "message", None) or str(err))
+
+    pkg_rows = pkg_resp.data or []
+    if not pkg_rows:
+        return
+
+    pkg = pkg_rows[0]
+    total_visits = int(pkg.get("total_visits") or 0)
+    visits_used = int(pkg.get("visits_used") or 0)
+    if visits_used >= total_visits:
+        return
+
+    new_used = visits_used + 1
+    update_data: dict[str, Any] = {
+        "visits_used": new_used,
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if new_used >= total_visits:
+        update_data["status"] = "completed"
+
+    upd = (
+        supabase.table("patient_packages")
+        .update(update_data)
+        .eq("id", pkg["id"])
+        .execute()
+    )
+    upd_err = getattr(upd, "error", None)
+    if upd_err:
+        raise RuntimeError(getattr(upd_err, "message", None) or str(upd_err))
+
+
 @router.patch("/{appointment_id}/status")
 def update_appointment_status(
     appointment_id: str,
@@ -777,7 +822,7 @@ def update_appointment_status(
         appt = (
             supabase.table("appointments")
             .select(
-                "id, clinic_id, google_event_id, clinician_id, start_time, end_time, status"
+                "id, clinic_id, patient_id, google_event_id, clinician_id, start_time, end_time, status"
             )
             .eq("id", appointment_id)
             .limit(1)
@@ -793,6 +838,7 @@ def update_appointment_status(
         raise HTTPException(status_code=404, detail="Appointment not found")
     appt_row = rows[0]
     clinic_id = str(appt_row.get("clinic_id") or "").strip()
+    patient_id = str(appt_row.get("patient_id") or "").strip()
     google_event_id = str(appt_row.get("google_event_id") or "").strip()
     freed_clinician_id = str(appt_row.get("clinician_id") or "").strip()
     freed_start_time = str(appt_row.get("start_time") or "")
@@ -853,6 +899,20 @@ def update_appointment_status(
                 freed_start_time,
                 freed_end_time,
             )
+        if (
+            status == "completed"
+            and prior_status != "completed"
+            and patient_id
+        ):
+            try:
+                _maybe_decrement_patient_package(patient_id, clinic_id)
+            except Exception:
+                logger.exception(
+                    "patient package decrement failed appointment_id=%s patient_id=%s clinic_id=%s",
+                    appointment_id,
+                    patient_id,
+                    clinic_id,
+                )
         return result.data[0]
     except HTTPException:
         raise
