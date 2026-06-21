@@ -41,7 +41,7 @@ STEDI_SUBMIT_URL = (
 )
 STEDI_STATUS_URL = (
     "https://healthcare.us.stedi.com/2024-04-01"
-    "/change/medicalnetwork/claimstatus/v3"
+    "/change/medicalnetwork/claimstatus/v2"
 )
 STEDI_ELIGIBILITY_URL = (
     "https://healthcare.us.stedi.com/2024-04-01"
@@ -412,6 +412,56 @@ def _build_stedi_837p_payload(
     }
 
 
+def _build_stedi_claim_status_payload(
+    claim: dict[str, Any],
+    patient: Optional[dict[str, Any]] = None,
+) -> dict[str, Any]:
+    """Build Stedi 276 real-time claim status request (POST /claimstatus/v2)."""
+    submit_payload = _build_stedi_837p_payload(claim, patient)
+    billing = submit_payload["billing"]
+    subscriber_src = submit_payload["subscriber"]
+
+    payer_id = str(claim.get("payer_id") or "").strip()
+    if not payer_id:
+        raise HTTPException(status_code=400, detail="Claim is missing payer_id")
+
+    member_id = str(subscriber_src.get("memberId") or "").strip()
+    if not member_id:
+        raise HTTPException(status_code=400, detail="Claim is missing member_id")
+
+    dos = _parse_date_only(claim.get("first_treatment_date"))
+    if dos is None:
+        dos = date.today()
+    encounter_start = dos - timedelta(days=7)
+    encounter_end = dos + timedelta(days=7)
+
+    provider: dict[str, Any] = {
+        "providerType": billing["providerType"],
+        "npi": billing["npi"],
+        "organizationName": billing["organizationName"],
+    }
+    employer_id = str(billing.get("employerId") or "").strip()
+    if employer_id:
+        provider["taxId"] = employer_id
+
+    subscriber: dict[str, Any] = {
+        "memberId": member_id,
+        "firstName": str(subscriber_src.get("firstName") or "Unknown").strip(),
+        "lastName": str(subscriber_src.get("lastName") or "Patient").strip(),
+        "dateOfBirth": str(subscriber_src.get("dateOfBirth") or "20000101").strip(),
+    }
+
+    return {
+        "tradingPartnerServiceId": payer_id,
+        "providers": [provider],
+        "subscriber": subscriber,
+        "encounter": {
+            "beginningDateOfService": encounter_start.strftime("%Y%m%d"),
+            "endDateOfService": encounter_end.strftime("%Y%m%d"),
+        },
+    }
+
+
 def _parse_stedi_benefit_amount(value: Any) -> Optional[float]:
     if value is None:
         return None
@@ -633,15 +683,18 @@ def _claim_status_from_stedi_response(data: dict[str, Any]) -> str:
 
     category = str(claim_status.get("statusCategoryCode") or "").upper()
     category_value = str(claim_status.get("statusCategoryCodeValue") or "").lower()
+    status_code_value = str(claim_status.get("statusCodeValue") or "").lower()
 
     if category.startswith("F") or (
         "final" in category_value and "payment" in category_value
-    ):
-        return "approved"
+    ) or "has been paid" in status_code_value:
+        return "paid"
     if "denied" in category_value or "reject" in category_value:
         return "denied"
     if "resubmit" in category_value:
         return "resubmitted"
+    if "pending" in category_value or "pended" in category_value:
+        return "pending"
     return "submitted"
 
 
@@ -1004,13 +1057,15 @@ async def check_claim_status(claim_id: str):
             detail="Claim has not been submitted yet",
         )
 
+    patient = _fetch_patient_for_claim(claim.get("patient_id"))
+    payload = _build_stedi_claim_status_payload(claim, patient)
     headers = _stedi_headers(api_key)
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.get(
+            response = await client.post(
                 STEDI_STATUS_URL,
-                params={"claimReference": reference_number},
                 headers=headers,
+                json=payload,
             )
     except httpx.HTTPError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
