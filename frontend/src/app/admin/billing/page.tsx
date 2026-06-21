@@ -221,8 +221,12 @@ export default function AdminBillingPage() {
   }
 
   function openEditClaim(claim: BillingClaimRow) {
-    setEditingClaim({ id: claim.id });
-    setIsNewClaimModalOpen(true);
+    if (String(claim.status ?? "").trim().toLowerCase() === "draft") {
+      setEditingClaim({ id: claim.id });
+      setIsNewClaimModalOpen(true);
+      return;
+    }
+    setDetailClaim(claim);
   }
 
   function closeClaimModal() {
