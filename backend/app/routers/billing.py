@@ -48,6 +48,7 @@ STEDI_ELIGIBILITY_URL = (
     "/change/medicalnetwork/eligibility/v3"
 )
 STEDI_PDF_URL = "https://healthcare.us.stedi.com/2024-04-01/export/pdf"
+STEDI_TEST_PAYER_ID = "STEDITEST"
 
 BILLING_PROVIDER_NPI = "1234567893"
 BILLING_PROVIDER_TAX_ID = "123456789"
@@ -360,10 +361,17 @@ def _build_stedi_837p_payload(
         "postalCode": BILLING_PROVIDER_POSTAL,
     }
 
+    payer_id = str(claim.get("payer_id") or "").strip()
+    usage_indicator = (
+        "P"
+        if payer_id and payer_id.upper() != STEDI_TEST_PAYER_ID.upper()
+        else "T"
+    )
+
     return {
-        "usageIndicator": "T",
+        "usageIndicator": usage_indicator,
         "tradingPartnerName": str(claim.get("payer_name") or "").strip(),
-        "tradingPartnerServiceId": str(claim.get("payer_id") or "").strip(),
+        "tradingPartnerServiceId": payer_id,
         "billing": {
             "providerType": "BillingProvider",
             "npi": BILLING_PROVIDER_NPI,
