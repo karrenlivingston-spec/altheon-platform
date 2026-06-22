@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Send, Sparkles, X } from "lucide-react";
 
 import { useClinic } from "@/app/admin/ClinicContext";
+import { apiAuthHeaders } from "@/lib/apiAuth";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -50,9 +51,10 @@ export default function AskAltheon() {
     let answer =
       "I couldn't retrieve that data right now. Please try again.";
     try {
+      const headers = await apiAuthHeaders();
       const res = await fetch(`${API_BASE}/ask-altheon`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({
           question: trimmed,
           clinic_id: clinicId,

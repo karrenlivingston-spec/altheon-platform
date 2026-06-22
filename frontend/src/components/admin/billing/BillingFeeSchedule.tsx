@@ -246,8 +246,10 @@ export default function BillingFeeSchedule() {
     let cancelled = false;
     const timer = setTimeout(async () => {
       try {
+        const headers = await authHeaders();
         const res = await fetch(
           `${API_BASE}/billing/cpt-codes?search=${encodeURIComponent(code)}`,
+          { headers },
         );
         if (!res.ok || cancelled) return;
         const data = (await res.json()) as CptOption[];

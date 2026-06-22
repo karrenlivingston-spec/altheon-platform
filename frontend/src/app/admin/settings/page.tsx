@@ -13,6 +13,7 @@ import {
 
 import { useClinic } from "@/app/admin/ClinicContext";
 import { FeeScheduleManager } from "@/components/admin/FeeScheduleManager";
+import { apiAuthHeaders } from "@/lib/apiAuth";
 import { supabase } from "@/lib/supabase";
 
 const API_BASE = "https://altheon-platform.onrender.com";
@@ -282,8 +283,10 @@ export default function AdminSettingsPage() {
     setLoading(true);
     setFetchError(null);
     try {
+      const headers = await apiAuthHeaders();
       const res = await fetch(
         `${API_BASE}/clinic-settings/${encodeURIComponent(clinicId)}`,
+        { headers },
       );
       if (res.status === 404) {
         setFetchError("Clinic settings were not found for this clinic.");
@@ -354,11 +357,12 @@ export default function AdminSettingsPage() {
     body: Record<string, unknown>,
   ): Promise<ClinicSettingsRow | null> {
     setSectionError(null);
+    const headers = await apiAuthHeaders();
     const res = await fetch(
       `${API_BASE}/clinic-settings/${encodeURIComponent(clinicId)}`,
       {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify(body),
       },
     );

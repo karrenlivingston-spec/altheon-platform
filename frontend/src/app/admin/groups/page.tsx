@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
 
 import { useClinic } from "@/app/admin/ClinicContext";
+import { apiAuthHeaders } from "@/lib/apiAuth";
 import {
   activeInactiveBadgeClass,
   DS_CARD,
@@ -218,8 +219,10 @@ export default function AdminGroupsPage() {
 
   const loadGroups = useCallback(async () => {
     try {
+      const headers = await apiAuthHeaders();
       const res = await fetch(
         `${API_BASE}/groups?clinic_id=${encodeURIComponent(clinicId)}`,
+        { headers },
       );
       if (!res.ok) {
         setError(`Groups: HTTP ${res.status}`);
@@ -236,6 +239,7 @@ export default function AdminGroupsPage() {
           try {
             const mRes = await fetch(
               `${API_BASE}/groups/${encodeURIComponent(g.id)}/members`,
+              { headers },
             );
             if (!mRes.ok) return [g.id, 0] as const;
             const members: unknown = await mRes.json();
@@ -256,22 +260,28 @@ export default function AdminGroupsPage() {
 
   const loadDashboard = useCallback(async () => {
     try {
+      const headers = await apiAuthHeaders();
       const [statsRes, cardsRes, insightsRes, distRes, activityRes] =
         await Promise.all([
           fetch(
             `${API_BASE}/api/groups/stats?clinic_id=${encodeURIComponent(clinicId)}`,
+            { headers },
           ),
           fetch(
             `${API_BASE}/api/groups/cards?clinic_id=${encodeURIComponent(clinicId)}`,
+            { headers },
           ),
           fetch(
             `${API_BASE}/api/groups/insights?clinic_id=${encodeURIComponent(clinicId)}`,
+            { headers },
           ),
           fetch(
             `${API_BASE}/api/groups/distribution?clinic_id=${encodeURIComponent(clinicId)}`,
+            { headers },
           ),
           fetch(
             `${API_BASE}/api/groups/activity?clinic_id=${encodeURIComponent(clinicId)}`,
+            { headers },
           ),
         ]);
       if (statsRes.ok) setStats(await statsRes.json());
@@ -324,11 +334,12 @@ export default function AdminGroupsPage() {
     setError(null);
     try {
       if (editingGroup) {
+        const headers = await apiAuthHeaders();
         const res = await fetch(
           `${API_BASE}/groups/${encodeURIComponent(editingGroup.id)}`,
           {
             method: "PATCH",
-            headers: { "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify({
               name: formName.trim(),
               description: formDescription.trim() || null,
@@ -343,9 +354,10 @@ export default function AdminGroupsPage() {
           return;
         }
       } else {
+        const headers = await apiAuthHeaders();
         const res = await fetch(`${API_BASE}/groups`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             clinic_id: clinicId,
             name: formName.trim(),
@@ -374,9 +386,10 @@ export default function AdminGroupsPage() {
     setDeletingId(group.id);
     setError(null);
     try {
+      const headers = await apiAuthHeaders();
       const res = await fetch(
         `${API_BASE}/groups/${encodeURIComponent(group.id)}`,
-        { method: "DELETE" },
+        { method: "DELETE", headers },
       );
       if (!res.ok && res.status !== 204) {
         setError(await res.text().catch(() => res.statusText));

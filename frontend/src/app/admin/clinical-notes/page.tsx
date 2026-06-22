@@ -58,11 +58,16 @@ type AppointmentListRow = {
 };
 
 async function authHeaders(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token ?? "";
-  const h: Record<string, string> = {};
-  if (token) h.Authorization = `Bearer ${token}`;
-  return h;
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+  };
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
+  return headers;
 }
 
 function normalizeAppointmentStatus(status: string | null | undefined): string {
@@ -485,6 +490,7 @@ export default function AdminClinicalNotesPage() {
     try {
       const res = await fetch(
         `${API_BASE}/patients?clinic_id=${encodeURIComponent(clinicId)}`,
+        { headers: await authHeaders() },
       );
       const json = res.ok ? await res.json() : [];
       setPatients(Array.isArray(json) ? json : []);
@@ -619,6 +625,7 @@ export default function AdminClinicalNotesPage() {
     try {
       const res = await fetch(
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(note.id)}`,
+        { headers: await authHeaders() },
       );
       if (!res.ok) {
         setError(await res.text().catch(() => res.statusText));
@@ -665,7 +672,7 @@ export default function AdminClinicalNotesPage() {
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(noteId)}/special-tests?clinic_id=${encodeURIComponent(clinicId)}`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: await authHeaders(),
           body: JSON.stringify({
             results: pending.map((p) => ({
               test_id: p.test_id,
@@ -714,7 +721,7 @@ export default function AdminClinicalNotesPage() {
           `${API_BASE}/api/clinical-notes/${encodeURIComponent(editingId)}`,
           {
             method: "PATCH",
-            headers: { "Content-Type": "application/json" },
+            headers: await authHeaders(),
             body: JSON.stringify({
               subjective: body.subjective,
               objective: body.objective,
@@ -736,7 +743,7 @@ export default function AdminClinicalNotesPage() {
 
       const res = await fetch(`${API_BASE}/api/clinical-notes`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: await authHeaders(),
         body: JSON.stringify(body),
       });
       if (!res.ok) {
@@ -765,7 +772,7 @@ export default function AdminClinicalNotesPage() {
     try {
       const res = await fetch(
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(id)}/submit`,
-        { method: "POST" },
+        { method: "POST", headers: await authHeaders() },
       );
       if (!res.ok) {
         setError(await res.text().catch(() => res.statusText));
@@ -823,6 +830,7 @@ export default function AdminClinicalNotesPage() {
     try {
       const res = await fetch(
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(note.id)}`,
+        { headers: await authHeaders() },
       );
       if (res.ok) {
         setViewNote((await res.json()) as ClinicalNote);
@@ -843,7 +851,7 @@ export default function AdminClinicalNotesPage() {
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(reviewNote.id)}/sign`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: await authHeaders(),
           body: JSON.stringify({ signed_by: signedByCandidate }),
         },
       );
@@ -875,7 +883,7 @@ export default function AdminClinicalNotesPage() {
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(editingId)}/sign`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: await authHeaders(),
           body: JSON.stringify({ signed_by: signedByCandidate }),
         },
       );
@@ -907,7 +915,7 @@ export default function AdminClinicalNotesPage() {
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(note.id)}/sign`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: await authHeaders(),
           body: JSON.stringify({ signed_by: signedByCandidate }),
         },
       );
@@ -939,7 +947,7 @@ export default function AdminClinicalNotesPage() {
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(reviewNote.id)}/request-correction`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: await authHeaders(),
           body: JSON.stringify({ correction_notes: notes }),
         },
       );

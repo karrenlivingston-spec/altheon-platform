@@ -24,6 +24,7 @@ import {
   defaultDateFrom,
   defaultDateTo,
 } from "@/components/admin/records/recordsTypes";
+import { apiAuthHeaders } from "@/lib/apiAuth";
 
 type PatientOption = {
   id: string;
@@ -112,8 +113,10 @@ export default function RecordsGenerateWizard({
       void (async () => {
         setSearchLoading(true);
         try {
+          const headers = await apiAuthHeaders();
           const res = await fetch(
             `${process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com"}/patients?clinic_id=${encodeURIComponent(clinicId)}&search=${encodeURIComponent(search.trim())}`,
+            { headers },
           );
           const json = res.ok ? await res.json() : [];
           if (!cancelled) {

@@ -212,7 +212,9 @@ export function FeeScheduleManager({
 
   const loadModifierRules = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/modifier-rules`);
+      const res = await fetch(`${API_BASE}/api/modifier-rules`, {
+        headers: authHeaders(),
+      });
       if (!res.ok) return;
       const data = await res.json();
       setModifierRules(Array.isArray(data) ? (data as ModifierRule[]) : []);
@@ -436,7 +438,9 @@ export function FeeScheduleManager({
       try {
         const params = new URLSearchParams();
         if (q) params.set("search", q);
-        const res = await fetch(`${API_BASE}/api/cpt-codes?${params.toString()}`);
+        const res = await fetch(`${API_BASE}/api/cpt-codes?${params.toString()}`, {
+          headers: authHeaders(),
+        });
         if (!res.ok) {
           setCptOptions([]);
           return;

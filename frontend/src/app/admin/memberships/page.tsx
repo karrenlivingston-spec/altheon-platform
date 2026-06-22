@@ -30,6 +30,7 @@ import {
   membershipStatusBadgeClass,
 } from "@/app/admin/designSystem";
 import { useClinic } from "@/app/admin/ClinicContext";
+import { apiAuthHeaders } from "@/lib/apiAuth";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
@@ -256,6 +257,7 @@ export default function AdminMembershipsPage() {
 
   const loadData = useCallback(async () => {
     try {
+      const headers = await apiAuthHeaders();
       const [
         tiersRes,
         enrollRes,
@@ -269,30 +271,39 @@ export default function AdminMembershipsPage() {
       ] = await Promise.all([
         fetch(
           `${API_BASE}/membership-tiers?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers },
         ),
         fetch(
           `${API_BASE}/patient-memberships?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers },
         ),
         fetch(
           `${API_BASE}/api/memberships/stats?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers },
         ),
         fetch(
           `${API_BASE}/api/memberships/revenue-chart?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers },
         ),
         fetch(
           `${API_BASE}/api/memberships/utilization?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers },
         ),
         fetch(
           `${API_BASE}/api/memberships/tier-stats?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers },
         ),
         fetch(
           `${API_BASE}/api/memberships/recent-enrollments?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers },
         ),
         fetch(
           `${API_BASE}/api/memberships/activity-feed?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers },
         ),
         fetch(
           `${API_BASE}/api/memberships/visits-overview?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers },
         ),
       ]);
 
@@ -371,11 +382,12 @@ export default function AdminMembershipsPage() {
     setError(null);
     try {
       if (editingTier) {
+        const headers = await apiAuthHeaders();
         const res = await fetch(
           `${API_BASE}/membership-tiers/${encodeURIComponent(editingTier.id)}`,
           {
             method: "PATCH",
-            headers: { "Content-Type": "application/json" },
+            headers,
             body: JSON.stringify({
               name: formName.trim(),
               description: formDescription.trim() || null,
@@ -392,9 +404,10 @@ export default function AdminMembershipsPage() {
           return;
         }
       } else {
+        const headers = await apiAuthHeaders();
         const res = await fetch(`${API_BASE}/membership-tiers`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({
             clinic_id: clinicId,
             name: formName.trim(),
@@ -423,11 +436,12 @@ export default function AdminMembershipsPage() {
     setSavingTierId(tier.id);
     setError(null);
     try {
+      const headers = await apiAuthHeaders();
       const res = await fetch(
         `${API_BASE}/membership-tiers/${encodeURIComponent(tier.id)}`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({ is_active: !tier.is_active }),
         },
       );
@@ -445,11 +459,12 @@ export default function AdminMembershipsPage() {
     setSavingEnrollmentId(membershipId);
     setError(null);
     try {
+      const headers = await apiAuthHeaders();
       const res = await fetch(
         `${API_BASE}/patient-memberships/${encodeURIComponent(membershipId)}/status`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({ status }),
         },
       );
@@ -473,11 +488,12 @@ export default function AdminMembershipsPage() {
     setChangeTierBusy(true);
     setError(null);
     try {
+      const headers = await apiAuthHeaders();
       const res = await fetch(
         `${API_BASE}/patient-memberships/${encodeURIComponent(membership.id)}/tier`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({ new_tier_id: newTierId }),
         },
       );

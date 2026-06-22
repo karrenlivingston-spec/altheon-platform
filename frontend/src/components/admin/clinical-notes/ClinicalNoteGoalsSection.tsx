@@ -11,6 +11,7 @@ import {
   GoalSuggestion,
   NoteGoal,
 } from "@/components/admin/clinical-notes/clinicalNotesTypes";
+import { apiAuthHeaders } from "@/lib/apiAuth";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
@@ -44,8 +45,10 @@ export default function ClinicalNoteGoalsSection({
     }
     setLoading(true);
     try {
+      const headers = await apiAuthHeaders();
       const res = await fetch(
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(noteId)}/goals`,
+        { headers },
       );
       const json = res.ok ? await res.json() : [];
       setGoals(Array.isArray(json) ? (json as NoteGoal[]) : []);
@@ -72,7 +75,7 @@ export default function ClinicalNoteGoalsSection({
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(noteId)}/suggest-goals`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: await apiAuthHeaders(),
           body: JSON.stringify({ assessment_text: assessmentText }),
         },
       );
@@ -93,7 +96,7 @@ export default function ClinicalNoteGoalsSection({
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(noteId)}/goals`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: await apiAuthHeaders(),
           body: JSON.stringify({
             description: s.description,
             goal_type: s.goal_type,
@@ -125,7 +128,7 @@ export default function ClinicalNoteGoalsSection({
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(noteId)}/goals`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: await apiAuthHeaders(),
           body: JSON.stringify({
             description: "New goal",
             goal_type: "short_term",
@@ -157,7 +160,7 @@ export default function ClinicalNoteGoalsSection({
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(noteId)}/goals/${encodeURIComponent(goal.id)}`,
         {
           method: "PATCH",
-          headers: { "Content-Type": "application/json" },
+          headers: await apiAuthHeaders(),
           body: JSON.stringify({
             description: goal.description,
             goal_type: goal.goal_type,
@@ -183,7 +186,7 @@ export default function ClinicalNoteGoalsSection({
     try {
       const res = await fetch(
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(noteId)}/goals/${encodeURIComponent(goalId)}`,
-        { method: "DELETE" },
+        { method: "DELETE", headers: await apiAuthHeaders() },
       );
       if (!res.ok) {
         onError?.(await res.text().catch(() => "Failed to delete goal"));

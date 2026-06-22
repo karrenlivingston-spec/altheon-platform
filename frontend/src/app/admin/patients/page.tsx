@@ -13,6 +13,7 @@ import NewPatientModal, {
   type CreatedPatient,
 } from "@/components/admin/patients/NewPatientModal";
 import { useClinic } from "@/app/admin/ClinicContext";
+import { apiAuthHeaders } from "@/lib/apiAuth";
 import {
   DS_INPUT,
   DS_PAGE_SUBTITLE,
@@ -72,8 +73,10 @@ export default function AdminPatientsPage() {
   const loadPatients = useCallback(async () => {
     setLoading(true);
     try {
+      const headers = await apiAuthHeaders();
       const ptRes = await fetch(
         `${API_BASE}/patients?clinic_id=${encodeURIComponent(clinicId)}`,
+        { headers },
       );
       const ptJson = ptRes.ok ? await ptRes.json() : [];
       setPatients(Array.isArray(ptJson) ? ptJson : []);

@@ -157,8 +157,10 @@ export default function PatientFlow() {
   async function loadFlow() {
     setLoading(true);
     try {
+      const headers = await authHeaders();
       const res = await fetch(
         `${API_BASE}/appointments/patient-flow?clinic_id=${encodeURIComponent(clinicId)}&date=${encodeURIComponent(dateYmd)}`,
+        { headers },
       );
       const data = (res.ok ? await res.json() : null) as FlowResponse | null;
       setAppointments(data?.appointments ?? []);

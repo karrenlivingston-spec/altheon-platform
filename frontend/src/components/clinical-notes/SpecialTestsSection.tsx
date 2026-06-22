@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 
+import { apiAuthHeaders } from "@/lib/apiAuth";
+
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
 
@@ -65,8 +67,10 @@ export function SpecialTestsSection({
   const loadSavedResults = useCallback(async () => {
     if (!noteId || !clinicId) return;
     try {
+      const headers = await apiAuthHeaders();
       const res = await fetch(
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(noteId)}/special-tests?clinic_id=${encodeURIComponent(clinicId)}`,
+        { headers },
       );
       if (!res.ok) return;
       const json = (await res.json()) as { results?: SavedResultRow[] };
@@ -104,7 +108,10 @@ export function SpecialTestsSection({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/api/clinical-notes/special-tests`);
+      const headers = await apiAuthHeaders();
+      const res = await fetch(`${API_BASE}/api/clinical-notes/special-tests`, {
+        headers,
+      });
       if (!res.ok) {
         setError("Could not load the special tests library.");
         return;
@@ -151,11 +158,12 @@ export function SpecialTestsSection({
     setSaving(true);
     setError(null);
     try {
+      const headers = await apiAuthHeaders();
       const res = await fetch(
         `${API_BASE}/api/clinical-notes/${encodeURIComponent(noteId)}/special-tests?clinic_id=${encodeURIComponent(clinicId)}`,
         {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers,
           body: JSON.stringify({ results: payload }),
         },
       );
