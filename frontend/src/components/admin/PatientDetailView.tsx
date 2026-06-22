@@ -33,6 +33,7 @@ import { PatientDocumentsTab } from "@/components/admin/PatientDocumentsTab";
 import PatientHeader from "@/components/admin/patients/PatientHeader";
 import PatientQuickStats from "@/components/admin/patients/PatientQuickStats";
 import PatientOverviewTab from "@/components/admin/patients/PatientOverviewTab";
+import PatientHEPTab from "@/components/admin/patients/PatientHEPTab";
 import type { PatientHeaderStats } from "@/components/admin/patients/patientTypes";
 import { REFERRAL_SOURCE_OPTIONS } from "@/components/admin/patients/patientTypes";
 
@@ -53,6 +54,7 @@ export type PageTab =
   | "legal"
   | "memberships"
   | "packages"
+  | "hep"
   | "benefits";
 
 function sleep(ms: number): Promise<void> {
@@ -724,6 +726,7 @@ export function PatientDetailView({
     { id: "legal", label: "Legal" },
     { id: "memberships", label: "Memberships" },
     { id: "packages", label: "Packages" },
+    { id: "hep", label: "Home Exercise Programs" },
     { id: "benefits", label: "Benefits" },
   ];
 
@@ -2091,6 +2094,14 @@ export function PatientDetailView({
             </div>
           </div>
         </>
+      ) : null}
+
+      {pageTab === "hep" ? (
+        <PatientHEPTab
+          patientId={patientId}
+          clinicId={clinicId}
+          active={pageTab === "hep"}
+        />
       ) : null}
       </div>
     </div>

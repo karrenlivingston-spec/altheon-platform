@@ -15,6 +15,7 @@ const VALID_TABS = new Set<PageTab>([
   "legal",
   "memberships",
   "packages",
+  "hep",
   "benefits",
 ]);
 

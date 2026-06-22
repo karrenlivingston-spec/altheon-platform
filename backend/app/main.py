@@ -49,6 +49,7 @@ from app.routers import (
     measurements as measurements_router,
     outcome_measures as outcome_measures_router,
     virtual_visits as virtual_visits_router,
+    hep as hep_router,
 )
 from app.routes.legal import router as legal_router
 from routers import groups as groups_router
@@ -132,6 +133,7 @@ app.include_router(
 app.include_router(next_available.router, prefix="/next-available", tags=["next-available"])
 app.include_router(memberships.router, tags=["Memberships"])
 app.include_router(patient_packages.router, tags=["Patient Packages"])
+app.include_router(hep_router.router)
 app.include_router(staff.router, tags=["Staff"])
 app.include_router(
     billing_payments_router.router,
