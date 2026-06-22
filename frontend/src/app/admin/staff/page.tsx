@@ -38,7 +38,7 @@ type StaffRow = {
   role: string;
   name: string;
   email: string;
-  joined_at?: string | null;
+  created_at?: string | null;
 };
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -314,7 +314,7 @@ export default function StaffManagementPage() {
                         )}
                       </td>
                       <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
-                        {formatJoinedDate(row.joined_at)}
+                        {formatJoinedDate(row.created_at)}
                       </td>
                       <td className={DS_TD_PRIMARY}>
                         <button
