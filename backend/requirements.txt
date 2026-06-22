@@ -16,4 +16,4 @@ pymupdf
 Pillow
 pytesseract
 pillow-heif
-elevenlabs
+elevenlabsemail-validator
