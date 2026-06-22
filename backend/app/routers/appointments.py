@@ -263,7 +263,9 @@ def _format_calendar_appt_row(
     r: dict[str, Any],
     first_appt_by_patient: dict[str, datetime],
     clinic_tz: ZoneInfo,
+    package_by_patient: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    packages = package_by_patient if package_by_patient is not None else {}
     patient = r.get("patients") or {}
     clinician = r.get("clinicians") or {}
     treatment = r.get("treatment_types") or {}
@@ -282,6 +284,7 @@ def _format_calendar_appt_row(
     is_new_patient = bool(
         first_dt and appt_date_str and first_dt.date().isoformat() == appt_date_str
     )
+    package = packages.get(pid)
     return {
         "id": str(r.get("id")),
         "start_time": start_raw,
@@ -308,6 +311,8 @@ def _format_calendar_appt_row(
             "name": treatment.get("name"),
             "duration_minutes": int(treatment.get("duration_minutes") or 0),
         },
+        "package_visit_number": int(package.get("visits_used") or 0) + 1 if package else None,
+        "package_total_visits": int(package.get("total_visits") or 0) if package else None,
     }
 
 
@@ -399,7 +404,31 @@ def get_appointments_calendar(
                 dth = dth.replace(tzinfo=timezone.utc)
             first_appt_by_patient[pid] = dth.astimezone(clinic_tz)
 
-    appointments = [_format_calendar_appt_row(r, first_appt_by_patient, clinic_tz) for r in rows]
+    package_by_patient: dict[str, Any] = {}
+    if patient_ids:
+        try:
+            pkg_resp = (
+                supabase.table("patient_packages")
+                .select("patient_id, visits_used, total_visits, status, purchase_date")
+                .in_("patient_id", patient_ids)
+                .eq("clinic_id", clinic_id)
+                .eq("status", "active")
+                .order("purchase_date", desc=False)
+                .execute()
+            )
+            _handle_supabase_error(pkg_resp)
+            for pkg_row in pkg_resp.data or []:
+                pid = str(pkg_row.get("patient_id") or "").strip()
+                if not pid or pid in package_by_patient:
+                    continue
+                package_by_patient[pid] = pkg_row
+        except Exception:
+            package_by_patient = {}
+
+    appointments = [
+        _format_calendar_appt_row(r, first_appt_by_patient, clinic_tz, package_by_patient)
+        for r in rows
+    ]
     return {"appointments": appointments}
 
 
