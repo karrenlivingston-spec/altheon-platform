@@ -8,12 +8,17 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.dependencies.permissions import (
+    CLINICAL_ROLES,
+    enforce_clinic_role_from_auth_header,
+    require_role,
+)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 
 _ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
@@ -851,9 +856,13 @@ def _resolve_clinic_users_pk(
 
 
 @router.post("/clinical-notes")
-def create_clinical_note(body: CreateClinicalNoteBody):
+def create_clinical_note(
+    body: CreateClinicalNoteBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     patient_id = body.patient_id.strip()
     clinic_id = body.clinic_id.strip()
+    enforce_clinic_role_from_auth_header(authorization, clinic_id, *CLINICAL_ROLES)
     author_id = body.author_id.strip()
     if not patient_id or not clinic_id or not author_id:
         raise HTTPException(

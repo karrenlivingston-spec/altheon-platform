@@ -3,14 +3,19 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from fastapi import APIRouter, Body, HTTPException, Query
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query
 from fastapi.responses import JSONResponse
 
 from app.constants import STTPDN_CLINIC_ID
 from app.db import supabase
+from app.dependencies.permissions import (
+    ALL_ROLES,
+    enforce_clinic_role_from_auth_header,
+    require_role,
+)
 from routers.fee_schedule import ClinicUserDep
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_role(*ALL_ROLES))])
 
 
 def _now_iso() -> str:
@@ -478,7 +483,10 @@ def list_patients(clinic_id: str = Query(...), search: Optional[str] = Query(def
 
 
 @router.post("")
-def create_patient(body: dict = Body(...)):
+def create_patient(
+    body: dict = Body(...),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     """Create a patient row for the requested clinic (defaults to STTPDN if omitted)."""
     first_name = (body.get("first_name") or "").strip()
     last_name = (body.get("last_name") or "").strip()
@@ -488,6 +496,7 @@ def create_patient(body: dict = Body(...)):
         )
 
     clinic_id = (body.get("clinic_id") or "").strip() or STTPDN_CLINIC_ID
+    enforce_clinic_role_from_auth_header(authorization, clinic_id, *ALL_ROLES)
     confirm_duplicate = bool(body.get("confirm_duplicate"))
 
     normalized_phone = _normalize_phone_digits(body.get("phone"))

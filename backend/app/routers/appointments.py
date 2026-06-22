@@ -5,11 +5,12 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 import pytz
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
 from app.constants import STTPDN_CLINIC_ID
 from app.db import supabase
+from app.dependencies.permissions import ALL_ROLES, assert_clinic_role, enforce_clinic_role_from_auth_header, require_role
 from app.google_calendar import (
     create_calendar_event,
     delete_calendar_event,
@@ -19,7 +20,7 @@ from app.routers.intake import send_booking_intake_sms
 from app.services.waitlist import run_waitlist_notify_for_freed_slot
 from app.sms import send_sms
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_role(*ALL_ROLES))])
 logger = logging.getLogger(__name__)
 # SQL migration (run manually):
 # ALTER TABLE appointments ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'aria';
@@ -103,22 +104,7 @@ def _resolve_bearer_user_id(authorization: Optional[str]) -> str:
 
 
 def _assert_user_has_clinic_access(user_id: str, clinic_id: str) -> None:
-    try:
-        access = (
-            supabase.table("clinic_users")
-            .select("user_id")
-            .eq("user_id", user_id)
-            .eq("clinic_id", clinic_id)
-            .limit(1)
-            .execute()
-        )
-        _handle_supabase_error(access)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-    if not access.data:
-        raise HTTPException(status_code=403, detail="No clinic access for user")
+    assert_clinic_role(user_id, clinic_id, ALL_ROLES)
 
 
 @router.get("/patient-flow")
@@ -1519,7 +1505,14 @@ def patch_appointment_virtual(
 
 
 @router.post("")
-def create_appointment(payload: CreateAppointmentRequest):
+def create_appointment(
+    payload: CreateAppointmentRequest,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    clinic_id = (payload.clinic_id or "").strip()
+    if not clinic_id:
+        raise HTTPException(status_code=400, detail="clinic_id is required")
+    enforce_clinic_role_from_auth_header(authorization, clinic_id, *ALL_ROLES)
     source = (payload.source or "ai").strip().lower() or "ai"
     patient_id = (payload.patient_id or "").strip()
     if not patient_id:

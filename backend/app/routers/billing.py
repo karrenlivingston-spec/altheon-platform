@@ -11,10 +11,15 @@ from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, Header
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.dependencies.permissions import (
+    BILLING_ROLES,
+    enforce_clinic_role_from_auth_header,
+    require_role,
+)
 from app.routers.patient_statement_pdf import build_patient_statement_pdf
 from app.routers.resubmission_pdf import (
     _insurance_address,
@@ -30,7 +35,7 @@ from app.routers.superbill_pdf import (
 from app.sms import send_sms
 from routers.fee_schedule import ClinicUserDep
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_role(*BILLING_ROLES))])
 
 MEDICARE_CAP_DOLLARS = 2480.0
 logger = logging.getLogger(__name__)
@@ -115,6 +120,13 @@ def _fetch_claim(claim_id: str) -> dict[str, Any]:
     if not rows:
         raise HTTPException(status_code=404, detail="Claim not found")
     return rows[0]
+
+
+def _require_billing_access(authorization: Optional[str], clinic_id: Any) -> None:
+    cid = str(clinic_id or "").strip()
+    if not cid:
+        raise HTTPException(status_code=500, detail="Missing clinic_id on record")
+    enforce_clinic_role_from_auth_header(authorization, cid, *BILLING_ROLES)
 
 
 def _insert_audit_log(
@@ -833,7 +845,11 @@ def list_claims(clinic_id: str = Query(...)):
 
 
 @router.post("/claims")
-def create_claim(body: CreateClaimBody):
+def create_claim(
+    body: CreateClaimBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    _require_billing_access(authorization, body.clinic_id)
     row = _claim_row_from_create(body)
     try:
         ins = supabase.table("insurance_claims").insert(row).execute()
@@ -859,8 +875,12 @@ def create_claim(body: CreateClaimBody):
 
 
 @router.get("/claims/{claim_id}")
-def get_claim(claim_id: str):
+def get_claim(
+    claim_id: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     claim = _fetch_claim(claim_id)
+    _require_billing_access(authorization, claim.get("clinic_id"))
     try:
         audit_resp = (
             supabase.table("claim_audit_log")
@@ -881,8 +901,13 @@ def get_claim(claim_id: str):
 
 
 @router.patch("/claims/{claim_id}")
-def patch_claim(claim_id: str, body: PatchClaimBody):
+def patch_claim(
+    claim_id: str,
+    body: PatchClaimBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     current = _fetch_claim(claim_id)
+    _require_billing_access(authorization, current.get("clinic_id"))
     old_status = str(current.get("status") or "").strip()
 
     data = body.model_dump(exclude_unset=True)
@@ -944,12 +969,16 @@ def patch_claim(claim_id: str, body: PatchClaimBody):
 
 
 @router.post("/claims/{claim_id}/submit")
-async def submit_claim(claim_id: str):
+async def submit_claim(
+    claim_id: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     api_key = _stedi_api_key()
     if not api_key:
         raise HTTPException(status_code=503, detail="Stedi API key not configured")
 
     claim = _fetch_claim(claim_id)
+    _require_billing_access(authorization, claim.get("clinic_id"))
     if str(claim.get("status") or "").strip().lower() != "draft":
         raise HTTPException(
             status_code=400,
@@ -1044,12 +1073,16 @@ async def submit_claim(claim_id: str):
 
 
 @router.get("/claims/{claim_id}/status")
-async def check_claim_status(claim_id: str):
+async def check_claim_status(
+    claim_id: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     api_key = _stedi_api_key()
     if not api_key:
         raise HTTPException(status_code=503, detail="Stedi API key not configured")
 
     claim = _fetch_claim(claim_id)
+    _require_billing_access(authorization, claim.get("clinic_id"))
     reference_number = str(claim.get("reference_number") or "").strip()
     if not reference_number:
         raise HTTPException(
@@ -1119,9 +1152,13 @@ async def check_claim_status(claim_id: str):
 
 
 @router.get("/claims/{claim_id}/cms1500-pdf")
-async def get_claim_cms1500_pdf(claim_id: str):
+async def get_claim_cms1500_pdf(
+    claim_id: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     """Return the Stedi-generated CMS-1500 PDF for a submitted claim."""
     claim = _fetch_claim(claim_id)
+    _require_billing_access(authorization, claim.get("clinic_id"))
     status = str(claim.get("status") or "").strip().lower()
     if status == "draft":
         raise HTTPException(
@@ -1148,8 +1185,12 @@ async def get_claim_cms1500_pdf(claim_id: str):
 
 
 @router.delete("/claims/{claim_id}", status_code=204)
-def delete_claim(claim_id: str):
+def delete_claim(
+    claim_id: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     claim = _fetch_claim(claim_id)
+    _require_billing_access(authorization, claim.get("clinic_id"))
     status = str(claim.get("status") or "").strip().lower()
     if status != "draft":
         raise HTTPException(
@@ -1696,7 +1737,11 @@ def clinic_benefits_ledger(clinic: ClinicUserDep):
 
 
 @router.post("/insurance-verification")
-def insurance_verification(body: InsuranceVerificationBody):
+def insurance_verification(
+    body: InsuranceVerificationBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    _require_billing_access(authorization, body.clinic_id)
     cid = body.clinic_id.strip()
     pid = body.patient_id.strip()
     if not cid or not pid:
@@ -1850,7 +1895,11 @@ def _nested_patient(row: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.post("/superbill")
-def generate_superbill(body: SuperbillBody):
+def generate_superbill(
+    body: SuperbillBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    _require_billing_access(authorization, body.clinic_id)
     cid = body.clinic_id.strip()
     claim_id = body.claim_id.strip()
     if not cid or not claim_id:
@@ -2025,7 +2074,11 @@ def _patient_statement_totals(
 
 
 @router.post("/patient-statement")
-def generate_patient_statement(body: PatientStatementBody):
+def generate_patient_statement(
+    body: PatientStatementBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    _require_billing_access(authorization, body.clinic_id)
     cid = body.clinic_id.strip()
     pid = body.patient_id.strip()
     delivery = (body.delivery or "download").strip().lower()
@@ -2313,7 +2366,11 @@ def _fetch_clinical_note_for_claim(
 
 
 @router.post("/resubmission-package")
-def generate_resubmission_package(body: ResubmissionPackageBody):
+def generate_resubmission_package(
+    body: ResubmissionPackageBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    _require_billing_access(authorization, body.clinic_id)
     cid = body.clinic_id.strip()
     pid = body.patient_id.strip()
     claim_id = body.claim_id.strip()

@@ -17,13 +17,18 @@ from pathlib import Path
 from typing import Any, Optional
 
 import requests
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 
 from app.db import supabase
+from app.dependencies.permissions import (
+    CLINICAL_ROLES,
+    enforce_clinic_role_from_auth_header,
+    require_role,
+)
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 
 _CLAUDE_MODEL = "claude-haiku-4-5-20251001"
 
@@ -496,9 +501,13 @@ async def _transcribe_upload(audio: UploadFile) -> str:
 async def transcribe_only(
     audio: UploadFile = File(..., description="Recorded audio"),
     clinic_id: str = Form(default=""),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
     """Transcribe audio with ElevenLabs Scribe; returns transcript text only."""
-    _ = (clinic_id or "").strip()
+    cid = (clinic_id or "").strip()
+    if not cid:
+        raise HTTPException(status_code=400, detail="clinic_id is required")
+    enforce_clinic_role_from_auth_header(authorization, cid, *CLINICAL_ROLES)
     transcript = await _transcribe_upload(audio)
     return {"transcript": transcript}
 
@@ -509,9 +518,13 @@ async def transcribe_and_generate(
     clinic_id: str = Form(...),
     patient_id: str = Form(default=""),
     note_id: str = Form(default=""),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
     """Transcribe audio with ElevenLabs Scribe, then structure into SOAP with Claude Haiku."""
-    _ = clinic_id.strip()
+    cid = clinic_id.strip()
+    if not cid:
+        raise HTTPException(status_code=400, detail="clinic_id is required")
+    enforce_clinic_role_from_auth_header(authorization, cid, *CLINICAL_ROLES)
     _ = (patient_id or "").strip()
     nid = (note_id or "").strip()
 
