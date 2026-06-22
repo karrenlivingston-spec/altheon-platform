@@ -553,15 +553,15 @@ def dashboard_summary(clinic: ClinicUserDep):
         try:
             intake_act = supabase_execute(
                 lambda: supabase.table("intake_forms")
-                .select("id, submitted_at, patients(first_name, last_name)")
+                .select("id, completed_at, patients(first_name, last_name)")
                 .eq("clinic_id", cid)
-                .order("submitted_at", desc=True)
+                .order("completed_at", desc=True)
                 .limit(6)
                 .execute()
             )
             _handle_supabase_error(intake_act)
             for f in intake_act.data or []:
-                ts = f.get("submitted_at")
+                ts = f.get("completed_at")
                 if not ts:
                     continue
                 pname = _patient_name(f)
