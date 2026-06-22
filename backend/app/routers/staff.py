@@ -69,19 +69,66 @@ class AcceptInviteBody(BaseModel):
     token: str = Field(..., min_length=1)
 
 
-def _staff_display_name(row: dict[str, Any], auth_email: str) -> dict[str, str]:
-    clinicians_raw = row.get("clinicians")
-    clinician: dict[str, Any] | None = None
-    if isinstance(clinicians_raw, list):
-        clinician = clinicians_raw[0] if clinicians_raw else None
-    elif isinstance(clinicians_raw, dict):
-        clinician = clinicians_raw
+def _safe_auth_user_email(user_id: str) -> str:
+    if not user_id:
+        return ""
+    try:
+        return _auth_user_email(user_id)
+    except HTTPException:
+        return ""
+    except Exception:
+        logger.exception("auth email lookup failed user_id=%s", user_id)
+        return ""
 
+
+def _display_from_clinician(
+    clinician: dict[str, Any] | None,
+    auth_email: str,
+) -> dict[str, str]:
     first_name = str((clinician or {}).get("first_name") or "").strip()
     last_name = str((clinician or {}).get("last_name") or "").strip()
     name = f"{first_name} {last_name}".strip()
     email = str((clinician or {}).get("email") or "").strip() or auth_email
     return {"name": name or email or "—", "email": email or auth_email}
+
+
+def _clinicians_by_id(
+    clinic_user_rows: list[dict[str, Any]],
+    cid: str,
+) -> dict[str, dict[str, Any]]:
+    clinician_ids = list(
+        {
+            str(row.get("clinician_id") or "").strip()
+            for row in clinic_user_rows
+            if str(row.get("clinician_id") or "").strip()
+        }
+    )
+    if not clinician_ids:
+        return {}
+
+    try:
+        clin_resp = (
+            supabase.table("clinicians")
+            .select("id, first_name, last_name, email")
+            .eq("clinic_id", cid)
+            .in_("id", clinician_ids)
+            .execute()
+        )
+        _handle_supabase_error(clin_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("clinicians lookup failed clinic_id=%s", cid)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    lookup: dict[str, dict[str, Any]] = {}
+    for row in clin_resp.data or []:
+        if not isinstance(row, dict):
+            continue
+        clin_id = str(row.get("id") or "").strip()
+        if clin_id:
+            lookup[clin_id] = row
+    return lookup
 
 
 @router.get("/staff")
@@ -93,10 +140,7 @@ def list_staff(
     try:
         resp = (
             supabase.table("clinic_users")
-            .select(
-                "id, user_id, clinic_id, role, clinician_id, created_at, "
-                "clinicians(first_name, last_name, email)"
-            )
+            .select("id, user_id, clinic_id, role, created_at, clinician_id")
             .eq("clinic_id", cid)
             .order("role")
             .execute()
@@ -108,13 +152,16 @@ def list_staff(
         logger.exception("list_staff failed clinic_id=%s", cid)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
+    clinic_user_rows = [r for r in (resp.data or []) if isinstance(r, dict)]
+    clinician_by_id = _clinicians_by_id(clinic_user_rows, cid)
+
     out: list[dict[str, Any]] = []
-    for row in resp.data or []:
-        if not isinstance(row, dict):
-            continue
+    for row in clinic_user_rows:
         user_id = str(row.get("user_id") or "").strip()
-        auth_email = _auth_user_email(user_id) if user_id else ""
-        display = _staff_display_name(row, auth_email)
+        clinician_id = str(row.get("clinician_id") or "").strip()
+        clinician = clinician_by_id.get(clinician_id) if clinician_id else None
+        auth_email = _safe_auth_user_email(user_id) if not clinician else ""
+        display = _display_from_clinician(clinician, auth_email)
         out.append(
             {
                 "id": row.get("id"),
