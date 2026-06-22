@@ -52,6 +52,7 @@ export type PageTab =
   | "notes"
   | "legal"
   | "memberships"
+  | "packages"
   | "benefits";
 
 function sleep(ms: number): Promise<void> {
@@ -124,6 +125,17 @@ type MembershipRow = {
   status?: string;
   visits_remaining?: number;
   membership_tiers?: { name?: string } | { name?: string }[] | null;
+};
+
+type PackageRow = {
+  id: string;
+  package_name?: string | null;
+  total_visits?: number | null;
+  visits_used?: number | null;
+  price_cents?: number | null;
+  purchase_date?: string | null;
+  status?: string | null;
+  notes?: string | null;
 };
 
 type SurveyResponseRow = {
@@ -208,6 +220,24 @@ function tierNameFromRow(row: MembershipRow): string {
     return String((t as { name?: string }).name ?? "").trim() || "—";
   }
   return "—";
+}
+
+function todayYmdLocal(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function defaultPackageDraft() {
+  return {
+    package_name: "",
+    total_visits: "",
+    price_dollars: "",
+    purchase_date: todayYmdLocal(),
+    notes: "",
+  };
 }
 
 const FIELD_INPUT = `mt-1 w-full ${DS_INPUT}`;
@@ -306,6 +336,16 @@ export function PatientDetailView({
   const [membershipError, setMembershipError] = useState<string | null>(null);
   const [surveysLoading, setSurveysLoading] = useState(false);
   const [surveysError, setSurveysError] = useState<string | null>(null);
+  const [packageRows, setPackageRows] = useState<PackageRow[]>([]);
+  const [packagesLoading, setPackagesLoading] = useState(false);
+  const [packagesError, setPackagesError] = useState<string | null>(null);
+  const [showPackageForm, setShowPackageForm] = useState(false);
+  const [packageFormBusy, setPackageFormBusy] = useState(false);
+  const [packageFormError, setPackageFormError] = useState<string | null>(null);
+  const [packageActionBusyId, setPackageActionBusyId] = useState<string | null>(
+    null,
+  );
+  const [packageDraft, setPackageDraft] = useState(defaultPackageDraft);
 
   const [loadingPatient, setLoadingPatient] = useState(true);
   const [patientReady, setPatientReady] = useState(false);
@@ -465,6 +505,34 @@ export function PatientDetailView({
     [patientId, clinicId],
   );
 
+  const loadPackages = useCallback(async () => {
+    if (!patientId || !clinicId) return;
+    setPackagesLoading(true);
+    setPackagesError(null);
+    try {
+      const h = await authHeaders();
+      const res = await fetch(
+        `${API_BASE}/patient-packages?clinic_id=${encodeURIComponent(clinicId)}&patient_id=${encodeURIComponent(patientId)}`,
+        { headers: h },
+      );
+      if (!res.ok) {
+        setPackagesError(
+          (await res.text().catch(() => "")).trim() ||
+            `Could not load packages (${res.status})`,
+        );
+        setPackageRows([]);
+        return;
+      }
+      const json = await res.json();
+      setPackageRows(Array.isArray(json) ? json : []);
+    } catch {
+      setPackagesError("Could not load packages.");
+      setPackageRows([]);
+    } finally {
+      setPackagesLoading(false);
+    }
+  }, [patientId, clinicId]);
+
   const loadPiCases = useCallback(async () => {
     if (!patientId || !clinicId) return;
     setPiLoading(true);
@@ -510,6 +578,11 @@ export function PatientDetailView({
     setBillingRows([]);
     setMembershipRows([]);
     setSurveyRows([]);
+    setPackageRows([]);
+    setPackagesError(null);
+    setShowPackageForm(false);
+    setPackageFormError(null);
+    setPackageDraft(defaultPackageDraft());
 
     void (async () => {
       try {
@@ -562,6 +635,11 @@ export function PatientDetailView({
       cancelled = true;
     };
   }, [patientReady, patientId, clinicId, loadSecondaryResources]);
+
+  useEffect(() => {
+    if (pageTab !== "packages" || !patientReady) return;
+    void loadPackages();
+  }, [pageTab, patientReady, loadPackages]);
 
   const loadHeaderStats = useCallback(
     async (isCancelled?: () => boolean) => {
@@ -644,6 +722,7 @@ export function PatientDetailView({
     { id: "notes", label: "Notes" },
     { id: "legal", label: "Legal" },
     { id: "memberships", label: "Memberships" },
+    { id: "packages", label: "Packages" },
     { id: "benefits", label: "Benefits" },
   ];
 
@@ -1090,6 +1169,98 @@ export function PatientDetailView({
     );
   }
 
+  async function createPackage() {
+    if (!patientId || !clinicId) return;
+    const name = packageDraft.package_name.trim();
+    const totalVisits = Number(packageDraft.total_visits);
+    const priceDollars = parseFloat(packageDraft.price_dollars);
+    if (!name) {
+      setPackageFormError("Package name is required.");
+      return;
+    }
+    if (!Number.isFinite(totalVisits) || totalVisits <= 0) {
+      setPackageFormError("Total visits must be a positive number.");
+      return;
+    }
+    if (!Number.isFinite(priceDollars) || priceDollars < 0) {
+      setPackageFormError("Price must be a valid dollar amount.");
+      return;
+    }
+    if (!packageDraft.purchase_date.trim()) {
+      setPackageFormError("Purchase date is required.");
+      return;
+    }
+
+    setPackageFormBusy(true);
+    setPackageFormError(null);
+    try {
+      const h = await authHeaders();
+      const res = await fetch(`${API_BASE}/patient-packages`, {
+        method: "POST",
+        headers: h,
+        body: JSON.stringify({
+          patient_id: patientId,
+          clinic_id: clinicId,
+          package_name: name,
+          total_visits: Math.round(totalVisits),
+          price_cents: Math.round(priceDollars * 100),
+          purchase_date: packageDraft.purchase_date,
+          notes: packageDraft.notes.trim() || null,
+        }),
+      });
+      if (!res.ok) {
+        setPackageFormError(
+          (await res.text().catch(() => "")).trim() ||
+            `Could not create package (${res.status})`,
+        );
+        return;
+      }
+      setShowPackageForm(false);
+      setPackageDraft(defaultPackageDraft());
+      await loadPackages();
+    } catch {
+      setPackageFormError("Could not create package.");
+    } finally {
+      setPackageFormBusy(false);
+    }
+  }
+
+  async function cancelPackageRow(row: PackageRow) {
+    const label = (row.package_name ?? "").trim() || "this package";
+    if (
+      !window.confirm(
+        `Cancel package "${label}"? This cannot be undone.`,
+      )
+    ) {
+      return;
+    }
+    setPackageActionBusyId(row.id);
+    setPackagesError(null);
+    try {
+      const h = await authHeaders();
+      const res = await fetch(
+        `${API_BASE}/patient-packages/${encodeURIComponent(row.id)}`,
+        {
+          method: "PATCH",
+          headers: h,
+          body: JSON.stringify({ status: "cancelled" }),
+        },
+      );
+      if (!res.ok) {
+        setPackagesError(
+          (await res.text().catch(() => "")).trim() ||
+            `Could not cancel package (${res.status})`,
+        );
+        return;
+      }
+      await loadPackages();
+    } catch {
+      setPackagesError("Could not cancel package.");
+    } finally {
+      setPackageActionBusyId(null);
+    }
+  }
+
   function renderComingSoon(label: string) {
     return (
       <div className={`${DS_CARD} py-16 text-center`}>
@@ -1435,6 +1606,226 @@ export function PatientDetailView({
                 })}
               </div>
             )}
+          </div>
+        </div>
+      ) : null}
+
+      {pageTab === "packages" ? (
+        <div className="mt-8 space-y-8">
+          {packagesError ? (
+            <InlineSectionError message={packagesError} />
+          ) : null}
+
+          {showPackageForm ? (
+            <div className={DS_CARD}>
+              <h2 className={DS_SECTION_HEADER}>New package</h2>
+              {packageFormError ? (
+                <div className="mb-4">
+                  <InlineSectionError message={packageFormError} />
+                </div>
+              ) : null}
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <span className={LABEL_CLASS}>Package name</span>
+                  <input
+                    className={FIELD_INPUT}
+                    value={packageDraft.package_name}
+                    onChange={(e) =>
+                      setPackageDraft((d) => ({
+                        ...d,
+                        package_name: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <span className={LABEL_CLASS}>Total visits</span>
+                  <input
+                    type="number"
+                    min={1}
+                    step={1}
+                    className={FIELD_INPUT}
+                    value={packageDraft.total_visits}
+                    onChange={(e) =>
+                      setPackageDraft((d) => ({
+                        ...d,
+                        total_visits: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <span className={LABEL_CLASS}>Price</span>
+                  <div className="relative mt-1">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-500">
+                      $
+                    </span>
+                    <input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      className={`${FIELD_INPUT} pl-7`}
+                      value={packageDraft.price_dollars}
+                      onChange={(e) =>
+                        setPackageDraft((d) => ({
+                          ...d,
+                          price_dollars: e.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                </div>
+                <div>
+                  <span className={LABEL_CLASS}>Purchase date</span>
+                  <input
+                    type="date"
+                    className={FIELD_INPUT}
+                    value={packageDraft.purchase_date}
+                    onChange={(e) =>
+                      setPackageDraft((d) => ({
+                        ...d,
+                        purchase_date: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+                <div className="sm:col-span-2">
+                  <span className={LABEL_CLASS}>Notes</span>
+                  <textarea
+                    rows={3}
+                    className={FIELD_INPUT}
+                    value={packageDraft.notes}
+                    onChange={(e) =>
+                      setPackageDraft((d) => ({ ...d, notes: e.target.value }))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="mt-6 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  disabled={packageFormBusy}
+                  onClick={() => void createPackage()}
+                  className={`${DS_PRIMARY_BTN} disabled:opacity-50`}
+                >
+                  {packageFormBusy ? "Saving…" : "Create package"}
+                </button>
+                <button
+                  type="button"
+                  disabled={packageFormBusy}
+                  onClick={() => {
+                    setShowPackageForm(false);
+                    setPackageFormError(null);
+                    setPackageDraft(defaultPackageDraft());
+                  }}
+                  className={DS_SECONDARY_BTN}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          <div className={DS_TABLE_WRAP}>
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 bg-gray-50 px-6 py-3">
+              <h2 className="text-xs font-semibold uppercase tracking-[0.05em] text-gray-500">
+                Visit packages
+              </h2>
+              {!showPackageForm ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPackageFormError(null);
+                    setPackageDraft(defaultPackageDraft());
+                    setShowPackageForm(true);
+                  }}
+                  className={DS_PRIMARY_BTN}
+                >
+                  New Package
+                </button>
+              ) : null}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-left text-sm">
+                <thead className={DS_TABLE_HEAD}>
+                  <tr>
+                    <th className={DS_TH}>Package</th>
+                    <th className={DS_TH}>Total visits</th>
+                    <th className={DS_TH}>Used</th>
+                    <th className={DS_TH}>Remaining</th>
+                    <th className={DS_TH}>Status</th>
+                    <th className={DS_TH}>Purchase date</th>
+                    <th className={DS_TH} />
+                  </tr>
+                </thead>
+                <tbody>
+                  {packagesLoading ? (
+                    <TableSkeleton cols={7} rows={4} />
+                  ) : packageRows.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={7}
+                        className="px-6 py-10 text-center text-gray-500"
+                      >
+                        No visit packages for this patient.
+                      </td>
+                    </tr>
+                  ) : (
+                    packageRows.map((row) => {
+                      const total = Number(row.total_visits) || 0;
+                      const used = Number(row.visits_used) || 0;
+                      const remaining = Math.max(0, total - used);
+                      const st = (row.status ?? "").toLowerCase();
+                      const isActive = st === "active";
+                      return (
+                        <tr key={row.id} className={DS_TR}>
+                          <td className={DS_TD_PRIMARY}>
+                            {(row.package_name ?? "").trim() || "—"}
+                          </td>
+                          <td className={`${DS_TD_PRIMARY} tabular-nums`}>
+                            {total}
+                          </td>
+                          <td className={`${DS_TD_PRIMARY} tabular-nums`}>
+                            {used}
+                          </td>
+                          <td className={`${DS_TD_PRIMARY} tabular-nums`}>
+                            {remaining}
+                          </td>
+                          <td className={DS_TD_PRIMARY}>
+                            <span
+                              className={membershipStatusBadgeClass(
+                                row.status ?? "",
+                              )}
+                            >
+                              {row.status ?? "—"}
+                            </span>
+                          </td>
+                          <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
+                            {formatDob(row.purchase_date)}
+                          </td>
+                          <td className={DS_TD_PRIMARY}>
+                            {isActive ? (
+                              <button
+                                type="button"
+                                disabled={packageActionBusyId === row.id}
+                                onClick={() => void cancelPackageRow(row)}
+                                className={`${DS_SECONDARY_BTN} disabled:opacity-50`}
+                              >
+                                {packageActionBusyId === row.id
+                                  ? "Cancelling…"
+                                  : "Cancel"}
+                              </button>
+                            ) : (
+                              "—"
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
       ) : null}
