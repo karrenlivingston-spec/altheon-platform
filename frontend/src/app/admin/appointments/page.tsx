@@ -47,6 +47,7 @@ import WaitlistViewModal, {
 } from "@/components/admin/appointments/WaitlistViewModal";
 import GroupSessionModal from "@/components/admin/appointments/GroupSessionModal";
 import { supabase } from "@/lib/supabase";
+import { apiAuthHeaders } from "@/lib/apiAuth";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
@@ -129,10 +130,10 @@ export default function AdminAppointmentsPage() {
 
   const loadMeta = useCallback(async () => {
     if (!clinicId) return;
-    const h = await authHeaders();
+    const headers = await apiAuthHeaders();
     const [clinRes, locRes] = await Promise.all([
       fetch(`${API_BASE}/clinicians?clinic_id=${encodeURIComponent(clinicId)}`, {
-        headers: h,
+        headers,
       }),
       supabase
         .from("locations")

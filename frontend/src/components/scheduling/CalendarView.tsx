@@ -45,11 +45,8 @@ import {
   findMondayYmdOfWeekContaining,
   getEasternYMD,
 } from "@/components/adminEastern";
-import {
-  injectIntakePrintStylesAndPrint,
-  intakeMedicalHistoryPills,
-  painDotClass,
-} from "@/lib/intakePrint";
+import { injectIntakePrintStylesAndPrint, intakeMedicalHistoryPills, painDotClass } from "@/lib/intakePrint";
+import { apiAuthHeaders } from "@/lib/apiAuth";
 import { supabase } from "@/lib/supabase";
 
 const API_BASE = "https://altheon-platform.onrender.com";
@@ -2342,6 +2339,7 @@ const BookPatientModal = memo(function BookPatientModal({
   const [selectedClinicianId, setSelectedClinicianId] = useState(
     () => initialClinicianId || clinicians[0]?.id || "",
   );
+  const [modalClinicians, setModalClinicians] = useState<ClinicianRow[]>(clinicians);
   const [isVirtual, setIsVirtual] = useState(false);
   const [confirming, setConfirming] = useState(false);
 
@@ -2357,6 +2355,34 @@ const BookPatientModal = memo(function BookPatientModal({
       setStep(2);
     }
   }, [initialPatient]);
+
+  useEffect(() => {
+    setModalClinicians(clinicians);
+  }, [clinicians]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const headers = await apiAuthHeaders();
+        const res = await fetch(
+          `${API_BASE}/clinicians?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers },
+        );
+        const data = res.ok ? await res.json() : [];
+        if (!cancelled) {
+          setModalClinicians(Array.isArray(data) ? data : []);
+        }
+      } catch {
+        if (!cancelled) {
+          setModalClinicians(clinicians);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clinicId, clinicians]);
 
   useEffect(() => {
     if (treatmentTypes.length > 0 && !treatmentTypeId) {
@@ -2388,10 +2414,10 @@ const BookPatientModal = memo(function BookPatientModal({
   }, []);
 
   useEffect(() => {
-    if (!selectedClinicianId && clinicians.length > 0) {
-      setSelectedClinicianId(clinicians[0].id);
+    if (!selectedClinicianId && modalClinicians.length > 0) {
+      setSelectedClinicianId(modalClinicians[0].id);
     }
-  }, [clinicians, selectedClinicianId]);
+  }, [modalClinicians, selectedClinicianId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2718,7 +2744,7 @@ const BookPatientModal = memo(function BookPatientModal({
                   value={selectedClinicianId}
                   onChange={(e) => setSelectedClinicianId(e.target.value)}
                 >
-                  {clinicians.map((c) => (
+                  {modalClinicians.map((c) => (
                     <option key={c.id} value={c.id}>
                       {`Dr. ${(c.first_name ?? "").trim()} ${(c.last_name ?? "").trim()}`.trim()}
                     </option>
