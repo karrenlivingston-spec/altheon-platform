@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { DS_PAGE_ROOT, DS_PAGE_SUBTITLE, DS_PAGE_TITLE } from "@/app/admin/designSystem";
 import { useClinic } from "@/app/admin/ClinicContext";
+import { usePermissions } from "@/hooks/usePermissions";
 import AriaCard from "@/components/admin/dashboard/AriaCard";
 import ClaimsAction from "@/components/admin/dashboard/ClaimsAction";
 import ClaimsDonut from "@/components/admin/dashboard/ClaimsDonut";
@@ -68,6 +69,7 @@ function DashboardSkeleton() {
 
 export default function AdminOverviewPage() {
   const { clinicId, agent_name: agentName } = useClinic();
+  const { canViewBilling } = usePermissions();
   const [data, setData] = useState<DashboardSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -139,15 +141,17 @@ export default function AdminOverviewPage() {
                 rows={data.schedule_today}
                 totalToday={data.appointments_today}
               />
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <CollectionsDonut data={data} />
-                <ClaimsDonut data={data} />
-              </div>
+              {canViewBilling ? (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <CollectionsDonut data={data} />
+                  <ClaimsDonut data={data} />
+                </div>
+              ) : null}
             </div>
 
             <div className="space-y-6">
               <TasksAlerts data={data} onRefresh={() => void fetchSummary({ silent: true })} />
-              <ClaimsAction data={data} />
+              {canViewBilling ? <ClaimsAction data={data} /> : null}
             </div>
 
             <div className="space-y-6">

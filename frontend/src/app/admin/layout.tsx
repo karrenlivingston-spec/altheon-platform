@@ -21,9 +21,11 @@ import {
   Building2,
   Settings,
   Clock3,
+  UserCog,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
+import { usePermissions } from "@/hooks/usePermissions";
 
 import { ClinicProvider, useClinic } from "./ClinicContext";
 import AskAltheon from "./components/AskAltheon";
@@ -115,6 +117,12 @@ function AdminAuthenticatedShellInner({
     error: clinicError,
     setClinicId,
   } = useClinic();
+  const {
+    isAdmin,
+    canViewBilling,
+    canViewClinicalNotes,
+    canManageStaff,
+  } = usePermissions();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [clinicMenuOpen, setClinicMenuOpen] = useState(false);
 
@@ -372,6 +380,7 @@ function AdminAuthenticatedShellInner({
                 Groups
               </span>
             </Link>
+            {canViewBilling ? (
             <Link
               href="/admin/billing"
               className={navLinkClass("/admin/billing")}
@@ -379,9 +388,10 @@ function AdminAuthenticatedShellInner({
             >
               <span className="flex items-center gap-3">
                 <Receipt className={navIconClass("/admin/billing")} aria-hidden />
-                Billing
+                Billing & Claims
               </span>
             </Link>
+            ) : null}
             <div className="mt-8" aria-hidden />
             <Link
               href="/admin/memberships"
@@ -409,6 +419,7 @@ function AdminAuthenticatedShellInner({
                 PI Cases
               </span>
             </Link>
+            {canViewClinicalNotes ? (
             <Link
               href="/admin/clinical-notes"
               className={navLinkClass("/admin/clinical-notes")}
@@ -422,6 +433,7 @@ function AdminAuthenticatedShellInner({
                 Clinical Notes
               </span>
             </Link>
+            ) : null}
             <Link
               href="/admin/records"
               className={navLinkClass("/admin/records")}
@@ -463,6 +475,23 @@ function AdminAuthenticatedShellInner({
                 </span>
               </Link>
             ) : null}
+            {isAdmin || canManageStaff ? (
+              <div className="mt-8" aria-hidden />
+            ) : null}
+            {canManageStaff ? (
+              <Link
+                href="/admin/staff"
+                className={navLinkClass("/admin/staff")}
+                onClick={() => setSidebarOpen(false)}
+              >
+                <span className="flex items-center gap-3">
+                  <UserCog className={navIconClass("/admin/staff")} aria-hidden />
+                  Staff Management
+                </span>
+              </Link>
+            ) : null}
+            {isAdmin ? (
+              <>
             <Link
               href="/admin/settings"
               className={navLinkClass("/admin/settings")}
@@ -489,6 +518,8 @@ function AdminAuthenticatedShellInner({
                 Availability
               </span>
             </Link>
+              </>
+            ) : null}
           </nav>
           <div className="border-t border-slate-700/60 px-3 py-5">
             <button

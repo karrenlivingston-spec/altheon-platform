@@ -316,16 +316,16 @@ def patient_header_stats(patient_id: str, clinic: ClinicUserDep):
         try:
             intake_resp = (
                 supabase.table("intake_forms")
-                .select("id, submitted_at")
+                .select("id, completed_at")
                 .eq("clinic_id", cid)
                 .eq("patient_id", pid)
-                .order("submitted_at", desc=True)
+                .order("completed_at", desc=True)
                 .limit(3)
                 .execute()
             )
             _handle_supabase_error(intake_resp)
             for f in intake_resp.data or []:
-                ts = f.get("submitted_at")
+                ts = f.get("completed_at")
                 if not ts:
                     continue
                 activities.append(

@@ -94,7 +94,7 @@ def list_staff(
         resp = (
             supabase.table("clinic_users")
             .select(
-                "id, user_id, clinic_id, role, clinician_id, "
+                "id, user_id, clinic_id, role, clinician_id, created_at, "
                 "clinicians(first_name, last_name, email)"
             )
             .eq("clinic_id", cid)
@@ -124,6 +124,7 @@ def list_staff(
                 "clinician_id": row.get("clinician_id"),
                 "name": display["name"],
                 "email": display["email"],
+                "joined_at": row.get("created_at"),
             }
         )
     return out

@@ -13,6 +13,7 @@ import {
   DashboardSummary,
   formatUsdFromCents,
 } from "@/components/admin/dashboard/dashboardTypes";
+import { usePermissions } from "@/hooks/usePermissions";
 
 type StatBarProps = {
   data: DashboardSummary | null;
@@ -43,10 +44,14 @@ function StatCard({
 }
 
 export default function StatBar({ data, loading }: StatBarProps) {
+  const { canViewBilling } = usePermissions();
+
   if (loading || !data) {
     return (
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
-        {Array.from({ length: 6 }).map((_, i) => (
+      <div
+        className={`grid grid-cols-2 gap-4 ${canViewBilling ? "md:grid-cols-3 xl:grid-cols-6" : "md:grid-cols-2"}`}
+      >
+        {Array.from({ length: canViewBilling ? 6 : 2 }).map((_, i) => (
           <div
             key={i}
             className="h-24 animate-pulse rounded-xl border border-gray-200 bg-white"
@@ -80,7 +85,9 @@ export default function StatBar({ data, loading }: StatBarProps) {
   );
 
   return (
-    <div className="grid grid-cols-2 gap-4 md:grid-cols-3 xl:grid-cols-6">
+    <div
+      className={`grid grid-cols-2 gap-4 ${canViewBilling ? "md:grid-cols-3 xl:grid-cols-6" : "md:grid-cols-2"}`}
+    >
       <StatCard
         icon={Calendar}
         value={String(data.appointments_today)}
@@ -95,40 +102,44 @@ export default function StatBar({ data, loading }: StatBarProps) {
         sub={weekSub}
         subClass={weekClass}
       />
-      <StatCard
-        icon={ClipboardList}
-        value={String(openTasks)}
-        label="Open Tasks"
-        sub={
-          openTasks > 0 ? `${openTasks} require attention` : "All clear"
-        }
-        subClass={openTasks > 0 ? "text-amber-600" : "text-gray-500"}
-      />
-      <StatCard
-        icon={DollarSign}
-        value={formatUsdFromCents(data.collections_mtd_cents)}
-        label="Collections MTD"
-        sub={
-          pendingCents > 0
-            ? `${formatUsdFromCents(pendingCents)} pending`
-            : "Fully collected"
-        }
-        subClass={pendingCents > 0 ? "text-amber-600" : "text-gray-500"}
-      />
-      <StatCard
-        icon={AlertTriangle}
-        value={String(claimsNeed)}
-        label="Claims At Risk"
-        sub={claimsNeed > 0 ? "Action needed" : "No issues"}
-        subClass={claimsNeed > 0 ? "text-red-600" : "text-gray-500"}
-      />
-      <StatCard
-        icon={Phone}
-        value={String(data.aria.calls_today)}
-        label="Calls Today (Aria)"
-        sub={`${data.aria.booked_today} booked · ${data.aria.missed_today} missed`}
-        subClass="text-gray-500"
-      />
+      {canViewBilling ? (
+        <>
+          <StatCard
+            icon={ClipboardList}
+            value={String(openTasks)}
+            label="Open Tasks"
+            sub={
+              openTasks > 0 ? `${openTasks} require attention` : "All clear"
+            }
+            subClass={openTasks > 0 ? "text-amber-600" : "text-gray-500"}
+          />
+          <StatCard
+            icon={DollarSign}
+            value={formatUsdFromCents(data.collections_mtd_cents)}
+            label="Collections MTD"
+            sub={
+              pendingCents > 0
+                ? `${formatUsdFromCents(pendingCents)} pending`
+                : "Fully collected"
+            }
+            subClass={pendingCents > 0 ? "text-amber-600" : "text-gray-500"}
+          />
+          <StatCard
+            icon={AlertTriangle}
+            value={String(claimsNeed)}
+            label="Claims At Risk"
+            sub={claimsNeed > 0 ? "Action needed" : "No issues"}
+            subClass={claimsNeed > 0 ? "text-red-600" : "text-gray-500"}
+          />
+          <StatCard
+            icon={Phone}
+            value={String(data.aria.calls_today)}
+            label="Calls Today (Aria)"
+            sub={`${data.aria.booked_today} booked · ${data.aria.missed_today} missed`}
+            subClass="text-gray-500"
+          />
+        </>
+      ) : null}
     </div>
   );
 }
