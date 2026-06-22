@@ -26,6 +26,7 @@ class PackageCreate(BaseModel):
     package_name: str
     total_visits: int = Field(..., gt=0)
     price_cents: int = Field(..., ge=0)
+    visits_used: int = Field(0, ge=0)
     purchase_date: date
     notes: Optional[str] = None
 
@@ -69,7 +70,7 @@ def create_patient_package(body: PackageCreate):
         "clinic_id": body.clinic_id,
         "package_name": body.package_name,
         "total_visits": body.total_visits,
-        "visits_used": 0,
+        "visits_used": body.visits_used,
         "price_cents": body.price_cents,
         "purchase_date": body.purchase_date.isoformat(),
         "status": "active",

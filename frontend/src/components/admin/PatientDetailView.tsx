@@ -234,6 +234,7 @@ function defaultPackageDraft() {
   return {
     package_name: "",
     total_visits: "",
+    visits_already_used: "0",
     price_dollars: "",
     purchase_date: todayYmdLocal(),
     notes: "",
@@ -1173,6 +1174,9 @@ export function PatientDetailView({
     if (!patientId || !clinicId) return;
     const name = packageDraft.package_name.trim();
     const totalVisits = Number(packageDraft.total_visits);
+    const visitsAlreadyUsedRaw = packageDraft.visits_already_used.trim();
+    const visitsAlreadyUsed =
+      visitsAlreadyUsedRaw === "" ? 0 : Number(visitsAlreadyUsedRaw);
     const priceDollars = parseFloat(packageDraft.price_dollars);
     if (!name) {
       setPackageFormError("Package name is required.");
@@ -1180,6 +1184,18 @@ export function PatientDetailView({
     }
     if (!Number.isFinite(totalVisits) || totalVisits <= 0) {
       setPackageFormError("Total visits must be a positive number.");
+      return;
+    }
+    if (
+      !Number.isFinite(visitsAlreadyUsed) ||
+      !Number.isInteger(visitsAlreadyUsed) ||
+      visitsAlreadyUsed < 0
+    ) {
+      setPackageFormError("Visits already used must be a non-negative whole number.");
+      return;
+    }
+    if (visitsAlreadyUsed >= totalVisits) {
+      setPackageFormError("Visits already used must be less than total visits.");
       return;
     }
     if (!Number.isFinite(priceDollars) || priceDollars < 0) {
@@ -1203,6 +1219,7 @@ export function PatientDetailView({
           clinic_id: clinicId,
           package_name: name,
           total_visits: Math.round(totalVisits),
+          visits_used: visitsAlreadyUsed,
           price_cents: Math.round(priceDollars * 100),
           purchase_date: packageDraft.purchase_date,
           notes: packageDraft.notes.trim() || null,
@@ -1650,6 +1667,22 @@ export function PatientDetailView({
                       setPackageDraft((d) => ({
                         ...d,
                         total_visits: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <span className={LABEL_CLASS}>Visits already used</span>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    className={FIELD_INPUT}
+                    value={packageDraft.visits_already_used}
+                    onChange={(e) =>
+                      setPackageDraft((d) => ({
+                        ...d,
+                        visits_already_used: e.target.value,
                       }))
                     }
                   />
