@@ -69,6 +69,8 @@ export type CalendarAppointment = {
   location_id?: string;
   is_virtual?: boolean;
   is_new_patient?: boolean;
+  package_visit_number?: number | null;
+  package_total_visits?: number | null;
   patient: {
     id: string;
     first_name?: string | null;
@@ -2014,6 +2016,11 @@ function ApptCardContent({
         </p>
         <span className={`shrink-0 rounded-full ${statusDotClass(appt.status)} h-2 w-2`} />
       </div>
+      {appt.package_visit_number != null && appt.package_total_visits != null ? (
+        <span className="mt-0.5 inline-block rounded-full bg-[#EFF6FF] px-1.5 py-0.5 text-xs text-[#1D4ED8]">
+          Visit {appt.package_visit_number} of {appt.package_total_visits}
+        </span>
+      ) : null}
       <p className={`truncate text-slate-600 ${compact ? "text-[10px]" : "text-[11px]"}`}>
         {appt.treatment_type.name}
       </p>
