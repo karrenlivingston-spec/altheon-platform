@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -12,7 +12,7 @@ const INPUT_CLASS =
 const PRIMARY_BTN =
   "w-full rounded-[10px] bg-[#16A34A] py-3.5 text-sm font-semibold text-white shadow-[0_4px_12px_rgba(22,163,74,0.3)] transition-all duration-200 ease-in-out hover:-translate-y-px hover:bg-[#15803D] disabled:opacity-60";
 
-export default function AcceptInvitePage() {
+function AcceptInviteContent() {
   const searchParams = useSearchParams();
   const token = useMemo(
     () => (searchParams.get("token") ?? "").trim(),
@@ -191,5 +191,19 @@ export default function AcceptInvitePage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function AcceptInvitePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="flex min-h-screen items-center justify-center">
+          Loading...
+        </div>
+      }
+    >
+      <AcceptInviteContent />
+    </Suspense>
   );
 }
