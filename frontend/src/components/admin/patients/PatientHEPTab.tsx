@@ -1,6 +1,21 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  type DragEndEvent,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
 import { formatInTimeZone } from "date-fns-tz";
 
 import {
@@ -10,6 +25,12 @@ import {
   DS_SECONDARY_BTN,
   DS_SECTION_HEADER,
 } from "@/app/admin/designSystem";
+import ExerciseLibraryModal from "@/components/admin/patients/ExerciseLibraryModal";
+import HEPExerciseRow from "@/components/admin/patients/HEPExerciseRow";
+import {
+  draftsToPayload,
+  type HEPExerciseDraft,
+} from "@/components/admin/patients/hepTypes";
 import { apiAuthHeaders } from "@/lib/apiAuth";
 
 const API_BASE =
@@ -46,28 +67,6 @@ type ClinicianRow = {
   title?: string | null;
 };
 
-type ExerciseDraft = {
-  name: string;
-  sets: string;
-  reps: string;
-  hold_seconds: string;
-  frequency: string;
-  notes: string;
-  video_url: string;
-};
-
-function defaultExerciseDraft(): ExerciseDraft {
-  return {
-    name: "",
-    sets: "",
-    reps: "",
-    hold_seconds: "",
-    frequency: "",
-    notes: "",
-    video_url: "",
-  };
-}
-
 function formatCreatedDate(iso: string | null | undefined): string {
   if (!iso) return "—";
   try {
@@ -81,13 +80,6 @@ function clinicianOptionLabel(c: ClinicianRow): string {
   const name = `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim();
   const titled = name ? `Dr. ${name}` : "Clinician";
   return c.title ? `${titled}, ${c.title}` : titled;
-}
-
-function parseOptionalInt(value: string): number | undefined {
-  const trimmed = value.trim();
-  if (!trimmed) return undefined;
-  const n = Number(trimmed);
-  return Number.isFinite(n) ? Math.trunc(n) : undefined;
 }
 
 type PatientHEPTabProps = {
@@ -107,13 +99,19 @@ export default function PatientHEPTab({
   const [clinicians, setClinicians] = useState<ClinicianRow[]>([]);
   const [title, setTitle] = useState("");
   const [clinicianId, setClinicianId] = useState("");
-  const [exercises, setExercises] = useState<ExerciseDraft[]>([
-    defaultExerciseDraft(),
-  ]);
+  const [exercises, setExercises] = useState<HEPExerciseDraft[]>([]);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [sendSms, setSendSms] = useState(true);
   const [submitBusy, setSubmitBusy] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
 
   const loadPrograms = useCallback(async () => {
     if (!patientId.trim() || !clinicId.trim()) {
@@ -189,7 +187,7 @@ export default function PatientHEPTab({
 
   function resetForm() {
     setTitle("");
-    setExercises([defaultExerciseDraft()]);
+    setExercises([]);
     setSendSms(true);
     setFormError(null);
     if (clinicians.length > 0) {
@@ -197,10 +195,25 @@ export default function PatientHEPTab({
     }
   }
 
-  function updateExercise(index: number, patch: Partial<ExerciseDraft>) {
+  function updateExercise(index: number, patch: Partial<HEPExerciseDraft>) {
     setExercises((rows) =>
       rows.map((row, i) => (i === index ? { ...row, ...patch } : row)),
     );
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setExercises((rows) => {
+      const oldIndex = rows.findIndex((row) => row.library_id === active.id);
+      const newIndex = rows.findIndex((row) => row.library_id === over.id);
+      if (oldIndex < 0 || newIndex < 0) return rows;
+      return arrayMove(rows, oldIndex, newIndex);
+    });
+  }
+
+  function handleLibraryConfirm(selected: HEPExerciseDraft[]) {
+    setExercises(selected);
   }
 
   async function handleCreate() {
@@ -213,23 +226,9 @@ export default function PatientHEPTab({
       setFormError("Select a clinician.");
       return;
     }
-    const payloadExercises = exercises
-      .map((row) => {
-        const name = row.name.trim();
-        if (!name) return null;
-        return {
-          name,
-          sets: parseOptionalInt(row.sets),
-          reps: parseOptionalInt(row.reps),
-          hold_seconds: parseOptionalInt(row.hold_seconds),
-          frequency: row.frequency.trim() || undefined,
-          notes: row.notes.trim() || undefined,
-          video_url: row.video_url.trim() || undefined,
-        };
-      })
-      .filter(Boolean);
+    const payloadExercises = draftsToPayload(exercises);
     if (payloadExercises.length === 0) {
-      setFormError("Add at least one exercise with a name.");
+      setFormError("Add at least one exercise from the library.");
       return;
     }
 
@@ -361,15 +360,6 @@ export default function PatientHEPTab({
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
-            <span className={LABEL_CLASS}>Title</span>
-            <input
-              className={FIELD_INPUT}
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Low back recovery — week 1"
-            />
-          </div>
-          <div>
             <span className={LABEL_CLASS}>Clinician</span>
             <select
               className={FIELD_INPUT}
@@ -387,6 +377,15 @@ export default function PatientHEPTab({
               )}
             </select>
           </div>
+          <div>
+            <span className={LABEL_CLASS}>Title</span>
+            <input
+              className={FIELD_INPUT}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              placeholder="e.g. Low back recovery — week 1"
+            />
+          </div>
         </div>
 
         <div className="mt-6 space-y-4">
@@ -395,117 +394,44 @@ export default function PatientHEPTab({
             <button
               type="button"
               className={DS_SECONDARY_BTN}
-              onClick={() =>
-                setExercises((rows) => [...rows, defaultExerciseDraft()])
-              }
+              onClick={() => setLibraryOpen(true)}
             >
-              + Add Exercise
+              Browse Exercise Library
             </button>
           </div>
 
-          {exercises.map((row, index) => (
-            <div
-              key={index}
-              className="rounded-xl border border-gray-100 bg-gray-50/60 p-4"
+          {exercises.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-gray-200 bg-gray-50/50 px-4 py-8 text-center text-sm text-gray-500">
+              No exercises selected. Browse the library to add exercises to this
+              program.
+            </p>
+          ) : (
+            <DndContext
+              sensors={sensors}
+              collisionDetection={closestCenter}
+              onDragEnd={handleDragEnd}
             >
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                <div className="sm:col-span-2 lg:col-span-3">
-                  <span className={LABEL_CLASS}>Name</span>
-                  <input
-                    className={FIELD_INPUT}
-                    value={row.name}
-                    onChange={(e) =>
-                      updateExercise(index, { name: e.target.value })
-                    }
-                    placeholder="Exercise name"
-                  />
+              <SortableContext
+                items={exercises.map((row) => row.library_id)}
+                strategy={verticalListSortingStrategy}
+              >
+                <div className="space-y-3">
+                  {exercises.map((row, index) => (
+                    <HEPExerciseRow
+                      key={row.library_id}
+                      exercise={row}
+                      onChange={(patch) => updateExercise(index, patch)}
+                      onRemove={() =>
+                        setExercises((rows) =>
+                          rows.filter((_, i) => i !== index),
+                        )
+                      }
+                    />
+                  ))}
                 </div>
-                <div>
-                  <span className={LABEL_CLASS}>Sets</span>
-                  <input
-                    type="number"
-                    min={0}
-                    className={FIELD_INPUT}
-                    value={row.sets}
-                    onChange={(e) =>
-                      updateExercise(index, { sets: e.target.value })
-                    }
-                  />
-                </div>
-                <div>
-                  <span className={LABEL_CLASS}>Reps</span>
-                  <input
-                    type="number"
-                    min={0}
-                    className={FIELD_INPUT}
-                    value={row.reps}
-                    onChange={(e) =>
-                      updateExercise(index, { reps: e.target.value })
-                    }
-                  />
-                </div>
-                <div>
-                  <span className={LABEL_CLASS}>Hold (sec)</span>
-                  <input
-                    type="number"
-                    min={0}
-                    className={FIELD_INPUT}
-                    value={row.hold_seconds}
-                    onChange={(e) =>
-                      updateExercise(index, { hold_seconds: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <span className={LABEL_CLASS}>Frequency</span>
-                  <input
-                    className={FIELD_INPUT}
-                    value={row.frequency}
-                    onChange={(e) =>
-                      updateExercise(index, { frequency: e.target.value })
-                    }
-                    placeholder="e.g. 2x per day"
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <span className={LABEL_CLASS}>Notes</span>
-                  <input
-                    className={FIELD_INPUT}
-                    value={row.notes}
-                    onChange={(e) =>
-                      updateExercise(index, { notes: e.target.value })
-                    }
-                  />
-                </div>
-                <div className="sm:col-span-2">
-                  <span className={LABEL_CLASS}>Video URL</span>
-                  <input
-                    className={FIELD_INPUT}
-                    value={row.video_url}
-                    onChange={(e) =>
-                      updateExercise(index, { video_url: e.target.value })
-                    }
-                    placeholder="https://"
-                  />
-                </div>
-              </div>
-              {exercises.length > 1 ? (
-                <div className="mt-3 flex justify-end">
-                  <button
-                    type="button"
-                    className="text-xs font-medium text-red-600 hover:text-red-700"
-                    onClick={() =>
-                      setExercises((rows) =>
-                        rows.filter((_, i) => i !== index),
-                      )
-                    }
-                  >
-                    Remove
-                  </button>
-                </div>
-              ) : null}
-            </div>
-          ))}
+              </SortableContext>
+            </DndContext>
+          )}
         </div>
 
         <label className="mt-6 flex cursor-pointer items-center gap-2 text-sm text-gray-700">
@@ -529,6 +455,15 @@ export default function PatientHEPTab({
           </button>
         </div>
       </div>
+
+      <ExerciseLibraryModal
+        open={libraryOpen}
+        clinicId={clinicId}
+        patientId={patientId}
+        initialSelected={exercises}
+        onClose={() => setLibraryOpen(false)}
+        onConfirm={handleLibraryConfirm}
+      />
     </div>
   );
 }

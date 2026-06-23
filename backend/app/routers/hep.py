@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -19,6 +20,13 @@ router = APIRouter(prefix="/hep", tags=["hep"])
 logger = logging.getLogger(__name__)
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "https://www.altheon.app")
+_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+
+LIBRARY_SELECT = (
+    "id, name, category, body_region, description, instructions, "
+    "default_sets, default_reps, default_hold_seconds, default_frequency, "
+    "notes_template, contraindications, video_url"
+)
 
 
 def _handle_supabase_error(response: Any) -> None:
@@ -52,6 +60,30 @@ class HEPCreate(BaseModel):
     title: str
     exercises: list[Exercise]
     send_sms: bool = True
+
+
+class AISuggestBody(BaseModel):
+    clinic_id: str = Field(..., min_length=1)
+    soap_text: str
+
+
+def _parse_ai_json_array(raw: str) -> list[dict[str, Any]]:
+    text = (raw or "").strip()
+    if not text:
+        raise json.JSONDecodeError("empty response", text, 0)
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE)
+    if fence:
+        text = fence.group(1).strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\[[\s\S]*\]", text)
+        if not match:
+            raise
+        data = json.loads(match.group(0))
+    if not isinstance(data, list):
+        raise json.JSONDecodeError("expected JSON array", text, 0)
+    return [item for item in data if isinstance(item, dict)]
 
 
 @router.post("")
@@ -164,6 +196,177 @@ def list_hep(
         raise
     except Exception as exc:
         logger.exception("list_hep failed clinic_id=%s patient_id=%s", clinic_id, patient_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.get("/library")
+def get_exercise_library(
+    clinic_id: str = Query(..., min_length=1),
+    category: Optional[str] = Query(default=None),
+    body_region: Optional[str] = Query(default=None),
+    search: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    try:
+        enforce_clinic_role_from_auth_header(authorization, clinic_id, *CLINICAL_ROLES)
+
+        query = (
+            supabase.table("exercise_library")
+            .select(LIBRARY_SELECT)
+            .eq("is_active", True)
+            .order("category")
+            .order("name")
+        )
+
+        if category and category.strip():
+            query = query.eq("category", category.strip())
+        if body_region and body_region.strip():
+            query = query.eq("body_region", body_region.strip())
+
+        result = query.execute()
+        _handle_supabase_error(result)
+        exercises = result.data or []
+
+        if search and search.strip():
+            search_lower = search.strip().lower()
+            exercises = [
+                exercise
+                for exercise in exercises
+                if search_lower in str(exercise.get("name") or "").lower()
+                or search_lower in str(exercise.get("description") or "").lower()
+                or search_lower in str(exercise.get("category") or "").lower()
+                or search_lower in str(exercise.get("body_region") or "").lower()
+            ]
+
+        return exercises
+
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("get_exercise_library failed clinic_id=%s", clinic_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/ai-suggest")
+def ai_suggest_exercises(
+    payload: AISuggestBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """
+    Accepts { soap_text, clinic_id }.
+    Sends SOAP assessment/plan to Claude Haiku with the full exercise library.
+    Returns suggested exercises hydrated with library fields and ai_reason.
+    """
+    try:
+        enforce_clinic_role_from_auth_header(
+            authorization,
+            payload.clinic_id,
+            *CLINICAL_ROLES,
+        )
+
+        soap_text = payload.soap_text.strip()
+        if not soap_text:
+            raise HTTPException(status_code=400, detail="soap_text is required")
+
+        api_key = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+        if not api_key:
+            raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not configured")
+
+        library_result = (
+            supabase.table("exercise_library")
+            .select(LIBRARY_SELECT)
+            .eq("is_active", True)
+            .order("category")
+            .order("name")
+            .execute()
+        )
+        _handle_supabase_error(library_result)
+        library = library_result.data or []
+
+        library_for_prompt = [
+            {
+                "id": row.get("id"),
+                "name": row.get("name"),
+                "category": row.get("category"),
+                "body_region": row.get("body_region"),
+                "description": row.get("description"),
+                "contraindications": row.get("contraindications"),
+            }
+            for row in library
+        ]
+
+        library_text = "\n".join(
+            [
+                (
+                    f"ID: {exercise['id']} | {exercise['name']} | {exercise['category']} | "
+                    f"{exercise['body_region']} | {exercise['description']} | "
+                    f"Contraindications: {exercise.get('contraindications') or 'None'}"
+                )
+                for exercise in library_for_prompt
+            ]
+        )
+
+        prompt = f"""You are a physical therapy clinical assistant. Based on the SOAP note below, recommend 4-6 home exercises from the provided exercise library that are most appropriate for this patient.
+
+SOAP NOTE:
+{soap_text}
+
+EXERCISE LIBRARY:
+{library_text}
+
+Return ONLY a JSON array (no markdown, no explanation) with objects in this format:
+[
+  {{"id": "<uuid>", "name": "<name>", "reason": "<one sentence clinical rationale>"}},
+  ...
+]
+
+Only recommend exercises that are clinically appropriate. Do not recommend exercises if contraindications match the patient presentation."""
+
+        try:
+            import anthropic
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="anthropic package is not installed",
+            ) from exc
+
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model=_ANTHROPIC_MODEL,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        blocks = getattr(message, "content", None) or []
+        raw_parts: list[str] = []
+        for block in blocks:
+            if hasattr(block, "text"):
+                raw_parts.append(str(block.text))
+            elif isinstance(block, dict) and block.get("text"):
+                raw_parts.append(str(block["text"]))
+        raw = "".join(raw_parts).strip()
+        suggestions = _parse_ai_json_array(raw)
+
+        hydrated = {str(row.get("id")): row for row in library if row.get("id")}
+
+        result_list: list[dict[str, Any]] = []
+        for suggestion in suggestions:
+            exercise_id = str(suggestion.get("id") or "").strip()
+            exercise = hydrated.get(exercise_id)
+            if not exercise:
+                continue
+            row = dict(exercise)
+            row["ai_reason"] = str(suggestion.get("reason") or "").strip()
+            result_list.append(row)
+
+        return result_list
+
+    except HTTPException:
+        raise
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail="AI response could not be parsed") from exc
+    except Exception as exc:
+        logger.exception("ai_suggest_exercises failed clinic_id=%s", payload.clinic_id)
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
