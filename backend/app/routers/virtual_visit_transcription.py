@@ -1,167 +1,22 @@
-"""Real-time virtual visit transcription (ElevenLabs Scribe) and SOAP generation."""
+"""Virtual visit audio upload → ElevenLabs Scribe REST → Claude Haiku SOAP."""
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 import anthropic
-import websockets as ws_lib
-from fastapi import APIRouter, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+import httpx
+from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 
 from app.db import supabase
-from app.dependencies.permissions import CLINICAL_ROLES, assert_clinic_role, enforce_clinic_role_from_auth_header
+from app.dependencies.permissions import CLINICAL_ROLES, enforce_clinic_role_from_auth_header
 
 router = APIRouter(prefix="/visits", tags=["virtual_visit_transcription"])
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
-EL_STREAM_URL = "wss://api.elevenlabs.io/v1/speech-to-text/stream"
-
-
-def _user_id_from_token(token: str) -> str:
-    t = (token or "").strip()
-    if not t:
-        raise ValueError("Missing token")
-    try:
-        auth_response = supabase.auth.get_user(t)
-    except Exception as exc:
-        raise ValueError("Invalid or expired token") from exc
-
-    user_obj = getattr(auth_response, "user", None)
-    if user_obj is None and isinstance(auth_response, dict):
-        user_obj = auth_response.get("user")
-    uid = getattr(user_obj, "id", None) if user_obj is not None else None
-    if uid is None and isinstance(user_obj, dict):
-        uid = user_obj.get("id")
-    if not uid:
-        raise ValueError("Invalid or expired token")
-    return str(uid)
-
-
-@router.websocket("/{room_id}/transcribe")
-async def transcribe_visit(
-    websocket: WebSocket,
-    room_id: str,
-    token: str = Query(...),
-):
-    """
-    WebSocket endpoint. Clinician browser connects here after starting recording.
-    Receives binary audio chunks, forwards to ElevenLabs Scribe streaming API,
-    accumulates transcript, saves chunks to virtual_visits.transcript in real time.
-    """
-    await websocket.accept()
-
-    try:
-        user_id = _user_id_from_token(token)
-    except ValueError:
-        await websocket.close(code=4001)
-        return
-
-    visit_resp = (
-        supabase.table("virtual_visits")
-        .select("id, clinic_id, appointment_id, transcript_status")
-        .eq("room_id", room_id)
-        .limit(1)
-        .execute()
-    )
-
-    if not visit_resp.data:
-        await websocket.close(code=4004)
-        return
-
-    visit_row = visit_resp.data[0]
-    visit_id = visit_row["id"]
-    clinic_id = str(visit_row.get("clinic_id") or "").strip()
-
-    try:
-        assert_clinic_role(user_id, clinic_id, CLINICAL_ROLES)
-    except HTTPException:
-        await websocket.close(code=4003)
-        return
-
-    if not ELEVENLABS_API_KEY:
-        await websocket.close(code=1011)
-        return
-
-    full_transcript = ""
-    chunk_count = 0
-
-    supabase.table("virtual_visits").update(
-        {
-            "transcript_status": "recording",
-            "recording_started_at": datetime.now(timezone.utc).isoformat(),
-        }
-    ).eq("id", visit_id).execute()
-
-    try:
-        el_headers = {"xi-api-key": ELEVENLABS_API_KEY}
-        async with ws_lib.connect(EL_STREAM_URL, extra_headers=el_headers) as el_ws:
-            await el_ws.send(
-                json.dumps(
-                    {
-                        "model_id": "scribe_v1",
-                        "language_code": "en",
-                        "output_format": "text",
-                    }
-                )
-            )
-
-            async def forward_audio() -> None:
-                while True:
-                    try:
-                        data = await websocket.receive_bytes()
-                        await el_ws.send(data)
-                    except WebSocketDisconnect:
-                        await el_ws.send(json.dumps({"type": "end_of_stream"}))
-                        break
-                    except Exception:
-                        break
-
-            async def receive_transcript() -> None:
-                nonlocal full_transcript, chunk_count
-                async for message in el_ws:
-                    try:
-                        data = json.loads(message)
-                        chunk = data.get("text", "")
-                        if not chunk:
-                            continue
-                        full_transcript += " " + chunk
-                        chunk_count += 1
-                        await websocket.send_json(
-                            {
-                                "type": "transcript_chunk",
-                                "text": chunk,
-                                "full": full_transcript.strip(),
-                            }
-                        )
-                        if chunk_count % 10 == 0:
-                            supabase.table("virtual_visits").update(
-                                {"transcript": full_transcript.strip()}
-                            ).eq("id", visit_id).execute()
-                    except Exception:
-                        continue
-
-            await asyncio.gather(forward_audio(), receive_transcript())
-
-    except Exception:
-        supabase.table("virtual_visits").update(
-            {"transcript_status": "failed"}
-        ).eq("id", visit_id).execute()
-        await websocket.close(code=1011)
-        return
-
-    supabase.table("virtual_visits").update(
-        {
-            "transcript": full_transcript.strip(),
-            "transcript_status": "processing",
-        }
-    ).eq("id", visit_id).execute()
-
-    await websocket.close()
 
 
 def _parse_soap_json(raw: str) -> dict[str, Any]:
@@ -173,87 +28,90 @@ def _parse_soap_json(raw: str) -> dict[str, Any]:
     return json.loads(text.strip())
 
 
-def _upsert_clinical_note_from_soap(visit: dict[str, Any], soap: dict[str, Any]) -> None:
-    appointment_id = visit.get("appointment_id")
-    if not appointment_id:
-        return
-
-    soap_fields = {
-        "subjective": soap.get("subjective", ""),
-        "objective": soap.get("objective", ""),
-        "assessment": soap.get("assessment", ""),
-        "plan": soap.get("plan", ""),
-        "soap_source": "virtual_visit_transcript",
-    }
-
-    existing_note = (
-        supabase.table("clinical_notes")
-        .select("id, status")
-        .eq("appointment_id", appointment_id)
-        .limit(1)
-        .execute()
-    )
-
-    if existing_note.data:
-        note = existing_note.data[0]
-        if str(note.get("status") or "") == "signed":
-            return
-        supabase.table("clinical_notes").update(soap_fields).eq("id", note["id"]).execute()
-        return
-
-    patient_id = str(visit.get("patient_id") or "").strip()
-    clinician_id = str(visit.get("clinician_id") or "").strip()
-    clinic_id = str(visit.get("clinic_id") or "").strip()
-    if not patient_id or not clinician_id or not clinic_id:
-        return
-
-    supabase.table("clinical_notes").insert(
-        {
-            "appointment_id": appointment_id,
-            "clinic_id": clinic_id,
-            "patient_id": patient_id,
-            "author_id": clinician_id,
-            "status": "draft",
-            "note_type": "daily_note",
-            **soap_fields,
-        }
-    ).execute()
+def _mark_visit_failed(visit_id: str) -> None:
+    try:
+        supabase.table("virtual_visits").update(
+            {"transcript_status": "failed"}
+        ).eq("id", visit_id).execute()
+    except Exception:
+        pass
 
 
-@router.post("/{room_id}/generate-soap")
-async def generate_soap_from_transcript(
+@router.post("/{room_id}/transcribe-and-generate")
+async def transcribe_and_generate(
     room_id: str,
+    clinic_id: str = Form(...),
+    audio: UploadFile = File(...),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
-    """
-    Called after visit ends. Reads transcript from virtual_visits,
-    sends to Claude Haiku, saves SOAP draft, returns it.
-    """
+    cid = clinic_id.strip()
+    enforce_clinic_role_from_auth_header(authorization, cid, *CLINICAL_ROLES)
+
+    if not ELEVENLABS_API_KEY:
+        raise HTTPException(status_code=500, detail="ELEVENLABS_API_KEY not configured")
+    if not ANTHROPIC_API_KEY:
+        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+    v: dict[str, Any] | None = None
     try:
-        visit_resp = (
+        visit = (
             supabase.table("virtual_visits")
-            .select(
-                "id, transcript, appointment_id, clinic_id, patient_id, clinician_id"
-            )
+            .select("id, appointment_id, clinic_id, patient_id, clinician_id")
             .eq("room_id", room_id)
             .limit(1)
             .execute()
         )
 
-        if not visit_resp.data:
+        if not visit.data:
             raise HTTPException(status_code=404, detail="Visit not found")
 
-        v = visit_resp.data[0]
-        clinic_id = str(v.get("clinic_id") or "").strip()
-        enforce_clinic_role_from_auth_header(authorization, clinic_id, *CLINICAL_ROLES)
+        v = visit.data[0]
+        visit_clinic = str(v.get("clinic_id") or "").strip()
+        if visit_clinic and visit_clinic != cid:
+            raise HTTPException(status_code=403, detail="Visit does not belong to this clinic")
 
-        transcript = str(v.get("transcript") or "").strip()
+        supabase.table("virtual_visits").update(
+            {"transcript_status": "processing"}
+        ).eq("id", v["id"]).execute()
+
+        audio_bytes = await audio.read()
+        if not audio_bytes:
+            raise HTTPException(status_code=400, detail="Empty audio upload")
+
+        async with httpx.AsyncClient(timeout=120.0) as client:
+            scribe_response = await client.post(
+                "https://api.elevenlabs.io/v1/speech-to-text",
+                headers={"xi-api-key": ELEVENLABS_API_KEY},
+                files={
+                    "file": (
+                        audio.filename or "recording.webm",
+                        audio_bytes,
+                        "audio/webm",
+                    )
+                },
+                data={"model_id": "scribe_v1"},
+            )
+
+        if scribe_response.status_code != 200:
+            _mark_visit_failed(str(v["id"]))
+            raise HTTPException(
+                status_code=502,
+                detail=f"ElevenLabs Scribe error: {scribe_response.text}",
+            )
+
+        transcript = scribe_response.json().get("text", "").strip()
         if not transcript:
-            raise HTTPException(status_code=400, detail="No transcript available")
+            _mark_visit_failed(str(v["id"]))
+            raise HTTPException(status_code=400, detail="No transcript returned from Scribe")
 
-        if not ANTHROPIC_API_KEY:
-            raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+        supabase.table("virtual_visits").update(
+            {
+                "transcript": transcript,
+                "transcript_status": "processing",
+            }
+        ).eq("id", v["id"]).execute()
 
+        ai_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         prompt = f"""You are a physical therapy clinical documentation assistant.
 Based on the following visit transcript between a clinician and patient, generate a complete SOAP note.
 
@@ -262,17 +120,17 @@ TRANSCRIPT:
 
 Return ONLY a JSON object (no markdown, no explanation):
 {{
-  "subjective": "Patient's reported symptoms, history, complaints, functional limitations...",
-  "objective": "Clinician's objective findings, measurements, observations, tests performed...",
+  "subjective": "Patient reported symptoms, history, complaints, functional limitations...",
+  "objective": "Clinician objective findings, measurements, observations, tests performed...",
   "assessment": "Clinical assessment, diagnosis impression, progress toward goals...",
   "plan": "Treatment plan, interventions performed, home program, follow-up..."
 }}
 
 Be specific and clinical. Use professional PT/chiropractic documentation language.
-If information for a section is not present in the transcript, write what can be reasonably inferred and note it."""
+Write in professional third person (e.g. Patient reports..., Clinician noted...).
+If a section has limited information from the transcript, document what is available."""
 
-        client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
-        message = client.messages.create(
+        message = ai_client.messages.create(
             model="claude-haiku-4-5-20251001",
             max_tokens=2048,
             messages=[{"role": "user", "content": prompt}],
@@ -287,13 +145,135 @@ If information for a section is not present in the transcript, write what can be
             }
         ).eq("id", v["id"]).execute()
 
-        _upsert_clinical_note_from_soap(v, soap)
+        note_id = None
+        appointment_id = v.get("appointment_id")
+        if appointment_id:
+            existing = (
+                supabase.table("clinical_notes")
+                .select("id, status")
+                .eq("appointment_id", appointment_id)
+                .limit(1)
+                .execute()
+            )
+
+            note_data = {
+                "subjective": soap.get("subjective", ""),
+                "objective": soap.get("objective", ""),
+                "assessment": soap.get("assessment", ""),
+                "plan": soap.get("plan", ""),
+                "soap_source": "virtual_visit_transcript",
+            }
+
+            if existing.data:
+                existing_row = existing.data[0]
+                note_id = existing_row.get("id")
+                if str(existing_row.get("status") or "") != "signed":
+                    supabase.table("clinical_notes").update(note_data).eq(
+                        "id", existing_row["id"]
+                    ).execute()
+            else:
+                patient_id = str(v.get("patient_id") or "").strip()
+                clinician_id = str(v.get("clinician_id") or "").strip()
+                if patient_id and clinician_id:
+                    new_note = supabase.table("clinical_notes").insert(
+                        {
+                            **note_data,
+                            "appointment_id": appointment_id,
+                            "clinic_id": v["clinic_id"],
+                            "patient_id": patient_id,
+                            "author_id": clinician_id,
+                            "note_type": "progress_note",
+                            "status": "draft",
+                        }
+                    ).execute()
+                    if new_note.data:
+                        note_id = new_note.data[0]["id"]
 
         return {
-            "soap": soap,
-            "appointment_id": v.get("appointment_id"),
             "transcript": transcript,
+            "soap": soap,
+            "appointment_id": appointment_id,
+            "note_id": note_id,
         }
+
+    except HTTPException:
+        raise
+    except json.JSONDecodeError as exc:
+        if v:
+            _mark_visit_failed(str(v["id"]))
+        raise HTTPException(
+            status_code=500, detail="AI response could not be parsed"
+        ) from exc
+    except Exception as exc:
+        if v:
+            _mark_visit_failed(str(v["id"]))
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@router.post("/{room_id}/generate-soap")
+async def generate_soap_from_transcript(
+    room_id: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """Fallback: regenerate SOAP from existing transcript without re-uploading audio."""
+    try:
+        visit = (
+            supabase.table("virtual_visits")
+            .select(
+                "id, transcript, appointment_id, clinic_id, patient_id, clinician_id"
+            )
+            .eq("room_id", room_id)
+            .limit(1)
+            .execute()
+        )
+
+        if not visit.data:
+            raise HTTPException(status_code=404, detail="Visit not found")
+
+        v = visit.data[0]
+        clinic_id = str(v.get("clinic_id") or "").strip()
+        enforce_clinic_role_from_auth_header(authorization, clinic_id, *CLINICAL_ROLES)
+
+        transcript = (v.get("transcript") or "").strip()
+        if not transcript:
+            raise HTTPException(
+                status_code=400, detail="No transcript available for this visit"
+            )
+
+        if not ANTHROPIC_API_KEY:
+            raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+
+        ai_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+        message = ai_client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=2048,
+            messages=[
+                {
+                    "role": "user",
+                    "content": f"""Generate a SOAP note from this transcript. Return ONLY JSON:
+{{
+  "subjective": "...",
+  "objective": "...",
+  "assessment": "...",
+  "plan": "..."
+}}
+
+TRANSCRIPT:
+{transcript}""",
+                }
+            ],
+        )
+
+        soap = _parse_soap_json(message.content[0].text)
+
+        supabase.table("virtual_visits").update(
+            {
+                "soap_draft": soap,
+                "transcript_status": "complete",
+            }
+        ).eq("id", v["id"]).execute()
+
+        return {"soap": soap, "appointment_id": v.get("appointment_id")}
 
     except HTTPException:
         raise

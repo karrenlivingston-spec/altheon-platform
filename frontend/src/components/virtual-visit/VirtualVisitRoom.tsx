@@ -49,34 +49,6 @@ type Phase =
 
 type ParticipantRole = "clinician" | "patient";
 
-function TranscriptStatusPill({
-  status,
-}: {
-  status: "idle" | "recording" | "processing" | "complete" | "failed";
-}) {
-  const labels: Record<typeof status, string> = {
-    idle: "Idle",
-    recording: "Recording…",
-    processing: "Processing…",
-    complete: "Complete",
-    failed: "Failed",
-  };
-  const styles: Record<typeof status, string> = {
-    idle: "bg-slate-600/60 text-slate-200",
-    recording: "bg-emerald-600/80 text-white animate-pulse",
-    processing: "bg-amber-500/80 text-white",
-    complete: "bg-emerald-600/80 text-white",
-    failed: "bg-red-600/80 text-white",
-  };
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${styles[status]}`}
-    >
-      Status: {labels[status]}
-    </span>
-  );
-}
-
 function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
@@ -101,12 +73,6 @@ function visitLogError(roomId: string, message: string, detail?: unknown) {
   } else {
     console.error(`[VirtualVisit:${roomId}] ${message}`);
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
 }
 
 async function acquireUserMedia(roomId: string): Promise<MediaStream> {
@@ -202,13 +168,11 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [completedDuration, setCompletedDuration] = useState(0);
   const [ending, setEnding] = useState(false);
-  const [generatingSoap, setGeneratingSoap] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [transcript, setTranscript] = useState("");
   const [transcriptStatus, setTranscriptStatus] = useState<
     "idle" | "recording" | "processing" | "complete" | "failed"
   >("idle");
-  const [showTranscript, setShowTranscript] = useState(true);
+  const [chartAppointmentId, setChartAppointmentId] = useState<string | null>(null);
   const [browserSupported] = useState(
     () => typeof window !== "undefined" && typeof window.RTCPeerConnection !== "undefined",
   );
@@ -218,10 +182,9 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
   const pendingRemoteStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
-  const wsRef = useRef<WebSocket | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
-  const transcriptEndRef = useRef<HTMLDivElement>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
   const peerRef = useRef<InstanceType<typeof SimplePeer> | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const sessionStartRef = useRef<Date | null>(null);
@@ -229,7 +192,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
   const remoteReadyRef = useRef(false);
   const localReadyRef = useRef(false);
 
-  const stopRecordingMedia = useCallback(() => {
+  const cleanupRecordingResources = useCallback(() => {
     if (mediaRecorderRef.current?.state !== "inactive") {
       try {
         mediaRecorderRef.current?.stop();
@@ -238,125 +201,81 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
       }
     }
     mediaRecorderRef.current = null;
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
+    audioChunksRef.current = [];
     if (audioContextRef.current) {
       void audioContextRef.current.close().catch(() => undefined);
       audioContextRef.current = null;
     }
   }, []);
 
-  const stopRecording = useCallback(() => {
-    stopRecordingMedia();
-    setIsRecording(false);
-    setTranscriptStatus((prev) => (prev === "recording" ? "processing" : prev));
-  }, [stopRecordingMedia]);
+  const stopRecording = useCallback((): Promise<Blob | null> => {
+    return new Promise((resolve) => {
+      const recorder = mediaRecorderRef.current;
+      if (!recorder || recorder.state === "inactive") {
+        cleanupRecordingResources();
+        resolve(null);
+        return;
+      }
+      recorder.onstop = () => {
+        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        mediaRecorderRef.current = null;
+        audioChunksRef.current = [];
+        void audioContextRef.current?.close().catch(() => undefined);
+        audioContextRef.current = null;
+        resolve(blob);
+      };
+      recorder.stop();
+      setIsRecording(false);
+    });
+  }, [cleanupRecordingResources]);
 
   const startRecording = useCallback(async () => {
-    const localStream = localStreamRef.current;
-    const remoteStream = remoteStreamRef.current;
-    if (!localStream || isRecording) return;
+    if (!localStreamRef.current || isRecording) return;
 
     try {
       const audioContext = new AudioContext();
       audioContextRef.current = audioContext;
       const destination = audioContext.createMediaStreamDestination();
 
-      if (localStream.getAudioTracks().length > 0) {
-        const localSource = audioContext.createMediaStreamSource(localStream);
+      if (localStreamRef.current.getAudioTracks().length > 0) {
+        const localSource = audioContext.createMediaStreamSource(localStreamRef.current);
         localSource.connect(destination);
       }
-
-      if (remoteStream?.getAudioTracks().length) {
-        const remoteSource = audioContext.createMediaStreamSource(remoteStream);
+      if (remoteStreamRef.current?.getAudioTracks().length) {
+        const remoteSource = audioContext.createMediaStreamSource(remoteStreamRef.current);
         remoteSource.connect(destination);
       }
 
-      const mixedStream = destination.stream;
       const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
         ? "audio/webm;codecs=opus"
         : "audio/webm";
-      const mediaRecorder = new MediaRecorder(mixedStream, { mimeType });
+      const mediaRecorder = new MediaRecorder(destination.stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
-
-      const clinicianToken = await getClinicianToken();
-      if (!clinicianToken) {
-        visitLogError(roomId, "startRecording: missing auth token");
-        void audioContext.close();
-        audioContextRef.current = null;
-        return;
-      }
-
-      const wsBase = API_BASE.replace("https://", "wss://").replace("http://", "ws://");
-      const wsUrl = `${wsBase}/visits/${encodeURIComponent(roomId)}/transcribe?token=${encodeURIComponent(clinicianToken)}`;
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(String(event.data)) as {
-            type?: string;
-            full?: string;
-          };
-          if (data.type === "transcript_chunk" && data.full) {
-            setTranscript(data.full);
-          }
-        } catch {
-          // ignore malformed messages
-        }
-      };
-
-      ws.onerror = () => {
-        visitLogError(roomId, "transcription WebSocket error");
-        setTranscriptStatus("failed");
-        stopRecordingMedia();
-        setIsRecording(false);
-      };
-
-      ws.onclose = () => {
-        if (mediaRecorderRef.current?.state === "recording") {
-          try {
-            mediaRecorderRef.current.stop();
-          } catch {
-            // ignore
-          }
-        }
-      };
-
-      ws.onopen = () => {
-        mediaRecorder.start(5000);
-      };
+      audioChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0 && ws.readyState === WebSocket.OPEN) {
-          ws.send(event.data);
-        }
+        if (event.data.size > 0) audioChunksRef.current.push(event.data);
       };
 
+      mediaRecorder.start(5000);
       setIsRecording(true);
       setTranscriptStatus("recording");
     } catch (err) {
       visitLogError(roomId, "Failed to start recording", err);
-      stopRecordingMedia();
+      cleanupRecordingResources();
       setIsRecording(false);
       setTranscriptStatus("failed");
     }
-  }, [getClinicianToken, isRecording, roomId, stopRecordingMedia]);
-
-  useEffect(() => {
-    transcriptEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [transcript]);
+  }, [cleanupRecordingResources, isRecording, roomId]);
 
   useEffect(() => {
     return () => {
-      stopRecordingMedia();
+      cleanupRecordingResources();
     };
-  }, [stopRecordingMedia]);
+  }, [cleanupRecordingResources]);
 
   const cleanupMedia = useCallback(() => {
-    stopRecordingMedia();
+    cleanupRecordingResources();
     visitLog(roomId, "cleanupMedia");
     peerRef.current?.destroy();
     peerRef.current = null;
@@ -371,7 +290,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
     remoteStreamRef.current = null;
-  }, [roomId, stopRecordingMedia]);
+  }, [roomId, cleanupRecordingResources]);
 
   useEffect(() => {
     return () => {
@@ -727,6 +646,14 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
     setPhase("connecting");
   }
 
+  function goToPatientChart(appointmentId?: string | null) {
+    if (appointmentId) {
+      window.location.href = `/admin/patients?appointment=${encodeURIComponent(appointmentId)}&tab=notes`;
+      return;
+    }
+    window.location.href = "/admin/patients";
+  }
+
   async function handleEndVisit() {
     if (!isClinician || !clinicIdParam) return;
     setEnding(true);
@@ -758,42 +685,51 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
         visitLog(roomId, "end visit: success", json);
         setCompletedDuration(json.duration_seconds ?? elapsedSeconds);
 
-        stopRecording();
         setTranscriptStatus("processing");
         soapInProgress = true;
-        setGeneratingSoap(true);
 
-        await sleep(3000);
+        const audioBlob = await stopRecording();
 
-        const soapRes = await fetch(
-          `${API_BASE}/visits/${encodeURIComponent(roomId)}/generate-soap`,
-          {
-            method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
+        if (audioBlob && audioBlob.size > 0) {
+          const formData = new FormData();
+          formData.append("clinic_id", clinicIdParam);
+          formData.append("audio", audioBlob, "recording.webm");
+
+          const soapRes = await fetch(
+            `${API_BASE}/visits/${encodeURIComponent(roomId)}/transcribe-and-generate`,
+            {
+              method: "POST",
+              headers: { Authorization: `Bearer ${token}` },
+              body: formData,
             },
-          },
-        );
+          );
 
-        if (soapRes.ok) {
-          const soapData = (await soapRes.json()) as {
-            appointment_id?: string;
-          };
-          setTranscriptStatus("complete");
-          cleanupMedia();
-          if (soapData.appointment_id) {
-            window.location.href = `/admin/patients?appointment=${encodeURIComponent(soapData.appointment_id)}&tab=notes`;
+          if (soapRes.ok) {
+            const soapData = (await soapRes.json()) as {
+              appointment_id?: string;
+            };
+            if (soapData.appointment_id) {
+              setChartAppointmentId(soapData.appointment_id);
+              setTranscriptStatus("complete");
+              window.setTimeout(() => {
+                goToPatientChart(soapData.appointment_id);
+              }, 2000);
+              return;
+            }
+            visitLogError(roomId, "transcribe-and-generate: missing appointment_id");
+            setTranscriptStatus("failed");
             return;
           }
-          setGeneratingSoap(false);
+
+          visitLogError(roomId, "transcribe-and-generate failed", {
+            status: soapRes.status,
+          });
           setTranscriptStatus("failed");
           return;
         }
 
-        visitLogError(roomId, "generate-soap failed", { status: soapRes.status });
+        visitLogError(roomId, "end visit: no audio blob captured");
         setTranscriptStatus("failed");
-        setGeneratingSoap(false);
         return;
       }
 
@@ -816,7 +752,6 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
       visitLogError(roomId, "end visit: unexpected error", err);
       if (soapInProgress) {
         setTranscriptStatus("failed");
-        setGeneratingSoap(false);
       } else {
         setConnectionStatus("Could not end visit. Please try again.");
       }
@@ -953,60 +888,51 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
           </div>
 
           {isClinician && clinicIdParam && phase === "in_call" ? (
-            <div className="mt-3 space-y-3 px-1 pb-3 sm:px-0">
+            <div className="mt-3 px-1 pb-3 sm:px-0">
               <div className="rounded-xl border border-teal-500/30 bg-[#0a1815]/80 px-4 py-3">
-                <div className="flex flex-col gap-2">
-                  {connectionStatus === "Connected" && !isRecording ? (
-                    <button
-                      type="button"
-                      onClick={() => void startRecording()}
-                      disabled={ending || generatingSoap}
-                      className="min-h-[40px] w-fit rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
-                    >
-                      🎙 Start Recording
-                    </button>
-                  ) : null}
-                  {isRecording ? (
-                    <p className="text-xs text-gray-400">
-                      Recording in progress — click End Visit when the session is complete.
-                    </p>
-                  ) : null}
-                  <div className="flex flex-wrap items-center gap-3">
-                    <TranscriptStatusPill status={transcriptStatus} />
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-xl border border-teal-500/30 bg-[#0a1815]/80 px-4 py-3">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <p className="text-xs font-semibold uppercase tracking-wide text-teal-200/90">
-                    Live Transcript
-                  </p>
+                {connectionStatus === "Connected" &&
+                !isRecording &&
+                transcriptStatus !== "processing" &&
+                transcriptStatus !== "complete" &&
+                transcriptStatus !== "failed" ? (
                   <button
                     type="button"
-                    onClick={() => setShowTranscript((v) => !v)}
-                    className="text-xs font-medium text-teal-300 hover:text-teal-100"
+                    onClick={() => void startRecording()}
+                    disabled={ending}
+                    className="min-h-[40px] w-fit rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
                   >
-                    {showTranscript ? "Hide" : "Show"}
+                    🎙 Start Recording
                   </button>
-                </div>
+                ) : null}
 
-                {transcriptStatus === "failed" ? (
-                  <p className="mb-2 rounded-lg border border-red-500/40 bg-red-950/40 px-3 py-2 text-xs text-red-200">
-                    Transcription failed — you can still document manually
+                {isRecording ? (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium text-red-400">🔴 Recording in progress</p>
+                    <p className="text-xs text-gray-400">
+                      Click End Visit when the session is complete — audio will be transcribed
+                      automatically.
+                    </p>
+                  </div>
+                ) : null}
+
+                {transcriptStatus === "complete" ? (
+                  <p className="rounded-lg border border-emerald-500/40 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200">
+                    ✅ SOAP note generated — redirecting to clinical notes…
                   </p>
                 ) : null}
 
-                {showTranscript ? (
-                  <div className="max-h-48 overflow-y-auto rounded-lg border border-teal-900/60 bg-black/30 px-3 py-2 text-sm leading-relaxed text-teal-50/90">
-                    {transcript.trim() ? (
-                      <p className="whitespace-pre-wrap">{transcript}</p>
-                    ) : (
-                      <p className="text-teal-200/50 italic">
-                        Transcript will appear here once recording starts…
-                      </p>
-                    )}
-                    <div ref={transcriptEndRef} />
+                {transcriptStatus === "failed" ? (
+                  <div className="space-y-3">
+                    <p className="rounded-lg border border-red-500/40 bg-red-950/40 px-3 py-2 text-xs text-red-200">
+                      ❌ Transcription failed — you can document this visit manually.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => goToPatientChart(chartAppointmentId)}
+                      className="rounded-lg border border-teal-500/40 px-4 py-2 text-sm font-medium text-teal-100 hover:bg-teal-900/40"
+                    >
+                      Close
+                    </button>
                   </div>
                 ) : null}
               </div>
@@ -1023,24 +949,26 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
               <button
                 type="button"
                 onClick={() => void handleEndVisit()}
-                disabled={ending || generatingSoap}
+                disabled={ending || transcriptStatus === "processing"}
                 className="min-h-[44px] w-full max-w-md rounded-lg px-5 py-2.5 text-sm font-medium text-white disabled:opacity-60"
                 style={{ backgroundColor: TEAL }}
               >
-                {ending || generatingSoap ? "Ending…" : "End Visit"}
+                {ending || transcriptStatus === "processing" ? "Ending…" : "End Visit"}
               </button>
             </div>
           </div>
         ) : null}
 
-        {generatingSoap && isClinician ? (
+        {transcriptStatus === "processing" && isClinician ? (
           <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-6">
             <div className="w-full max-w-sm rounded-2xl bg-white px-8 py-10 text-center shadow-xl">
               <p className="text-3xl leading-none">⚙️</p>
               <h2 className="mt-4 text-lg font-semibold text-slate-900">
-                Generating your SOAP note
+                Transcribing and generating your SOAP note…
               </h2>
-              <p className="mt-2 text-sm text-slate-600">Please wait…</p>
+              <p className="mt-2 text-sm text-slate-600">
+                Please wait — this takes about 30 seconds.
+              </p>
               <div className="mx-auto mt-6 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
                 <div className="h-full w-1/3 animate-pulse rounded-full bg-[#0d9488]" />
               </div>
