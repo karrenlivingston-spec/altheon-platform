@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { DS_PRIMARY_BTN, DS_SECONDARY_BTN } from "@/app/admin/designSystem";
+import { apiAuthHeaders } from "@/lib/apiAuth";
 
 const API_BASE = "https://altheon-platform.onrender.com";
 
@@ -224,10 +225,14 @@ export function AmbientScribe({
         form.append("patient_id", (patientId ?? "").trim());
         form.append("note_id", (noteId ?? "").trim());
 
+        const headers = await apiAuthHeaders();
+        delete headers["Content-Type"];
+
         const res = await fetch(
           `${API_BASE}/soap-dictation/transcribe-and-generate`,
           {
             method: "POST",
+            headers,
             body: form,
           },
         );

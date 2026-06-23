@@ -32,6 +32,8 @@ export type PlanOfCareNote = {
   clinic_id: string;
   note_type?: string | null;
   plan?: string | null;
+  subjective?: string | null;
+  assessment?: string | null;
   author_name?: string | null;
   diagnosis_code?: string | null;
 };
@@ -40,6 +42,9 @@ type PlanOfCareModalProps = {
   note: PlanOfCareNote;
   clinicId: string;
   patientName?: string | null;
+  subjectiveText?: string;
+  assessmentText?: string;
+  planText?: string;
   onClose: () => void;
 };
 
@@ -57,6 +62,18 @@ function noteSoapText(row: ClinicalNoteSoapRow): string {
   return [(row.assessment ?? "").trim(), (row.plan ?? "").trim()]
     .filter(Boolean)
     .join("\n\n");
+}
+
+function liveSoapText(
+  note: PlanOfCareNote,
+  subjectiveText?: string,
+  assessmentText?: string,
+  planText?: string,
+): string {
+  const subjective = (subjectiveText ?? note.subjective ?? "").trim();
+  const assessment = (assessmentText ?? note.assessment ?? "").trim();
+  const plan = (planText ?? note.plan ?? "").trim();
+  return [subjective, assessment, plan].filter(Boolean).join("\n\n");
 }
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -82,6 +99,9 @@ export default function PlanOfCareModal({
   note,
   clinicId,
   patientName,
+  subjectiveText,
+  assessmentText,
+  planText,
   onClose,
 }: PlanOfCareModalProps) {
   const [frequency, setFrequency] = useState("");
@@ -129,17 +149,20 @@ export default function PlanOfCareModal({
     setAiSuggestMessage(null);
     try {
       const headers = await authHeaders();
-      const notesRes = await fetch(
-        `${API_BASE}/api/patients/${encodeURIComponent(note.patient_id)}/clinical-notes`,
-        { headers },
-      );
+      let soapText = liveSoapText(note, subjectiveText, assessmentText, planText);
 
-      let soapText = "";
-      if (notesRes.ok) {
-        const rows = await notesRes.json();
-        const notes = Array.isArray(rows) ? (rows as ClinicalNoteSoapRow[]) : [];
-        if (notes.length > 0) {
-          soapText = noteSoapText(notes[0]);
+      if (!soapText) {
+        const notesRes = await fetch(
+          `${API_BASE}/api/patients/${encodeURIComponent(note.patient_id)}/clinical-notes`,
+          { headers },
+        );
+
+        if (notesRes.ok) {
+          const rows = await notesRes.json();
+          const notes = Array.isArray(rows) ? (rows as ClinicalNoteSoapRow[]) : [];
+          if (notes.length > 0) {
+            soapText = noteSoapText(notes[0]);
+          }
         }
       }
 

@@ -266,6 +266,11 @@ export default function AdminClinicalNotesPage() {
 
   const [viewNote, setViewNote] = useState<ClinicalNote | null>(null);
   const [pocNote, setPocNote] = useState<ClinicalNote | null>(null);
+  const [pocLiveSoap, setPocLiveSoap] = useState<{
+    subjectiveText?: string;
+    assessmentText?: string;
+    planText?: string;
+  } | null>(null);
   const [exportingNoteId, setExportingNoteId] = useState<string | null>(null);
   const [viewLoading, setViewLoading] = useState(false);
 
@@ -1521,11 +1526,36 @@ export default function AdminClinicalNotesPage() {
                     <h3 className="text-sm font-semibold text-gray-900">
                       Plan of Care
                     </h3>
-                    {/* TODO: PlanOfCareModal is only reachable from the signed-note View modal today — add editor access when POC draft flow exists */}
-                    <p className="mt-2 text-xs text-gray-500">
-                      Plan of Care is available after the note is signed (from the
-                      note detail view).
-                    </p>
+                    {draftNoteType.toLowerCase().includes("evaluation") &&
+                    editingId &&
+                    draftPatientId ? (
+                      <button
+                        type="button"
+                        className={`mt-3 ${DS_SECONDARY_BTN}`}
+                        onClick={() => {
+                          setPocLiveSoap({
+                            subjectiveText: draftSubjective,
+                            assessmentText: draftAssessment,
+                            planText: draftPlan,
+                          });
+                          setPocNote({
+                            id: editingId,
+                            patient_id: draftPatientId,
+                            note_type: draftNoteType,
+                            author_name: null,
+                            subjective: draftSubjective,
+                            assessment: draftAssessment,
+                            plan: draftPlan,
+                          });
+                        }}
+                      >
+                        Open Plan of Care
+                      </button>
+                    ) : (
+                      <p className="mt-2 text-xs text-gray-500">
+                        Plan of Care is available for initial evaluation notes.
+                      </p>
+                    )}
                   </div>
                 </div>
               ) : null}
@@ -1822,7 +1852,10 @@ export default function AdminClinicalNotesPage() {
                   {viewNote.note_type?.toLowerCase().includes("evaluation") ? (
                     <button
                       type="button"
-                      onClick={() => setPocNote(viewNote)}
+                      onClick={() => {
+                        setPocLiveSoap(null);
+                        setPocNote(viewNote);
+                      }}
                       className={DS_SECONDARY_BTN}
                     >
                       Plan of Care
@@ -1850,7 +1883,13 @@ export default function AdminClinicalNotesPage() {
           note={{ ...pocNote, clinic_id: clinicId }}
           clinicId={clinicId}
           patientName={pocNote.patient_name}
-          onClose={() => setPocNote(null)}
+          subjectiveText={pocLiveSoap?.subjectiveText}
+          assessmentText={pocLiveSoap?.assessmentText}
+          planText={pocLiveSoap?.planText}
+          onClose={() => {
+            setPocNote(null);
+            setPocLiveSoap(null);
+          }}
         />
       ) : null}
 

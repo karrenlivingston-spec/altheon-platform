@@ -3091,6 +3091,14 @@ function MonthGrid({
 
   return (
     <div className="rounded-xl border border-black/10 bg-white p-4 shadow-[0_1px_3px_rgba(0,0,0,0.08)]">
+      <h2 className="mb-4 text-xl font-semibold text-slate-900">
+        {new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(
+          (() => {
+            const [y, m] = anchorYmd.split("-").map(Number);
+            return new Date(y, m - 1, 1);
+          })(),
+        )}
+      </h2>
       <div className="mb-2 grid grid-cols-7 gap-1 text-center text-[11px] font-medium text-slate-500">
         {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map((d) => (
           <div key={d}>{d}</div>
