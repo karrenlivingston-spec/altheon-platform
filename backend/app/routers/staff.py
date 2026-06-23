@@ -60,6 +60,7 @@ class StaffInviteBody(BaseModel):
     clinic_id: str = Field(..., min_length=1)
     email: EmailStr
     role: str = Field(..., min_length=1)
+    invited_by: str = Field(..., min_length=1)
 
 
 class StaffRolePatchBody(BaseModel):
@@ -140,9 +141,9 @@ def invite_staff(
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
     _auth: Optional[AuthorizedClinicUser] = Depends(require_role(*ADMIN_ROLES)),
 ):
-    actor = enforce_clinic_role_from_auth_header(authorization, body.clinic_id, *ADMIN_ROLES)
+    enforce_clinic_role_from_auth_header(authorization, body.clinic_id, *ADMIN_ROLES)
     cid = _require_uuid(body.clinic_id, "clinic_id")
-    invited_by = _require_uuid(actor.user_id, "invited_by")
+    invited_by = _require_uuid(body.invited_by, "invited_by")
     email = str(body.email).strip().lower()
     role = (body.role or "").strip().lower()
 
@@ -172,6 +173,7 @@ def invite_staff(
         role,
         email,
     )
+    print(f"invite_staff invited_by={insert_row.get('invited_by')}")
     try:
         ins = supabase.table("staff_invitations").insert(insert_row).execute()
         _handle_supabase_error(ins)

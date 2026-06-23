@@ -188,6 +188,7 @@ export default function StaffManagementPage() {
       clinic_id: trimmedClinicId,
       email,
       role: inviteRole,
+      invited_by: invitedBy,
     };
 
     console.log("[staff/invite] payload", { ...payload, invitedBy });
