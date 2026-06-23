@@ -3,18 +3,26 @@
 from __future__ import annotations
 
 import base64
+import json
+import logging
+import os
+import re
 import traceback
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 import fitz  # PyMuPDF
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.dependencies.permissions import CLINICAL_ROLES, enforce_clinic_role_from_auth_header
 from routers.fee_schedule import ClinicUserDep
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
 PAGE_W, PAGE_H = 612.0, 792.0
 MARGIN = 54.0
@@ -87,6 +95,30 @@ class PlanOfCareRequest(BaseModel):
     diagnosis_code: str = ""
     diagnosis_description: str = ""
     clinician_signature: str = ""
+
+
+class PocAISuggestBody(BaseModel):
+    clinic_id: str = Field(..., min_length=1)
+    soap_text: str
+
+
+def _parse_ai_json_object(raw: str) -> dict[str, Any]:
+    text = (raw or "").strip()
+    if not text:
+        raise json.JSONDecodeError("empty response", text, 0)
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE)
+    if fence:
+        text = fence.group(1).strip()
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{[\s\S]*\}", text)
+        if not match:
+            raise
+        data = json.loads(match.group(0))
+    if not isinstance(data, dict):
+        raise json.JSONDecodeError("expected JSON object", text, 0)
+    return data
 
 
 class PocPdfBuilder:
@@ -339,6 +371,90 @@ def _build_poc_pdf(
     )
 
     return builder.finish()
+
+
+@router.post("/plan-of-care/ai-suggest-goals")
+def ai_suggest_poc_goals(
+    payload: PocAISuggestBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    """
+    Accepts { clinic_id, soap_text }.
+    Returns { short_term_goals, long_term_goals } as plain text strings.
+    """
+    try:
+        enforce_clinic_role_from_auth_header(
+            authorization,
+            payload.clinic_id,
+            *CLINICAL_ROLES,
+        )
+
+        soap_text = payload.soap_text.strip()
+        if not soap_text:
+            raise HTTPException(status_code=400, detail="soap_text is required")
+
+        api_key = (os.getenv("ANTHROPIC_API_KEY") or "").strip()
+        if not api_key:
+            raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not configured")
+
+        prompt = f"""You are a physical therapy clinical assistant helping a clinician write a Plan of Care.
+
+Based on the SOAP note below, generate:
+1. Short-Term Goals (2-week goals) — 2 to 3 specific, measurable, functional goals
+2. Long-Term Goals (end of plan of care) — 2 to 3 specific, measurable, functional goals
+
+SOAP NOTE:
+{soap_text}
+
+Return ONLY a JSON object (no markdown, no explanation):
+{{
+  "short_term_goals": "1. [goal]\\n2. [goal]\\n3. [goal]",
+  "long_term_goals": "1. [goal]\\n2. [goal]\\n3. [goal]"
+}}
+
+Goals must be:
+- Specific and measurable (include time frames, distances, pain scales, repetitions where appropriate)
+- Functional and patient-centered (what will the patient be able to DO)
+- Realistic for the diagnosis and presentation in the SOAP note
+- Written in third person (e.g. "Patient will...")"""
+
+        try:
+            import anthropic
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="anthropic package is not installed",
+            ) from exc
+
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model=_ANTHROPIC_MODEL,
+            max_tokens=1024,
+            messages=[{"role": "user", "content": prompt}],
+        )
+
+        blocks = getattr(message, "content", None) or []
+        raw_parts: list[str] = []
+        for block in blocks:
+            if hasattr(block, "text"):
+                raw_parts.append(str(block.text))
+            elif isinstance(block, dict) and block.get("text"):
+                raw_parts.append(str(block["text"]))
+        raw = "".join(raw_parts).strip()
+        result = _parse_ai_json_object(raw)
+
+        return {
+            "short_term_goals": str(result.get("short_term_goals") or "").strip(),
+            "long_term_goals": str(result.get("long_term_goals") or "").strip(),
+        }
+
+    except HTTPException:
+        raise
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=500, detail="AI response could not be parsed") from exc
+    except Exception as exc:
+        logger.exception("ai_suggest_poc_goals failed clinic_id=%s", payload.clinic_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/plan-of-care/generate")

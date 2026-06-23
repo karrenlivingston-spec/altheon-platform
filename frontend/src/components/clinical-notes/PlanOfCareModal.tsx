@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { Loader2, X } from "lucide-react";
+import { Loader2, Sparkles, X } from "lucide-react";
 
 import {
   DS_CARD,
@@ -9,7 +9,7 @@ import {
   DS_PRIMARY_BTN,
   DS_SECONDARY_BTN,
 } from "@/app/admin/designSystem";
-import { supabase } from "@/lib/supabase";
+import { apiAuthHeaders } from "@/lib/apiAuth";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
@@ -43,12 +43,24 @@ type PlanOfCareModalProps = {
   onClose: () => void;
 };
 
+type ClinicalNoteSoapRow = {
+  assessment?: string | null;
+  plan?: string | null;
+};
+
+type AiSuggestMessage =
+  | { kind: "success"; text: string }
+  | { kind: "info"; text: string }
+  | { kind: "error"; text: string };
+
+function noteSoapText(row: ClinicalNoteSoapRow): string {
+  return [(row.assessment ?? "").trim(), (row.plan ?? "").trim()]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 async function authHeaders(): Promise<Record<string, string>> {
-  const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token ?? "";
-  const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (token) h.Authorization = `Bearer ${token}`;
-  return h;
+  return apiAuthHeaders();
 }
 
 function downloadBase64Pdf(base64: string, filename: string) {
@@ -87,6 +99,10 @@ export default function PlanOfCareModal({
   );
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [aiSuggestBusy, setAiSuggestBusy] = useState(false);
+  const [aiSuggestMessage, setAiSuggestMessage] = useState<AiSuggestMessage | null>(
+    null,
+  );
 
   const allProcedures = useMemo(() => {
     const set = new Set(selectedProcedures);
@@ -107,6 +123,73 @@ export default function PlanOfCareModal({
     );
     setCustomProcedure("");
   }, [customProcedure]);
+
+  async function handleAiSuggestGoals() {
+    setAiSuggestBusy(true);
+    setAiSuggestMessage(null);
+    try {
+      const headers = await authHeaders();
+      const notesRes = await fetch(
+        `${API_BASE}/api/patients/${encodeURIComponent(note.patient_id)}/clinical-notes`,
+        { headers },
+      );
+
+      let soapText = "";
+      if (notesRes.ok) {
+        const rows = await notesRes.json();
+        const notes = Array.isArray(rows) ? (rows as ClinicalNoteSoapRow[]) : [];
+        if (notes.length > 0) {
+          soapText = noteSoapText(notes[0]);
+        }
+      }
+
+      if (!soapText) {
+        setAiSuggestMessage({
+          kind: "info",
+          text: "No recent SOAP note found for this patient",
+        });
+        return;
+      }
+
+      const suggestRes = await fetch(
+        `${API_BASE}/api/plan-of-care/ai-suggest-goals`,
+        {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            clinic_id: clinicId,
+            soap_text: soapText,
+          }),
+        },
+      );
+
+      if (!suggestRes.ok) {
+        setAiSuggestMessage({
+          kind: "error",
+          text: "Could not generate goals — please enter manually",
+        });
+        return;
+      }
+
+      const data = (await suggestRes.json()) as {
+        short_term_goals?: string;
+        long_term_goals?: string;
+      };
+      setShortTermGoals(String(data.short_term_goals ?? "").trim());
+      setLongTermGoals(String(data.long_term_goals ?? "").trim());
+      setAiSuggestMessage({
+        kind: "success",
+        text: "Goals suggested from SOAP note — review and edit before saving",
+      });
+    } catch {
+      setAiSuggestMessage({
+        kind: "error",
+        text: "Could not generate goals — please enter manually",
+      });
+    } finally {
+      setAiSuggestBusy(false);
+    }
+  }
 
   async function handleGenerate() {
     setLoading(true);
@@ -309,6 +392,49 @@ export default function PlanOfCareModal({
               Add
             </button>
           </div>
+        </div>
+
+        <div className="mt-4 rounded-xl border border-blue-100 bg-blue-50/50 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <p className="text-sm font-medium text-gray-900">
+                <Sparkles
+                  className="mr-1 inline size-4 text-blue-600"
+                  aria-hidden
+                />
+                AI Suggest Goals
+              </p>
+              <p className="text-xs text-gray-500">
+                Based on most recent SOAP note
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={aiSuggestBusy}
+              onClick={() => void handleAiSuggestGoals()}
+              className={`${DS_SECONDARY_BTN} inline-flex items-center gap-2 disabled:opacity-60`}
+            >
+              {aiSuggestBusy ? (
+                <Loader2 className="size-4 animate-spin" aria-hidden />
+              ) : (
+                <Sparkles className="size-4 text-blue-600" aria-hidden />
+              )}
+              AI Suggest Goals
+            </button>
+          </div>
+          {aiSuggestMessage ? (
+            <p
+              className={`mt-3 text-sm ${
+                aiSuggestMessage.kind === "success"
+                  ? "text-blue-700"
+                  : aiSuggestMessage.kind === "error"
+                    ? "text-red-700"
+                    : "text-gray-600"
+              }`}
+            >
+              {aiSuggestMessage.text}
+            </p>
+          ) : null}
         </div>
 
         <div className="mt-4">
