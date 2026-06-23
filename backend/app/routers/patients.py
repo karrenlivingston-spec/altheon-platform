@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 
 from app.constants import STTPDN_CLINIC_ID
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.dependencies.permissions import (
     ALL_ROLES,
     enforce_clinic_role_from_auth_header,
@@ -562,13 +563,15 @@ def get_patient(patient_id: str, clinic_id: str = Query(...)):
     if not _has_clinic_access(clinic_id, patient_id):
         raise HTTPException(status_code=404, detail="Patient not found")
     try:
-        resp = (
-            supabase.table("patients")
-            .select("*")
-            .eq("id", patient_id)
-            .eq("clinic_id", clinic_id)
-            .single()
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("patients")
+                .select("*")
+                .eq("id", patient_id)
+                .eq("clinic_id", clinic_id)
+                .single()
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:

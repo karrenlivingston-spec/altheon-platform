@@ -77,6 +77,9 @@ def supabase_execute(fn: Callable[[], T]) -> T:
             if not is_transient_supabase_failure(exc) or attempt >= _MAX_ATTEMPTS - 1:
                 raise
             delay = _BACKOFF_SECONDS[min(attempt, len(_BACKOFF_SECONDS) - 1)]
+            print(
+                f"Supabase transient failure (attempt {attempt + 1}/{_MAX_ATTEMPTS}): {exc}; retrying in 100ms"
+            )
             logger.warning(
                 "Supabase transient failure (attempt %s/%s): %s; retrying in %.0fms",
                 attempt + 1,

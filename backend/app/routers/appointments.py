@@ -17,6 +17,7 @@ from app.google_calendar import (
     update_calendar_event,
 )
 from app.routers.intake import send_booking_intake_sms
+from app.retry_utils import supabase_execute
 from app.services.waitlist import run_waitlist_notify_for_freed_slot
 from app.sms import send_sms
 
@@ -460,17 +461,19 @@ def get_appointment(
     user_id = _resolve_bearer_user_id(authorization)
     _assert_user_has_clinic_access(user_id, clinic_id)
     try:
-        resp = (
-            supabase.table("appointments")
-            .select(
-                "id, clinic_id, patient_id, clinician_id, start_time, end_time, status, notes, "
-                "patients(first_name, last_name, phone, insurance_carrier), "
-                "treatment_types(name), clinicians(first_name, last_name)"
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .select(
+                    "id, clinic_id, patient_id, clinician_id, start_time, end_time, status, notes, "
+                    "patients(first_name, last_name, phone, insurance_carrier), "
+                    "treatment_types(name), clinicians(first_name, last_name)"
+                )
+                .eq("id", appointment_id)
+                .eq("clinic_id", clinic_id)
+                .limit(1)
+                .execute()
             )
-            .eq("id", appointment_id)
-            .eq("clinic_id", clinic_id)
-            .limit(1)
-            .execute()
         )
         _handle_supabase_error(resp)
     except HTTPException:
