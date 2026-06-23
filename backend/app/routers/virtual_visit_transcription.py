@@ -7,7 +7,7 @@ import os
 from typing import Any, Optional
 
 import anthropic
-import httpx
+import requests as req_lib
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 
 from app.db import supabase
@@ -78,19 +78,19 @@ async def transcribe_and_generate(
         if not audio_bytes:
             raise HTTPException(status_code=400, detail="Empty audio upload")
 
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            scribe_response = await client.post(
-                "https://api.elevenlabs.io/v1/speech-to-text",
-                headers={"xi-api-key": ELEVENLABS_API_KEY},
-                files={
-                    "file": (
-                        audio.filename or "recording.webm",
-                        audio_bytes,
-                        "audio/webm",
-                    )
-                },
-                data={"model_id": "scribe_v1"},
-            )
+        scribe_response = req_lib.post(
+            "https://api.elevenlabs.io/v1/speech-to-text",
+            headers={"xi-api-key": ELEVENLABS_API_KEY},
+            files={
+                "file": (
+                    audio.filename or "recording.webm",
+                    audio_bytes,
+                    "audio/webm",
+                )
+            },
+            data={"model_id": "scribe_v1"},
+            timeout=120,
+        )
 
         if scribe_response.status_code != 200:
             _mark_visit_failed(str(v["id"]))
