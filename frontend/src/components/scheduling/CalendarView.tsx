@@ -773,6 +773,7 @@ export default function CalendarView({
 
   const handleApptCardClick = useCallback(
     (appt: CalendarAppointment, anchorRect: DOMRect) => {
+      setDetailAppt(appt);
       setPopupAppt(appt);
       setPopupAnchor(anchorRect);
     },
@@ -1029,11 +1030,20 @@ export default function CalendarView({
     if (!openAppointmentId || openAppointmentId.startsWith("block-")) return;
     const appt = appointments.find((a) => a.id === openAppointmentId);
     if (appt) {
+      setDetailAppt(appt);
       setPopupAppt(appt);
       setPopupAnchor(new DOMRect(window.innerWidth / 2, 160, 0, 0));
     }
     onOpenAppointmentHandled?.();
   }, [openAppointmentId, appointments, onOpenAppointmentHandled]);
+
+  useEffect(() => {
+    if (!detailAppt?.id) return;
+    const fresh = appointments.find((a) => a.id === detailAppt.id);
+    if (fresh) {
+      setDetailAppt(fresh);
+    }
+  }, [appointments, detailAppt?.id]);
 
   useEffect(() => {
     if (openBookingNonce <= 0) return;
@@ -1725,7 +1735,10 @@ export default function CalendarView({
             <button
               type="button"
               className="intake-print-close-btn mt-4 w-full rounded-lg border border-black/10 py-2 text-sm"
-              onClick={() => setDetailAppt(null)}
+              onClick={() => {
+                setDetailAppt(null);
+                closeAppointmentPopup();
+              }}
             >
               Close
             </button>
