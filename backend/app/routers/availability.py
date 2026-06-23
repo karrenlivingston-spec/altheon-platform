@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Optional
 import uuid
 import traceback
@@ -102,7 +102,7 @@ class AvailabilityRuleIn(BaseModel):
 
 class BlockedTimeIn(BaseModel):
     start_date: str
-    end_date: str
+    end_date: Optional[str] = None
     start_time_of_day: Optional[str] = None
     end_time_of_day: Optional[str] = None
     reason: Optional[str] = None
@@ -346,7 +346,10 @@ def _insert_blocked_time(
 
     try:
         start_date = _parse_block_date(body.start_date)
-        end_date = _parse_block_date(body.end_date)
+        if body.end_date and str(body.end_date).strip():
+            end_date = _parse_block_date(body.end_date)
+        else:
+            end_date = start_date
     except ValueError as exc:
         raise HTTPException(
             status_code=400,
@@ -372,17 +375,30 @@ def _insert_blocked_time(
             detail="end_time_of_day must be after start_time_of_day",
         )
 
-    row = {
-        "clinician_id": clinician_id,
-        "clinic_id": clinic_id,
-        "start_time": start_date.isoformat(),
-        "end_time": end_date.isoformat(),
-        "start_time_of_day": start_time_of_day,
-        "end_time_of_day": end_time_of_day,
-        "reason": (body.reason or "").strip() or None,
-    }
+    reason = (body.reason or "").strip() or None
+    insert_rows: list[dict[str, Any]] = []
+    current = start_date
+    while current <= end_date:
+        insert_rows.append(
+            {
+                "clinician_id": clinician_id,
+                "clinic_id": clinic_id,
+                "start_time": current.isoformat(),
+                "end_time": current.isoformat(),
+                "start_time_of_day": start_time_of_day,
+                "end_time_of_day": end_time_of_day,
+                "reason": reason,
+            }
+        )
+        current += timedelta(days=1)
+
+    n = len(insert_rows)
+    print(
+        f"schedule block {start_date.isoformat()} to {end_date.isoformat()} — {n} days created"
+    )
+
     try:
-        ins = supabase.table("blocked_time").insert(row).execute()
+        ins = supabase.table("blocked_time").insert(insert_rows).execute()
         _handle_supabase_error(ins)
     except HTTPException:
         raise
@@ -391,7 +407,14 @@ def _insert_blocked_time(
     rows = ins.data or []
     if not rows:
         raise HTTPException(status_code=500, detail="Failed to create blocked time")
-    return _shape_blocked_row(rows[0])
+    if n == 1:
+        return _shape_blocked_row(rows[0])
+    return {
+        "count": n,
+        "start_date": start_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "blocks": [_shape_blocked_row(row) for row in rows],
+    }
 
 
 @router.post("/availability/blocked-time")
