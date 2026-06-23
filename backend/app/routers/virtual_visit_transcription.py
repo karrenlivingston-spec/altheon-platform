@@ -39,6 +39,116 @@ def _mark_visit_failed(visit_id: str) -> None:
         pass
 
 
+def _resolve_transcribe_author_id(
+    clinic_id: str,
+    visit_clinician_id: str,
+    auth_user_id: str,
+) -> Optional[str]:
+    """Resolve clinical_notes.author_id (clinic_users.id) from visit clinician or auth user."""
+    cid = clinic_id.strip()
+    clin_id = (visit_clinician_id or "").strip()
+    auth_uid = (auth_user_id or "").strip()
+    allowed_roles = ["clinician", "clinic_admin"]
+
+    if clin_id:
+        try:
+            by_clinician = (
+                supabase.table("clinic_users")
+                .select("id, user_id, role, clinician_id")
+                .eq("clinic_id", cid)
+                .eq("clinician_id", clin_id)
+                .in_("role", allowed_roles)
+                .limit(1)
+                .execute()
+            )
+            rows = by_clinician.data or []
+            if rows:
+                author_id = str(rows[0].get("id") or "").strip()
+                if author_id:
+                    return author_id
+        except Exception:
+            logger.exception(
+                "author lookup by clinic_users.clinician_id failed clinic_id=%s clinician_id=%s",
+                cid,
+                clin_id,
+            )
+
+        try:
+            clin_resp = (
+                supabase.table("clinicians")
+                .select("email")
+                .eq("id", clin_id)
+                .eq("clinic_id", cid)
+                .limit(1)
+                .execute()
+            )
+            clin_rows = clin_resp.data or []
+            clin_email = (
+                str(clin_rows[0].get("email") or "").strip().lower()
+                if clin_rows
+                else ""
+            )
+            if clin_email:
+                cu_resp = (
+                    supabase.table("clinic_users")
+                    .select("id, user_id, role")
+                    .eq("clinic_id", cid)
+                    .in_("role", allowed_roles)
+                    .execute()
+                )
+                for row in cu_resp.data or []:
+                    uid = str(row.get("user_id") or "").strip()
+                    if not uid:
+                        continue
+                    try:
+                        auth_resp = supabase.auth.admin.get_user_by_id(uid)
+                    except Exception:
+                        continue
+                    user_obj = getattr(auth_resp, "user", None)
+                    if user_obj is None and isinstance(auth_resp, dict):
+                        user_obj = auth_resp.get("user")
+                    email = ""
+                    if user_obj is not None:
+                        email = str(getattr(user_obj, "email", None) or "").strip()
+                        if not email and isinstance(user_obj, dict):
+                            email = str(user_obj.get("email") or "").strip()
+                    if email.lower() == clin_email:
+                        author_id = str(row.get("id") or "").strip()
+                        if author_id:
+                            return author_id
+        except Exception:
+            logger.exception(
+                "author lookup via clinicians email failed clinic_id=%s clinician_id=%s",
+                cid,
+                clin_id,
+            )
+
+    if auth_uid:
+        try:
+            by_auth_user = (
+                supabase.table("clinic_users")
+                .select("id, user_id, role")
+                .eq("clinic_id", cid)
+                .eq("user_id", auth_uid)
+                .in_("role", allowed_roles)
+                .limit(1)
+                .execute()
+            )
+            rows = by_auth_user.data or []
+            if rows:
+                author_id = str(rows[0].get("id") or "").strip()
+                if author_id:
+                    return author_id
+        except Exception:
+            logger.exception(
+                "author lookup by auth user_id failed clinic_id=%s user_id=%s",
+                cid,
+                auth_uid,
+            )
+
+    return None
+
+
 @router.post("/{room_id}/transcribe-and-generate")
 async def transcribe_and_generate(
     room_id: str,
@@ -47,7 +157,7 @@ async def transcribe_and_generate(
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
     cid = clinic_id.strip()
-    enforce_clinic_role_from_auth_header(authorization, cid, *CLINICAL_ROLES)
+    actor = enforce_clinic_role_from_auth_header(authorization, cid, *CLINICAL_ROLES)
 
     if not ELEVENLABS_API_KEY:
         raise HTTPException(status_code=500, detail="ELEVENLABS_API_KEY not configured")
@@ -184,15 +294,21 @@ If a section has limited information from the transcript, document what is avail
                     ).execute()
             else:
                 patient_id = str(v.get("patient_id") or "").strip()
-                clinician_id = str(v.get("clinician_id") or "").strip()
-                if patient_id and clinician_id:
+                visit_clinician_id = str(v.get("clinician_id") or "").strip()
+                author_id = _resolve_transcribe_author_id(
+                    str(v.get("clinic_id") or cid),
+                    visit_clinician_id,
+                    actor.user_id,
+                )
+                print(f"transcribe author_id={author_id}")
+                if patient_id and author_id:
                     new_note = supabase.table("clinical_notes").insert(
                         {
                             **note_data,
                             "appointment_id": appointment_id,
                             "clinic_id": v["clinic_id"],
                             "patient_id": patient_id,
-                            "author_id": clinician_id,
+                            "author_id": author_id,
                             "note_type": "progress_note",
                             "status": "draft",
                         }
