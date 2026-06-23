@@ -1025,16 +1025,16 @@ _WD_FR = (
 
 _SMS_CONFIRM_TEMPLATES = {
     "en": (
-        "Hi {first_name}! Your appointment at STTPDN is confirmed for {day} at {time}.{loc_slot}"
-        "Questions? Call 561-772-5799. Reply STOP to opt out."
+        "Hi {first_name}! Your appointment at {clinic_name} is confirmed for {day} at {time}.{loc_slot}"
+        "{phone_line} Reply STOP to opt out."
     ),
     "es": (
-        "¡Hola {first_name}! Tu cita en STTPDN está confirmada para el {day} a las {time}.{loc_slot}"
-        "¿Preguntas? Llama al 561-772-5799. Responde STOP para cancelar."
+        "¡Hola {first_name}! Tu cita en {clinic_name} está confirmada para el {day} a las {time}.{loc_slot}"
+        "{phone_line} Responde STOP para cancelar."
     ),
     "fr": (
-        "Bonjour {first_name}! Votre rendez-vous chez STTPDN est confirmé pour le {day} à {time}.{loc_slot}"
-        "Des questions? Appelez le 561-772-5799. Répondez STOP pour vous désabonner."
+        "Bonjour {first_name}! Votre rendez-vous chez {clinic_name} est confirmé pour le {day} à {time}.{loc_slot}"
+        "{phone_line} Répondez STOP pour vous désabonner."
     ),
 }
 
@@ -1082,7 +1082,7 @@ def _format_confirmation_sms(
     start_time_iso: str,
     first_name: str,
     preferred_language: Optional[str] = None,
-    clinic_address: Optional[str] = None,
+    clinic_id: Optional[str] = None,
 ) -> str:
     s = str(start_time_iso).strip().replace("Z", "+00:00")
     try:
@@ -1095,38 +1095,90 @@ def _format_confirmation_sms(
     lang = _normalize_preferred_language(preferred_language)
     day_s, time_s = _format_sms_day_time_eastern(dt_e, lang)
     fn = (first_name or "there").strip() or "there"
-    loc_slot = _sms_location_slot(lang, clinic_address)
+    ctx = _fetch_clinic_sms_context(clinic_id or "")
+    loc_slot = _sms_location_slot(lang, ctx.get("clinic_address") or None)
     template = _SMS_CONFIRM_TEMPLATES.get(lang, _SMS_CONFIRM_TEMPLATES["en"])
+    phone_line = ctx.get(
+        {"es": "phone_line_es", "fr": "phone_line_fr"}.get(lang, "phone_line"),
+        ctx["phone_line"],
+    )
     return template.format(
-        first_name=fn, day=day_s, time=time_s, loc_slot=loc_slot
+        first_name=fn,
+        day=day_s,
+        time=time_s,
+        loc_slot=loc_slot,
+        clinic_name=ctx["clinic_name"],
+        phone_line=phone_line,
     )
 
 
-def _fetch_clinic_address(clinic_id: str) -> Optional[str]:
-    """Return clinics.address for SMS; None if missing, empty, or on error."""
+def _fetch_clinic_sms_context(clinic_id: str) -> dict[str, str]:
+    """Return clinic name, address, and localized phone lines for SMS templates."""
+    defaults: dict[str, str] = {
+        "clinic_name": "your clinic",
+        "clinic_address": "",
+        "clinic_phone": "",
+        "phone_line": "Questions? Contact your clinic.",
+        "phone_line_es": "¿Preguntas? Contacta tu clínica.",
+        "phone_line_fr": "Des questions? Contactez votre clinique.",
+    }
     cid = str(clinic_id or "").strip()
     if not cid:
-        return None
+        return defaults
     try:
         resp = (
             supabase.table("clinics")
-            .select("address")
+            .select("name, phone, sms_display_name, address")
             .eq("id", cid)
             .limit(1)
             .execute()
         )
         _handle_supabase_error(resp)
     except Exception:
-        logger.exception("fetch clinic address failed clinic_id=%s", cid)
-        return None
+        logger.exception("fetch clinic SMS context failed clinic_id=%s", cid)
+        return defaults
+
     rows = resp.data or []
     if not rows:
-        return None
-    raw = rows[0].get("address")
-    if raw is None:
-        return None
-    out = str(raw).strip()
-    return out or None
+        return defaults
+
+    row = rows[0]
+    clinic_name = (
+        str(row.get("sms_display_name") or "").strip()
+        or str(row.get("name") or "").strip()
+        or defaults["clinic_name"]
+    )
+    clinic_phone = str(row.get("phone") or "").strip()
+    clinic_address = str(row.get("address") or "").strip()
+    phone_line = (
+        f"Questions? Call {clinic_phone}."
+        if clinic_phone
+        else defaults["phone_line"]
+    )
+    phone_line_es = (
+        f"¿Preguntas? Llama al {clinic_phone}."
+        if clinic_phone
+        else defaults["phone_line_es"]
+    )
+    phone_line_fr = (
+        f"Des questions? Appelez le {clinic_phone}."
+        if clinic_phone
+        else defaults["phone_line_fr"]
+    )
+    return {
+        "clinic_name": clinic_name,
+        "clinic_address": clinic_address,
+        "clinic_phone": clinic_phone,
+        "phone_line": phone_line,
+        "phone_line_es": phone_line_es,
+        "phone_line_fr": phone_line_fr,
+    }
+
+
+def _fetch_clinic_address(clinic_id: str) -> Optional[str]:
+    """Return clinics.address for SMS; None if missing, empty, or on error."""
+    addr = (_fetch_clinic_sms_context(clinic_id).get("clinic_address") or "").strip()
+    return addr or None
 
 
 def _to_e164_us(phone: str) -> str:
@@ -1461,9 +1513,8 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
         fname = (pr.get("first_name") or "").strip()
         pref_lang = pr.get("preferred_language")
         if phone_out:
-            clinic_addr = _fetch_clinic_address(clinic_id)
             body = _format_confirmation_sms(
-                start_iso, fname, pref_lang, clinic_address=clinic_addr
+                start_iso, fname, pref_lang, clinic_id=clinic_id
             )
             send_sms(
                 clinic_id,
@@ -1799,9 +1850,8 @@ def create_appointment(
         fname = (prow.get("first_name") or payload.patient_first_name or "").strip()
         pref_lang = prow.get("preferred_language") or pref_stored
         if phone_out:
-            clinic_addr = _fetch_clinic_address(payload.clinic_id)
             body = _format_confirmation_sms(
-                start_iso, fname, pref_lang, clinic_address=clinic_addr
+                start_iso, fname, pref_lang, clinic_id=payload.clinic_id
             )
             send_sms(
                 payload.clinic_id,

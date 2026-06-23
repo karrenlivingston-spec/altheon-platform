@@ -52,6 +52,7 @@ from app.routers import (
     hep as hep_router,
 )
 from app.routers.virtual_visit_transcription import router as vv_transcription_router
+from app.routers.appointments import _fetch_clinic_sms_context
 from app.routes.legal import router as legal_router
 from routers import groups as groups_router
 from routers import retell_webhook as retell_webhook_router
@@ -512,10 +513,30 @@ def cancel_appointment(payload: dict):
                 from app.sms import send_sms
                 lang = pt.get("preferred_language") or "en"
                 fname = (pt.get("first_name") or "").strip()
+                ctx = _fetch_clinic_sms_context(clinic_id)
+                clinic_name = ctx["clinic_name"]
+                clinic_phone = ctx["clinic_phone"]
                 if lang == "es":
-                    body = f"Hola {fname}, tu cita en Straight To The Point Dry Needling ha sido cancelada. Llámanos al 561-772-5799 para reprogramar."
+                    if clinic_phone:
+                        body = (
+                            f"Hola {fname}, tu cita en {clinic_name} ha sido cancelada. "
+                            f"Llámanos al {clinic_phone} para reprogramar."
+                        )
+                    else:
+                        body = (
+                            f"Hola {fname}, tu cita en {clinic_name} ha sido cancelada. "
+                            "Contacta tu clínica para reprogramar."
+                        )
+                elif clinic_phone:
+                    body = (
+                        f"Hi {fname}, your appointment at {clinic_name} has been cancelled. "
+                        f"Call us at {clinic_phone} to reschedule."
+                    )
                 else:
-                    body = f"Hi {fname}, your appointment at Straight To The Point Dry Needling has been cancelled. Call us at 561-772-5799 to reschedule."
+                    body = (
+                        f"Hi {fname}, your appointment at {clinic_name} has been cancelled. "
+                        "Contact your clinic to reschedule."
+                    )
                 send_sms(clinic_id, _to_e164_us(pt["phone"]), body)
         except Exception:
             pass
