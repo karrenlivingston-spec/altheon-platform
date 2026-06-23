@@ -25,6 +25,8 @@ import { supabase } from "@/lib/supabase";
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
 
+const INVITE_LINK_BASE = "https://altheon.app/accept-invite";
+
 const STAFF_ROLES = [
   { value: "clinic_admin", label: "Clinic admin" },
   { value: "clinician", label: "Clinician" },
@@ -240,6 +242,19 @@ export default function StaffManagementPage() {
     }
   }
 
+  function inviteLink(token: string): string {
+    return `${INVITE_LINK_BASE}?token=${encodeURIComponent(token)}`;
+  }
+
+  async function copyInviteLink() {
+    if (!inviteToken) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink(inviteToken));
+    } catch {
+      setInviteError("Could not copy link to clipboard.");
+    }
+  }
+
   if (permissionsLoading || !canManageStaff) {
     return (
       <div className={DS_PAGE_ROOT}>
@@ -359,8 +374,9 @@ export default function StaffManagementPage() {
           <div className="w-full max-w-md rounded-[14px] border border-black/10 bg-white p-6 shadow-xl">
             <h2 className="text-lg font-semibold text-gray-900">Invite staff</h2>
             <p className="mt-1 text-sm text-gray-500">
-              Send the invite token to the new team member so they can accept
-              after signing in.
+              {inviteToken
+                ? "Share this link with your new team member to complete their account setup."
+                : "Enter the new team member's email and role to generate an invite link."}
             </p>
             {inviteError ? (
               <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
@@ -370,18 +386,33 @@ export default function StaffManagementPage() {
             {inviteToken ? (
               <div className="mt-4 space-y-3">
                 <label className="block text-xs font-medium uppercase tracking-wide text-gray-500">
+                  Invite link
+                </label>
+                <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs break-all text-gray-800">
+                  {inviteLink(inviteToken)}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className={DS_SECONDARY_BTN}
+                    onClick={() => void copyInviteLink()}
+                  >
+                    Copy link
+                  </button>
+                  <button
+                    type="button"
+                    className={DS_SECONDARY_BTN}
+                    onClick={() => void copyInviteToken()}
+                  >
+                    Copy token
+                  </button>
+                </div>
+                <label className="block text-xs font-medium uppercase tracking-wide text-gray-500">
                   Invite token
                 </label>
                 <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 font-mono text-xs break-all text-gray-800">
                   {inviteToken}
                 </div>
-                <button
-                  type="button"
-                  className={DS_SECONDARY_BTN}
-                  onClick={() => void copyInviteToken()}
-                >
-                  Copy token
-                </button>
               </div>
             ) : (
               <form className="mt-4 space-y-4" onSubmit={(e) => void handleInvite(e)}>

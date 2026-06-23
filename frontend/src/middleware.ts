@@ -4,7 +4,7 @@ import { NextResponse } from "next/server";
 /**
  * Canonical public path list — use with `isPublicRoute()` when adding auth middleware.
  */
-export const PUBLIC_ROUTE_PATHS = ["/", "/intake", "/admin/login"] as const;
+export const PUBLIC_ROUTE_PATHS = ["/", "/intake", "/admin/login", "/login", "/accept-invite"] as const;
 
 export const PUBLIC_ROUTES = new Set<string>(PUBLIC_ROUTE_PATHS);
 
