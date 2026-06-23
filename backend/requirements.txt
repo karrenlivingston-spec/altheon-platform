@@ -17,4 +17,5 @@ Pillow
 pytesseract
 pillow-heif
 elevenlabs
+websockets>=12.0
 email-validator

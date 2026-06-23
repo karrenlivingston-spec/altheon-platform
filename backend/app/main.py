@@ -51,6 +51,7 @@ from app.routers import (
     virtual_visits as virtual_visits_router,
     hep as hep_router,
 )
+from app.routers.virtual_visit_transcription import router as vv_transcription_router
 from app.routes.legal import router as legal_router
 from routers import groups as groups_router
 from routers import retell_webhook as retell_webhook_router
@@ -179,6 +180,7 @@ app.include_router(diagnostic_router, tags=["Diagnostics"])
 app.include_router(
     virtual_visits_router.router, prefix="/visits", tags=["Virtual Visits"]
 )
+app.include_router(vv_transcription_router)
 app.include_router(soap_dictation_router.router, prefix="")
 app.include_router(dme_router.router, prefix="", tags=["dme"])
 app.include_router(groups_router.router, prefix="/groups", tags=["groups"])
