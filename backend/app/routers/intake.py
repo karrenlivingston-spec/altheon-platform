@@ -444,6 +444,38 @@ def _ensure_intake_token(
     return token
 
 
+def _patient_has_prior_completed_appointment(
+    patient_id: str,
+    clinic_id: str,
+    appointment_id: str,
+) -> bool:
+    pid = str(patient_id or "").strip()
+    cid = str(clinic_id or "").strip()
+    aid = str(appointment_id or "").strip()
+    if not pid or not cid or not aid:
+        return False
+    try:
+        resp = (
+            supabase.table("appointments")
+            .select("id")
+            .eq("patient_id", pid)
+            .eq("clinic_id", cid)
+            .eq("status", "completed")
+            .neq("id", aid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+        return bool(resp.data)
+    except Exception:
+        logger.exception(
+            "prior completed appointment lookup failed patient_id=%s clinic_id=%s",
+            pid,
+            cid,
+        )
+        return False
+
+
 def send_booking_intake_sms(
     *,
     appointment_id: str,
@@ -455,6 +487,12 @@ def send_booking_intake_sms(
     preferred_language: Optional[str] = None,
 ) -> Optional[str]:
     """Create intake token if needed and send initial intake SMS at booking."""
+    if _patient_has_prior_completed_appointment(
+        patient_id, clinic_id, appointment_id
+    ):
+        print(f"intake SMS skipped — returning patient {patient_id}")
+        return None
+
     if not (patient_phone and str(patient_phone).strip()):
         return None
     if _intake_sms_sent(appointment_id, "intake_reminder"):
@@ -674,6 +712,13 @@ def send_intake_reminders():
             continue
 
         try:
+            if _patient_has_prior_completed_appointment(
+                patient_id, clinic_id, appt_id
+            ):
+                print(f"intake reminder skipped — returning patient {patient_id}")
+                skipped += 1
+                continue
+
             tok_row = _get_intake_token_for_appointment(appt_id)
             if not tok_row or _is_token_used(tok_row):
                 skipped += 1
