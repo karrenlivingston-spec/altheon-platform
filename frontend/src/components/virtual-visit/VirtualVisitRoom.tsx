@@ -936,28 +936,25 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
         {isClinician && clinicIdParam && phase === "in_call" ? (
           <div className="mt-3 shrink-0 space-y-3 px-1 sm:px-0">
             <div className="rounded-xl border border-teal-500/30 bg-[#0a1815]/80 px-4 py-3">
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-col gap-2">
                 {connectionStatus === "Connected" && !isRecording ? (
                   <button
                     type="button"
                     onClick={() => void startRecording()}
                     disabled={ending}
-                    className="min-h-[40px] rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
+                    className="min-h-[40px] w-fit rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
                   >
                     🎙 Start Recording
                   </button>
                 ) : null}
                 {isRecording ? (
-                  <button
-                    type="button"
-                    onClick={stopRecording}
-                    disabled={ending}
-                    className="min-h-[40px] rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-500 disabled:opacity-60"
-                  >
-                    ⏹ Stop Recording
-                  </button>
+                  <p className="text-xs text-gray-400">
+                    Recording in progress — click End Visit when the session is complete.
+                  </p>
                 ) : null}
-                <TranscriptStatusPill status={transcriptStatus} />
+                <div className="flex flex-wrap items-center gap-3">
+                  <TranscriptStatusPill status={transcriptStatus} />
+                </div>
               </div>
             </div>
 
