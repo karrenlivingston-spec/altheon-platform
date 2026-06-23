@@ -103,6 +103,12 @@ function visitLogError(roomId: string, message: string, detail?: unknown) {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, ms);
+  });
+}
+
 async function acquireUserMedia(roomId: string): Promise<MediaStream> {
   const constraints: MediaStreamConstraints = {
     video: { facingMode: "user" },
@@ -196,6 +202,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [completedDuration, setCompletedDuration] = useState(0);
   const [ending, setEnding] = useState(false);
+  const [generatingSoap, setGeneratingSoap] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [transcriptStatus, setTranscriptStatus] = useState<
@@ -723,6 +730,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
   async function handleEndVisit() {
     if (!isClinician || !clinicIdParam) return;
     setEnding(true);
+    let soapInProgress = false;
     try {
       const token = await getClinicianToken();
 
@@ -752,6 +760,10 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
 
         stopRecording();
         setTranscriptStatus("processing");
+        soapInProgress = true;
+        setGeneratingSoap(true);
+
+        await sleep(3000);
 
         const soapRes = await fetch(
           `${API_BASE}/visits/${encodeURIComponent(roomId)}/generate-soap`,
@@ -774,13 +786,14 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
             window.location.href = `/admin/patients?appointment=${encodeURIComponent(soapData.appointment_id)}&tab=notes`;
             return;
           }
-        } else {
-          visitLogError(roomId, "generate-soap failed", { status: soapRes.status });
+          setGeneratingSoap(false);
           setTranscriptStatus("failed");
+          return;
         }
 
-        cleanupMedia();
-        setPhase("completed");
+        visitLogError(roomId, "generate-soap failed", { status: soapRes.status });
+        setTranscriptStatus("failed");
+        setGeneratingSoap(false);
         return;
       }
 
@@ -801,7 +814,12 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
       );
     } catch (err) {
       visitLogError(roomId, "end visit: unexpected error", err);
-      setConnectionStatus("Could not end visit. Please try again.");
+      if (soapInProgress) {
+        setTranscriptStatus("failed");
+        setGeneratingSoap(false);
+      } else {
+        setConnectionStatus("Could not end visit. Please try again.");
+      }
     } finally {
       setEnding(false);
     }
@@ -915,106 +933,120 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
         </div>
       </header>
 
-      <main className="relative mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col sm:p-4">
-        {/* Mobile: remote ~80% of remaining viewport; desktop: 16:9 aspect box */}
-        <div className="relative min-h-0 w-full flex-[4] overflow-hidden bg-black/60 sm:aspect-video sm:flex-none sm:rounded-xl sm:shadow-lg">
-          <video
-            ref={remoteVideoRef}
-            autoPlay
-            playsInline
-            className="absolute inset-0 h-full w-full object-cover"
-          />
-          <video
-            ref={localVideoRef}
-            autoPlay
-            playsInline
-            muted
-            className="absolute right-3 top-3 z-10 h-[160px] w-[120px] rounded-lg border-2 border-teal-500/50 object-cover shadow-md sm:bottom-3 sm:top-auto sm:h-28 sm:w-40"
-          />
-        </div>
+      <main className="relative mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col overflow-hidden sm:p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {/* Mobile: remote ~80% of remaining viewport; desktop: 16:9 aspect box */}
+          <div className="relative min-h-0 w-full flex-[4] overflow-hidden bg-black/60 sm:aspect-video sm:flex-none sm:rounded-xl sm:shadow-lg">
+            <video
+              ref={remoteVideoRef}
+              autoPlay
+              playsInline
+              className="absolute inset-0 h-full w-full object-cover"
+            />
+            <video
+              ref={localVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className="absolute right-3 top-3 z-10 h-[160px] w-[120px] rounded-lg border-2 border-teal-500/50 object-cover shadow-md sm:bottom-3 sm:top-auto sm:h-28 sm:w-40"
+            />
+          </div>
 
-        {isClinician && clinicIdParam && phase === "in_call" ? (
-          <div className="mt-3 shrink-0 space-y-3 px-1 sm:px-0">
-            <div className="rounded-xl border border-teal-500/30 bg-[#0a1815]/80 px-4 py-3">
-              <div className="flex flex-col gap-2">
-                {connectionStatus === "Connected" && !isRecording ? (
+          {isClinician && clinicIdParam && phase === "in_call" ? (
+            <div className="mt-3 space-y-3 px-1 pb-3 sm:px-0">
+              <div className="rounded-xl border border-teal-500/30 bg-[#0a1815]/80 px-4 py-3">
+                <div className="flex flex-col gap-2">
+                  {connectionStatus === "Connected" && !isRecording ? (
+                    <button
+                      type="button"
+                      onClick={() => void startRecording()}
+                      disabled={ending || generatingSoap}
+                      className="min-h-[40px] w-fit rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
+                    >
+                      🎙 Start Recording
+                    </button>
+                  ) : null}
+                  {isRecording ? (
+                    <p className="text-xs text-gray-400">
+                      Recording in progress — click End Visit when the session is complete.
+                    </p>
+                  ) : null}
+                  <div className="flex flex-wrap items-center gap-3">
+                    <TranscriptStatusPill status={transcriptStatus} />
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-teal-500/30 bg-[#0a1815]/80 px-4 py-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-teal-200/90">
+                    Live Transcript
+                  </p>
                   <button
                     type="button"
-                    onClick={() => void startRecording()}
-                    disabled={ending}
-                    className="min-h-[40px] w-fit rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-500 disabled:opacity-60"
+                    onClick={() => setShowTranscript((v) => !v)}
+                    className="text-xs font-medium text-teal-300 hover:text-teal-100"
                   >
-                    🎙 Start Recording
+                    {showTranscript ? "Hide" : "Show"}
                   </button>
-                ) : null}
-                {isRecording ? (
-                  <p className="text-xs text-gray-400">
-                    Recording in progress — click End Visit when the session is complete.
+                </div>
+
+                {transcriptStatus === "failed" ? (
+                  <p className="mb-2 rounded-lg border border-red-500/40 bg-red-950/40 px-3 py-2 text-xs text-red-200">
+                    Transcription failed — you can still document manually
                   </p>
                 ) : null}
-                <div className="flex flex-wrap items-center gap-3">
-                  <TranscriptStatusPill status={transcriptStatus} />
-                </div>
+
+                {showTranscript ? (
+                  <div className="max-h-48 overflow-y-auto rounded-lg border border-teal-900/60 bg-black/30 px-3 py-2 text-sm leading-relaxed text-teal-50/90">
+                    {transcript.trim() ? (
+                      <p className="whitespace-pre-wrap">{transcript}</p>
+                    ) : (
+                      <p className="text-teal-200/50 italic">
+                        Transcript will appear here once recording starts…
+                      </p>
+                    )}
+                    <div ref={transcriptEndRef} />
+                  </div>
+                ) : null}
               </div>
             </div>
+          ) : null}
+        </div>
 
-            <div className="rounded-xl border border-teal-500/30 bg-[#0a1815]/80 px-4 py-3">
-              <div className="mb-2 flex items-center justify-between gap-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-teal-200/90">
-                  Live Transcript
-                </p>
-                <button
-                  type="button"
-                  onClick={() => setShowTranscript((v) => !v)}
-                  className="text-xs font-medium text-teal-300 hover:text-teal-100"
-                >
-                  {showTranscript ? "Hide" : "Show"}
-                </button>
-              </div>
-
-              {transcriptStatus === "complete" ? (
-                <p className="mb-2 rounded-lg border border-emerald-500/40 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200">
-                  SOAP note generated — redirecting to clinical notes…
-                </p>
-              ) : null}
-              {transcriptStatus === "failed" ? (
-                <p className="mb-2 rounded-lg border border-red-500/40 bg-red-950/40 px-3 py-2 text-xs text-red-200">
-                  Transcription failed — you can still document manually
-                </p>
-              ) : null}
-
-              {showTranscript ? (
-                <div className="max-h-48 overflow-y-auto rounded-lg border border-teal-900/60 bg-black/30 px-3 py-2 text-sm leading-relaxed text-teal-50/90">
-                  {transcript.trim() ? (
-                    <p className="whitespace-pre-wrap">{transcript}</p>
-                  ) : (
-                    <p className="text-teal-200/50 italic">
-                      Transcript will appear here once recording starts…
-                    </p>
-                  )}
-                  <div ref={transcriptEndRef} />
-                </div>
-              ) : null}
+        {isClinician && clinicIdParam ? (
+          <div
+            className="sticky bottom-0 z-20 shrink-0 border-t border-slate-200 bg-white px-4 py-3 shadow-[0_-4px_12px_rgba(0,0,0,0.08)] sm:rounded-b-xl"
+            style={{ paddingBottom: "max(0.75rem, env(safe-area-inset-bottom))" }}
+          >
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={() => void handleEndVisit()}
+                disabled={ending || generatingSoap}
+                className="min-h-[44px] w-full max-w-md rounded-lg px-5 py-2.5 text-sm font-medium text-white disabled:opacity-60"
+                style={{ backgroundColor: TEAL }}
+              >
+                {ending || generatingSoap ? "Ending…" : "End Visit"}
+              </button>
             </div>
           </div>
         ) : null}
 
-        <div
-          className="flex shrink-0 flex-[1] items-end justify-center px-4 pt-3 sm:flex-none sm:pt-0"
-          style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
-        >
-          {isClinician && clinicIdParam ? (
-            <button
-              type="button"
-              onClick={() => void handleEndVisit()}
-              disabled={ending}
-              className="min-h-[44px] rounded-lg px-5 py-2.5 text-sm font-medium text-white disabled:opacity-60"
-              style={{ backgroundColor: TEAL }}
-            >
-              {ending ? "Ending…" : "End Visit"}
-            </button>
-          ) : null}
-        </div>
+        {generatingSoap && isClinician ? (
+          <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 px-6">
+            <div className="w-full max-w-sm rounded-2xl bg-white px-8 py-10 text-center shadow-xl">
+              <p className="text-3xl leading-none">⚙️</p>
+              <h2 className="mt-4 text-lg font-semibold text-slate-900">
+                Generating your SOAP note
+              </h2>
+              <p className="mt-2 text-sm text-slate-600">Please wait…</p>
+              <div className="mx-auto mt-6 h-1.5 w-full overflow-hidden rounded-full bg-slate-200">
+                <div className="h-full w-1/3 animate-pulse rounded-full bg-[#0d9488]" />
+              </div>
+            </div>
+          </div>
+        ) : null}
       </main>
     </div>
   );
