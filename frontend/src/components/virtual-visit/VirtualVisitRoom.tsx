@@ -704,26 +704,38 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
             },
           );
 
-          if (soapRes.ok) {
-            const soapData = (await soapRes.json()) as {
-              appointment_id?: string;
-            };
-            if (soapData.appointment_id) {
-              setChartAppointmentId(soapData.appointment_id);
-              setTranscriptStatus("complete");
-              window.setTimeout(() => {
-                goToPatientChart(soapData.appointment_id);
-              }, 2000);
-              return;
+          const soapBodyText = await soapRes.text().catch(() => "");
+          let soapData: { appointment_id?: string } = {};
+          if (soapBodyText) {
+            try {
+              soapData = JSON.parse(soapBodyText) as { appointment_id?: string };
+            } catch {
+              soapData = { appointment_id: undefined };
             }
-            visitLogError(roomId, "transcribe-and-generate: missing appointment_id");
-            setTranscriptStatus("failed");
+          }
+
+          console.log("[transcribe-and-generate] response", {
+            status: soapRes.status,
+            body: soapBodyText ? soapData : soapBodyText,
+          });
+
+          if (soapRes.status === 200 && soapData.appointment_id) {
+            setChartAppointmentId(soapData.appointment_id);
+            setTranscriptStatus("complete");
+            window.setTimeout(() => {
+              goToPatientChart(soapData.appointment_id);
+            }, 2000);
             return;
           }
 
-          visitLogError(roomId, "transcribe-and-generate failed", {
-            status: soapRes.status,
-          });
+          if (soapRes.status === 200) {
+            visitLogError(roomId, "transcribe-and-generate: missing appointment_id");
+          } else {
+            visitLogError(roomId, "transcribe-and-generate failed", {
+              status: soapRes.status,
+              body: soapBodyText,
+            });
+          }
           setTranscriptStatus("failed");
           return;
         }
