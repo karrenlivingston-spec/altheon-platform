@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from typing import Any, Optional
 
@@ -14,6 +15,7 @@ from app.db import supabase
 from app.dependencies.permissions import CLINICAL_ROLES, enforce_clinic_role_from_auth_header
 
 router = APIRouter(prefix="/visits", tags=["virtual_visit_transcription"])
+logger = logging.getLogger(__name__)
 
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
@@ -75,6 +77,12 @@ async def transcribe_and_generate(
         ).eq("id", v["id"]).execute()
 
         audio_bytes = await audio.read()
+        logger.info(
+            "Audio blob received: %s bytes, filename: %s, content_type: %s",
+            len(audio_bytes),
+            audio.filename,
+            audio.content_type,
+        )
         if not audio_bytes:
             raise HTTPException(status_code=400, detail="Empty audio upload")
 
@@ -91,6 +99,9 @@ async def transcribe_and_generate(
             data={"model_id": "scribe_v1"},
             timeout=120,
         )
+
+        logger.info("Scribe response status: %s", scribe_response.status_code)
+        logger.info("Scribe response body: %s", scribe_response.text[:500])
 
         if scribe_response.status_code != 200:
             _mark_visit_failed(str(v["id"]))
@@ -199,12 +210,22 @@ If a section has limited information from the transcript, document what is avail
     except HTTPException:
         raise
     except json.JSONDecodeError as exc:
+        logger.error(
+            "transcribe-and-generate error: %s: %s",
+            type(exc).__name__,
+            str(exc),
+        )
         if v:
             _mark_visit_failed(str(v["id"]))
         raise HTTPException(
             status_code=500, detail="AI response could not be parsed"
         ) from exc
     except Exception as exc:
+        logger.error(
+            "transcribe-and-generate error: %s: %s",
+            type(exc).__name__,
+            str(exc),
+        )
         if v:
             _mark_visit_failed(str(v["id"]))
         raise HTTPException(status_code=500, detail=str(exc)) from exc
