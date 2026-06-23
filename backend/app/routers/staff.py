@@ -173,7 +173,7 @@ def invite_staff(
         role,
         email,
     )
-    print(f"invite_staff invited_by={insert_row.get('invited_by')}")
+    print(f"invite_staff insert_row={insert_row}")
     try:
         ins = supabase.table("staff_invitations").insert(insert_row).execute()
         _handle_supabase_error(ins)
