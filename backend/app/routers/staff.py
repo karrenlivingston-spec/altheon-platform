@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import traceback
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -19,7 +20,6 @@ from app.dependencies.permissions import (
     enforce_clinic_role_from_auth_header,
     require_role,
 )
-from routers.fee_schedule import _resolve_bearer_user_id
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -69,6 +69,9 @@ class StaffRolePatchBody(BaseModel):
 
 class AcceptInviteBody(BaseModel):
     token: str = Field(..., min_length=1)
+    first_name: str = Field(..., min_length=1)
+    last_name: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
 
 
 def _require_uuid(value: str, field: str) -> str:
@@ -328,110 +331,126 @@ def update_staff_role(
 
 
 @router.post("/staff/accept-invite")
-def accept_staff_invite(
-    body: AcceptInviteBody,
-    authorization: Optional[str] = Header(default=None, alias="Authorization"),
-):
-    user_id = _resolve_bearer_user_id(authorization)
+def accept_staff_invite(body: AcceptInviteBody):
     token = body.token.strip()
+    first_name = body.first_name.strip()
+    last_name = body.last_name.strip()
+    password = body.password
+
+    print(f"accept_staff_invite start token_prefix={token[:8] if token else ''}")
 
     try:
+        now_iso = _now_iso()
         invite_resp = (
             supabase.table("staff_invitations")
             .select("*")
             .eq("token", token)
+            .is_("accepted_at", "null")
+            .gt("expires_at", now_iso)
             .limit(1)
             .execute()
         )
         _handle_supabase_error(invite_resp)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("accept_staff_invite lookup failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    invite_rows = invite_resp.data or []
-    if not invite_rows:
-        raise HTTPException(status_code=404, detail="Invalid invitation token")
-
-    invite = invite_rows[0]
-    if invite.get("accepted_at"):
-        raise HTTPException(status_code=400, detail="Invitation already accepted")
-
-    expires_at_raw = invite.get("expires_at")
-    if expires_at_raw:
-        try:
-            expires_at = datetime.fromisoformat(
-                str(expires_at_raw).replace("Z", "+00:00")
+        invite_rows = invite_resp.data or []
+        if not invite_rows:
+            print("accept_staff_invite invite not found or expired")
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid or expired invite token",
             )
-            if expires_at.tzinfo is None:
-                expires_at = expires_at.replace(tzinfo=timezone.utc)
-            if datetime.now(timezone.utc) > expires_at:
-                raise HTTPException(status_code=400, detail="Invitation expired")
-        except HTTPException:
-            raise
-        except Exception:
-            pass
 
-    invite_email = str(invite.get("email") or "").strip().lower()
-    user_email = _auth_user_email(user_id)
-    if not user_email or user_email != invite_email:
-        raise HTTPException(
-            status_code=403,
-            detail="Signed-in user email does not match invitation",
+        invite = invite_rows[0]
+        email = str(invite.get("email") or "").strip().lower()
+        clinic_id = str(invite.get("clinic_id") or "").strip()
+        role = str(invite.get("role") or "").strip().lower()
+
+        if not email or not clinic_id or role not in STAFF_ASSIGNABLE_ROLES:
+            print(
+                "accept_staff_invite invalid invite record "
+                f"email={email!r} clinic_id={clinic_id!r} role={role!r}"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail="Invalid or expired invite token",
+            )
+
+        print(
+            "accept_staff_invite invite ok "
+            f"email={email} clinic_id={clinic_id} role={role}"
         )
 
-    clinic_id = str(invite.get("clinic_id") or "").strip()
-    role = str(invite.get("role") or "").strip()
-    if not clinic_id or role not in STAFF_ASSIGNABLE_ROLES:
-        raise HTTPException(status_code=500, detail="Invalid invitation record")
-
-    try:
-        existing = (
-            supabase.table("clinic_users")
+        loc_resp = (
+            supabase.table("locations")
             .select("id")
-            .eq("user_id", user_id)
             .eq("clinic_id", clinic_id)
+            .eq("is_active", True)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(existing)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("accept_staff_invite existing check failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    if existing.data:
-        raise HTTPException(
-            status_code=409,
-            detail="User already has access to this clinic",
-        )
-
-    try:
-        ins = (
-            supabase.table("clinic_users")
-            .insert(
-                {
-                    "user_id": user_id,
-                    "clinic_id": clinic_id,
-                    "role": role,
-                }
+        _handle_supabase_error(loc_resp)
+        loc_rows = loc_resp.data or []
+        if not loc_rows:
+            raise HTTPException(
+                status_code=500,
+                detail="No active location found for clinic",
             )
-            .execute()
+        location_id = str(loc_rows[0].get("id") or "").strip()
+        if not location_id:
+            raise HTTPException(
+                status_code=500,
+                detail="No active location found for clinic",
+            )
+
+        print(f"accept_staff_invite creating auth user email={email}")
+        auth_res = supabase.auth.admin.create_user(
+            {
+                "email": email,
+                "password": password,
+                "email_confirm": True,
+            }
         )
-        _handle_supabase_error(ins)
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("accept_staff_invite clinic_users insert failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        user_obj = getattr(auth_res, "user", None)
+        if user_obj is None and isinstance(auth_res, dict):
+            user_obj = auth_res.get("user")
+        new_user_id = str(getattr(user_obj, "id", None) or "").strip()
+        if not new_user_id and isinstance(user_obj, dict):
+            new_user_id = str(user_obj.get("id") or "").strip()
+        if not new_user_id:
+            raise HTTPException(
+                status_code=500,
+                detail="Auth user was created but no user id was returned",
+            )
 
-    inserted = ins.data or []
-    if not inserted:
-        raise HTTPException(status_code=500, detail="Failed to create clinic access")
+        print(f"accept_staff_invite auth user created user_id={new_user_id}")
 
-    try:
+        clinician_row = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": email,
+            "clinic_id": clinic_id,
+            "location_id": location_id,
+        }
+        print(f"accept_staff_invite clinician_row={clinician_row}")
+        clin_ins = supabase.table("clinicians").insert(clinician_row).execute()
+        _handle_supabase_error(clin_ins)
+        if not (clin_ins.data or []):
+            raise HTTPException(status_code=500, detail="Failed to create clinician")
+
+        clinic_user_row = {
+            "user_id": new_user_id,
+            "clinic_id": clinic_id,
+            "role": role,
+        }
+        print(f"accept_staff_invite clinic_user_row={clinic_user_row}")
+        cu_ins = supabase.table("clinic_users").insert(clinic_user_row).execute()
+        _handle_supabase_error(cu_ins)
+        if not (cu_ins.data or []):
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to create clinic user access",
+            )
+
         upd = (
             supabase.table("staff_invitations")
             .update({"accepted_at": _now_iso()})
@@ -439,10 +458,12 @@ def accept_staff_invite(
             .execute()
         )
         _handle_supabase_error(upd)
+
+        print(f"accept_staff_invite success email={email} role={role}")
+        return {"success": True, "email": email, "role": role}
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("accept_staff_invite mark accepted failed token=%s", token)
+        traceback.print_exc()
+        print(f"accept_staff_invite failed: {exc}")
         raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    return {"ok": True, "clinic_user": inserted[0]}
