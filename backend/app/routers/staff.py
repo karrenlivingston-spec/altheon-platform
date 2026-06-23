@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -56,9 +57,9 @@ def _auth_user_email(user_id: str) -> str:
 
 
 class StaffInviteBody(BaseModel):
-    clinic_id: str
+    clinic_id: str = Field(..., min_length=1)
     email: EmailStr
-    role: str
+    role: str = Field(..., min_length=1)
 
 
 class StaffRolePatchBody(BaseModel):
@@ -67,6 +68,20 @@ class StaffRolePatchBody(BaseModel):
 
 class AcceptInviteBody(BaseModel):
     token: str = Field(..., min_length=1)
+
+
+def _require_uuid(value: str, field: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        raise HTTPException(status_code=400, detail=f"{field} is required")
+    try:
+        uuid.UUID(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} must be a valid UUID",
+        ) from exc
+    return raw
 
 
 def _safe_auth_user_email(user_id: str) -> str:
@@ -126,7 +141,8 @@ def invite_staff(
     _auth: Optional[AuthorizedClinicUser] = Depends(require_role(*ADMIN_ROLES)),
 ):
     actor = enforce_clinic_role_from_auth_header(authorization, body.clinic_id, *ADMIN_ROLES)
-    cid = body.clinic_id.strip()
+    cid = _require_uuid(body.clinic_id, "clinic_id")
+    invited_by = _require_uuid(actor.user_id, "invited_by")
     email = str(body.email).strip().lower()
     role = (body.role or "").strip().lower()
 
@@ -146,9 +162,16 @@ def invite_staff(
         "email": email,
         "role": role,
         "token": token,
-        "invited_by": actor.user_id,
+        "invited_by": invited_by,
         "expires_at": expires_at,
     }
+    logger.info(
+        "invite_staff insert clinic_id=%s invited_by=%s role=%s email=%s",
+        cid,
+        invited_by,
+        role,
+        email,
+    )
     try:
         ins = supabase.table("staff_invitations").insert(insert_row).execute()
         _handle_supabase_error(ins)

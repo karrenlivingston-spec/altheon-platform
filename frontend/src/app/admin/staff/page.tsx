@@ -176,10 +176,32 @@ export default function StaffManagementPage() {
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault();
-    if (!clinicId) return;
+    const trimmedClinicId = (clinicId ?? "").trim();
+    const { data: sessionData } = await supabase.auth.getSession();
+    const invitedBy = (
+      sessionData.session?.user?.id ??
+      userId ??
+      ""
+    ).trim();
     const email = inviteEmail.trim();
+    const payload = {
+      clinic_id: trimmedClinicId,
+      email,
+      role: inviteRole,
+    };
+
+    console.log("[staff/invite] payload", { ...payload, invitedBy });
+
+    if (!trimmedClinicId || !invitedBy) {
+      setInviteError("Missing clinic or user context — cannot send invite");
+      return;
+    }
     if (!email) {
       setInviteError("Email is required.");
+      return;
+    }
+    if (!STAFF_ROLES.some((r) => r.value === inviteRole)) {
+      setInviteError("Invalid role selected.");
       return;
     }
     setInviteBusy(true);
@@ -189,11 +211,7 @@ export default function StaffManagementPage() {
       const res = await fetch(`${API_BASE}/staff/invite`, {
         method: "POST",
         headers: await authHeaders(),
-        body: JSON.stringify({
-          clinic_id: clinicId,
-          email,
-          role: inviteRole,
-        }),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         throw new Error(

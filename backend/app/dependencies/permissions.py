@@ -11,7 +11,7 @@ from app.db import supabase
 from routers.fee_schedule import _resolve_bearer_user_id
 
 ADMIN_ROLES: list[str] = ["super_admin", "clinic_admin"]
-BILLING_ROLES: list[str] = ["super_admin", "clinic_admin"]
+BILLING_ROLES: list[str] = ["super_admin", "clinic_admin", "clinician"]
 CLINICAL_ROLES: list[str] = ["super_admin", "clinic_admin", "clinician"]
 ALL_ROLES: list[str] = ["super_admin", "clinic_admin", "clinician", "front_desk"]
 

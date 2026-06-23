@@ -5,7 +5,7 @@ import { useMemo } from "react";
 import { useClinic } from "@/app/admin/ClinicContext";
 
 const ADMIN_ROLES = new Set(["super_admin", "clinic_admin"]);
-const BILLING_ROLES = new Set(["super_admin", "clinic_admin"]);
+const BILLING_ROLES = new Set(["super_admin", "clinic_admin", "clinician"]);
 const CLINICAL_ROLES = new Set(["super_admin", "clinic_admin", "clinician"]);
 
 export function usePermissions() {
@@ -17,7 +17,10 @@ export function usePermissions() {
     const isAdmin = ADMIN_ROLES.has(normalizedRole);
     const isClinician = normalizedRole === "clinician";
     const isFrontDesk = normalizedRole === "front_desk";
-    const canViewBilling = BILLING_ROLES.has(normalizedRole);
+    const canAccessBilling = BILLING_ROLES.has(normalizedRole);
+    const canViewBilling = canAccessBilling;
+    const canViewClaims = canAccessBilling;
+    const canSubmitClaims = canAccessBilling;
     const canViewClinicalNotes = CLINICAL_ROLES.has(normalizedRole);
     const canManageStaff = isAdmin;
 
@@ -28,7 +31,10 @@ export function usePermissions() {
       isAdmin,
       isClinician,
       isFrontDesk,
+      canAccessBilling,
       canViewBilling,
+      canViewClaims,
+      canSubmitClaims,
       canViewClinicalNotes,
       canManageStaff,
     };
