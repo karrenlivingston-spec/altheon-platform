@@ -142,23 +142,22 @@ def detect_cpt_codes(
         _handle_supabase_error(fee_resp)
         fee_schedule = fee_resp.data or []
         if not fee_schedule:
-            raise HTTPException(
-                status_code=404,
-                detail="No fee schedule found for this clinic",
-            )
-
-        allowed_codes = {
-            str(row.get("cpt_code") or "").strip().upper()
-            for row in fee_schedule
-            if isinstance(row, dict)
-        }
-        fee_schedule_text = "\n".join(
-            [
-                f"- {row['cpt_code']}: charge ${row['charge']}, modifiers: {_format_modifiers(row.get('modifiers'))}"
+            # No fee schedule — detect codes from SOAP content only, without charge data
+            fee_schedule_text = "(No fee schedule configured for this clinic — detect CPT codes based on clinical content only)"
+            allowed_codes: set[str] = set()
+        else:
+            allowed_codes = {
+                str(row.get("cpt_code") or "").strip().upper()
                 for row in fee_schedule
-                if isinstance(row, dict) and row.get("cpt_code")
-            ]
-        )
+                if isinstance(row, dict)
+            }
+            fee_schedule_text = "\n".join(
+                [
+                    f"- {row['cpt_code']}: charge ${row['charge']}, modifiers: {_format_modifiers(row.get('modifiers'))}"
+                    for row in fee_schedule
+                    if isinstance(row, dict) and row.get("cpt_code")
+                ]
+            )
 
         api_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
         if not api_key:
@@ -200,14 +199,17 @@ def detect_cpt_codes(
 
         detected_codes = _extract_json_array(raw)
 
-        # Keep only codes present on the clinic fee schedule
+        # If fee schedule exists, filter to known codes only; otherwise return all detected
         filtered: list[dict[str, Any]] = []
         for item in detected_codes:
             if not isinstance(item, dict):
                 continue
             code = str(item.get("cpt_code") or "").strip().upper()
-            if code and code in allowed_codes:
-                filtered.append(item)
+            if not code:
+                continue
+            if allowed_codes and code not in allowed_codes:
+                continue
+            filtered.append(item)
 
         upd = (
             supabase.table("clinical_notes")
