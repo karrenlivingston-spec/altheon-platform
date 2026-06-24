@@ -25,6 +25,7 @@ import { SpecialTestsSection } from "@/components/clinical-notes/SpecialTestsSec
 import CptDetectionPanel, {
   type CptCode,
 } from "@/components/CptDetectionPanel";
+import PayerOptimizerPanel from "@/components/soap/PayerOptimizerPanel";
 import PlanOfCareModal from "@/components/clinical-notes/PlanOfCareModal";
 import ClinicalNotesStatCards from "@/components/admin/clinical-notes/ClinicalNotesStatCards";
 import ClinicalNotesFilterTabs from "@/components/admin/clinical-notes/ClinicalNotesFilterTabs";
@@ -130,7 +131,32 @@ type PatientRow = {
   id: string;
   first_name?: string;
   last_name?: string;
+  insurance_carrier?: string | null;
 };
+
+const PAYER_CPT_DESCRIPTIONS: Record<string, string> = {
+  "97161": "PT Eval Low",
+  "97162": "PT Eval Mod",
+  "97163": "PT Eval High",
+  "97164": "PT Re-Eval",
+  "97110": "Therapeutic Ex",
+  "97112": "Neuromusc Re-ed",
+  "97530": "Therapeutic Act",
+  "97140": "Manual Therapy",
+  "97010": "Hot/Cold Pack",
+  "97014": "E-Stim (Unatt.)",
+  G0283: "E-Stim (Medicare)",
+};
+
+function payerCodesToCptCodes(codes: string[]): CptCode[] {
+  return codes.map((cpt_code) => ({
+    cpt_code,
+    description: PAYER_CPT_DESCRIPTIONS[cpt_code] ?? cpt_code,
+    charge: 0,
+    modifiers: [],
+    reason: "Selected from payer billing optimizer",
+  }));
+}
 
 type ClinicalNote = ClinicalNoteListItem;
 
@@ -263,6 +289,9 @@ export default function AdminClinicalNotesPage() {
   const [editorTab, setEditorTab] = useState(1);
   const [draftNoteStatus, setDraftNoteStatus] = useState("draft");
   const [draftAiFeedback, setDraftAiFeedback] = useState("");
+  const [optimizerVisitType, setOptimizerVisitType] = useState<
+    "initial" | "followup"
+  >("followup");
 
   const [viewNote, setViewNote] = useState<ClinicalNote | null>(null);
   const [pocNote, setPocNote] = useState<ClinicalNote | null>(null);
@@ -585,6 +614,53 @@ export default function AdminClinicalNotesPage() {
     }
     void resolveAppointmentForPatient(pid);
   }, [editorOpen, editingId, draftPatientId, resolveAppointmentForPatient]);
+
+  const resolveVisitTypeForPatient = useCallback(
+    async (patientId: string) => {
+      const pid = patientId.trim();
+      if (!pid || !clinicId) {
+        setOptimizerVisitType("followup");
+        return;
+      }
+      try {
+        const params = new URLSearchParams({
+          clinic_id: clinicId,
+          patient_id: pid,
+        });
+        const res = await fetch(`${API_BASE}/appointments?${params.toString()}`, {
+          headers: await authHeaders(),
+        });
+        if (!res.ok) {
+          setOptimizerVisitType("followup");
+          return;
+        }
+        const data: unknown = await res.json();
+        const rows = Array.isArray(data) ? (data as AppointmentListRow[]) : [];
+        const completed = rows.filter(
+          (r) => normalizeAppointmentStatus(r.status) === "completed",
+        );
+        setOptimizerVisitType(completed.length === 0 ? "initial" : "followup");
+      } catch {
+        setOptimizerVisitType("followup");
+      }
+    },
+    [clinicId],
+  );
+
+  useEffect(() => {
+    if (!editorOpen) return;
+    const pid = draftPatientId.trim();
+    if (!pid) {
+      setOptimizerVisitType("followup");
+      return;
+    }
+    void resolveVisitTypeForPatient(pid);
+  }, [editorOpen, draftPatientId, resolveVisitTypeForPatient]);
+
+  const draftPatientPrimaryPayer = useMemo(() => {
+    const p = patients.find((x) => x.id === draftPatientId);
+    return p?.insurance_carrier?.trim() || null;
+  }, [patients, draftPatientId]);
 
   function resetEditor() {
     setEditingId(null);
@@ -1516,6 +1592,20 @@ export default function AdminClinicalNotesPage() {
 
               {editorTab === 4 ? (
                 <div className="space-y-4">
+                  <PayerOptimizerPanel
+                    clinicId={clinicId}
+                    appointmentId={draftAppointmentId.trim()}
+                    primaryPayer={draftPatientPrimaryPayer}
+                    secondaryPayer={null}
+                    visitType={
+                      draftNoteType.toLowerCase().includes("initial")
+                        ? "initial"
+                        : optimizerVisitType
+                    }
+                    onCodesSelected={(codes) => {
+                      setDraftCptCodes(payerCodesToCptCodes(codes));
+                    }}
+                  />
                   <CptDetectionPanel
                     noteId={editingId ?? ""}
                     clinicId={clinicId}
