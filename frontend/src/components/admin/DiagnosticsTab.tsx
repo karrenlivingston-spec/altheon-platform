@@ -600,10 +600,31 @@ export function DiagnosticsTab({
       form.append("upload_source", "receptionist");
 
       const url = `${API_BASE}/patients/${encodeURIComponent(patientId)}/documents/upload?clinic_id=${encodeURIComponent(clinicId)}`;
-      const res = await uploadWithProgress(url, form, h, setUploadProgress);
 
-      if (!res.ok) {
-        throw new Error((await res.text().catch(() => "")).trim() || "Upload failed");
+      let res: Response | null = null;
+      let lastError = "";
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          res = await uploadWithProgress(url, form, h, setUploadProgress);
+          if (res.ok) break;
+          lastError = (await res.text().catch(() => "")).trim() || "Upload failed";
+          if (attempt < 3) {
+            setUploadError(`Upload attempt ${attempt} failed — retrying…`);
+            await new Promise((r) => setTimeout(r, attempt * 1000));
+            setUploadProgress(0);
+          }
+        } catch (fetchErr) {
+          lastError = fetchErr instanceof Error ? fetchErr.message : "Upload failed";
+          if (attempt < 3) {
+            setUploadError(`Upload attempt ${attempt} failed — retrying…`);
+            await new Promise((r) => setTimeout(r, attempt * 1000));
+            setUploadProgress(0);
+          }
+        }
+      }
+
+      if (!res?.ok) {
+        throw new Error(lastError || "Upload failed after 3 attempts");
       }
       const data = (await res.json()) as { document_id?: string };
       if (data.document_id) {
