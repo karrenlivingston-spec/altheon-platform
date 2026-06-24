@@ -142,6 +142,8 @@ async function attachStreamToVideo(
   el.srcObject = stream;
   if (label === "local") {
     el.muted = true;
+  } else {
+    el.muted = false;
   }
   try {
     await el.play();
@@ -778,9 +780,6 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
           if (soapRes.status === 200 && soapData.appointment_id) {
             setChartAppointmentId(soapData.appointment_id);
             setTranscriptStatus("complete");
-            window.setTimeout(() => {
-              goToPatientChart(soapData.appointment_id);
-            }, 2000);
             return;
           }
 
@@ -944,6 +943,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
               ref={remoteVideoRef}
               autoPlay
               playsInline
+              muted={false}
               className="absolute inset-0 h-full w-full object-cover"
             />
             <div className="absolute right-3 top-3 z-10 h-[160px] w-[120px] sm:bottom-3 sm:top-auto sm:h-28 sm:w-40">
@@ -995,9 +995,18 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
                 ) : null}
 
                 {transcriptStatus === "complete" ? (
-                  <p className="rounded-lg border border-emerald-500/40 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200">
-                    ✅ SOAP note generated — redirecting to clinical notes…
-                  </p>
+                  <div className="space-y-3">
+                    <p className="rounded-lg border border-emerald-500/40 bg-emerald-950/40 px-3 py-2 text-xs text-emerald-200">
+                      SOAP note generated — you may now close this window.
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => window.close()}
+                      className="rounded-lg border border-teal-500/40 px-4 py-2 text-sm font-medium text-teal-100 hover:bg-teal-900/40"
+                    >
+                      Close
+                    </button>
+                  </div>
                 ) : null}
 
                 {transcriptStatus === "failed" ? (
