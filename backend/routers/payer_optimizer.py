@@ -56,6 +56,15 @@ def _shape_payer_result(payer_query: str, row: Optional[dict[str, Any]]) -> dict
     }
 
 
+def _payer_match_or_filter(query_name: str) -> str:
+    ilike_val = query_name.replace("%", "\\%").replace(",", " ")
+    alias_escaped = query_name.replace('"', '\\"')
+    return (
+        f"payer_name.ilike.{ilike_val},"
+        f'payer_name_aliases.cs.{{"{alias_escaped}"}}'
+    )
+
+
 def _lookup_payer_rule(
     clinic_id: str,
     payer_name: str,
@@ -70,6 +79,7 @@ def _lookup_payer_rule(
         "payer_name, payer_category, cpt_codes, notes, "
         "reimbursement_amount, visit_type, clinic_id"
     )
+    payer_or = _payer_match_or_filter(query_name)
 
     try:
         clinic_resp = (
@@ -77,7 +87,7 @@ def _lookup_payer_rule(
             .select(select_cols)
             .eq("clinic_id", clinic_id)
             .eq("visit_type", visit_type)
-            .ilike("payer_name", query_name)
+            .or_(payer_or)
             .limit(1)
             .execute()
         )
@@ -93,7 +103,7 @@ def _lookup_payer_rule(
             .select(select_cols)
             .is_("clinic_id", "null")
             .eq("visit_type", visit_type)
-            .ilike("payer_name", query_name)
+            .or_(payer_or)
             .limit(1)
             .execute()
         )
