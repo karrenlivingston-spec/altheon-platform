@@ -50,8 +50,64 @@ def _pdf_text(data: bytes) -> str:
         parts: list[str] = []
         for page in doc:
             parts.append(page.get_text("text"))
+        text = "\n".join(p for p in parts if p.strip()).strip()
         doc.close()
-        return "\n".join(p for p in parts if p.strip()).strip()
+
+        if text:
+            return text
+
+        # Scanned PDF — rasterize pages and extract via Claude vision
+        return _pdf_ocr_via_claude(data)
+    except Exception:
+        traceback.print_exc()
+        return ""
+
+
+def _pdf_ocr_via_claude(data: bytes) -> str:
+    """Rasterize each PDF page and send to Claude Haiku for OCR extraction."""
+    try:
+        import base64
+        import fitz
+        import anthropic
+
+        doc = fitz.open(stream=data, filetype="pdf")
+        content: list[dict] = []
+
+        for page_num, page in enumerate(doc):
+            mat = fitz.Matrix(2.0, 2.0)  # 2x scale for legibility
+            pix = page.get_pixmap(matrix=mat)
+            img_bytes = pix.tobytes("png")
+            b64 = base64.standard_b64encode(img_bytes).decode()
+            content.append({
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": b64,
+                },
+            })
+            content.append({
+                "type": "text",
+                "text": f"Page {page_num + 1}: Please extract all text from this page exactly as it appears.",
+            })
+
+        doc.close()
+
+        if not content:
+            return ""
+
+        content.append({
+            "type": "text",
+            "text": "Extract all text from the above pages. Return only the extracted text, preserving structure and layout as much as possible. Do not summarize or interpret — just extract.",
+        })
+
+        client = anthropic.Anthropic()
+        response = client.messages.create(
+            model="claude-haiku-4-5",
+            max_tokens=4096,
+            messages=[{"role": "user", "content": content}],
+        )
+        return response.content[0].text.strip() if response.content else ""
     except Exception:
         traceback.print_exc()
         return ""
