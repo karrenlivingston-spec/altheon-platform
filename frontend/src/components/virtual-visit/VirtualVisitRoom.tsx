@@ -83,10 +83,7 @@ function isIOSDevice(): boolean {
   );
 }
 
-async function acquireUserMedia(
-  roomId: string,
-  onDebugLog?: (msg: string) => void,
-): Promise<MediaStream> {
+async function acquireUserMedia(roomId: string): Promise<MediaStream> {
   const videoConstraint: MediaTrackConstraints = isIOSDevice()
     ? { facingMode: "user" }
     : { facingMode: "user" };
@@ -94,17 +91,13 @@ async function acquireUserMedia(
     video: videoConstraint,
     audio: { echoCancellation: true },
   };
-  onDebugLog?.("getUserMedia: requesting");
   try {
     visitLog(roomId, "getUserMedia: requesting with constraints", constraints);
     const stream = await navigator.mediaDevices.getUserMedia(constraints);
-    onDebugLog?.(`getUserMedia: got ${stream.getTracks().length} tracks`);
     return stream;
   } catch (firstErr) {
-    onDebugLog?.(`getUserMedia: failed ${firstErr}`);
     visitLogError(roomId, "getUserMedia: constrained request failed, retrying basic", firstErr);
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    onDebugLog?.(`getUserMedia: got ${stream.getTracks().length} tracks`);
     return stream;
   }
 }
@@ -141,7 +134,6 @@ async function attachStreamToVideo(
   roomId: string,
   label: "local" | "remote",
   onLocalPlayBlocked?: () => void,
-  onDebugLog?: (msg: string) => void,
 ): Promise<void> {
   if (!el) {
     visitLogError(roomId, `${label} video element ref not ready`);
@@ -149,7 +141,6 @@ async function attachStreamToVideo(
   }
 
   const isIOS = isIOSDevice();
-  onDebugLog?.(`${label}: el=${!!el} isIOS=${isIOS}`);
 
   // On iOS, pause briefly to let the video element fully mount
   if (isIOS) {
@@ -158,20 +149,16 @@ async function attachStreamToVideo(
 
   el.srcObject = stream;
   el.muted = label === "local";
-  onDebugLog?.(`${label}: srcObject set, tracks=${stream.getTracks().length}`);
 
   // On iOS, call load() before play() to initialize the element
   if (isIOS) {
     el.load();
-    onDebugLog?.(`${label}: load() called`);
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
 
   try {
     await el.play();
-    onDebugLog?.(`${label}: play() succeeded`);
   } catch (err) {
-    onDebugLog?.(`${label}: play() error ${err instanceof Error ? err.name : err}`);
     if (
       label === "local" &&
       err instanceof DOMException &&
@@ -230,13 +217,6 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
   >("idle");
   const [chartAppointmentId, setChartAppointmentId] = useState<string | null>(null);
   const [localVideoTapRequired, setLocalVideoTapRequired] = useState(false);
-  const [debugLogs, setDebugLogs] = useState<string[]>([]);
-  const addDebugLog = useCallback((msg: string) => {
-    setDebugLogs((prev) => [
-      ...prev.slice(-20),
-      `${new Date().toISOString().slice(11, 19)} ${msg}`,
-    ]);
-  }, []);
   const [browserSupported] = useState(
     () => typeof window !== "undefined" && typeof window.RTCPeerConnection !== "undefined",
   );
@@ -393,12 +373,10 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
         pendingRemoteStreamRef.current,
         roomId,
         "remote",
-        undefined,
-        addDebugLog,
       );
       pendingRemoteStreamRef.current = null;
     }
-  }, [phase, roomId, addDebugLog]);
+  }, [phase, roomId]);
 
   useEffect(() => {
     if (!roomId) {
@@ -468,7 +446,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
 
       let stream: MediaStream;
       try {
-        stream = await acquireUserMedia(roomId, addDebugLog);
+        stream = await acquireUserMedia(roomId);
       } catch (err) {
         visitLogError(roomId, "getUserMedia failed", err);
         setMediaError(
@@ -486,7 +464,6 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
         roomId,
         "local",
         onLocalPlayBlocked,
-        addDebugLog,
       );
 
       const joinRes = await fetch(
@@ -537,8 +514,6 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
           remoteStream,
           roomId,
           "remote",
-          undefined,
-          addDebugLog,
         );
         setConnectionStatus("Connected");
       };
@@ -724,7 +699,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
         role === "clinician" ? "Waiting for patient…" : "Waiting for clinician…",
       );
     },
-    [info?.started_at, roomId, clinicIdParam, getClinicianToken, onLocalPlayBlocked, addDebugLog],
+    [info?.started_at, roomId, clinicIdParam, getClinicianToken, onLocalPlayBlocked],
   );
 
   useEffect(() => {
@@ -1102,13 +1077,6 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
           </div>
         ) : null}
       </main>
-
-      <div className="fixed bottom-16 left-0 right-0 z-[100] max-h-48 overflow-y-auto bg-black/80 p-2 text-xs text-green-400 font-mono">
-        {debugLogs.map((log, i) => (
-          <div key={i}>{log}</div>
-        ))}
-        {debugLogs.length === 0 && <div className="text-gray-500">debug: no logs yet</div>}
-      </div>
     </div>
   );
 }
