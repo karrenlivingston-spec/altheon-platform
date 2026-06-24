@@ -954,8 +954,8 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
 
   return (
     <div
-      className="flex h-[100dvh] flex-col overflow-hidden"
-      style={{ background: PAGE_BG }}
+      className="flex flex-col overflow-hidden"
+      style={{ background: PAGE_BG, height: '100svh', minHeight: '-webkit-fill-available' }}
     >
       <header className="shrink-0 border-b border-teal-900/50 px-4 py-3">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-2">
@@ -976,7 +976,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
       <main className="relative mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col overflow-hidden sm:p-4">
         <div className="min-h-0 flex-1 overflow-y-auto">
           {/* Mobile: remote ~80% of remaining viewport; desktop: 16:9 aspect box */}
-          <div className="relative min-h-0 w-full flex-[4] overflow-hidden bg-black/60 sm:aspect-video sm:flex-none sm:rounded-xl sm:shadow-lg">
+          <div className="relative w-full overflow-hidden bg-black/60 sm:aspect-video sm:rounded-xl sm:shadow-lg" style={{ minHeight: '40vh' }}>
             <video
               ref={remoteVideoRef}
               autoPlay
