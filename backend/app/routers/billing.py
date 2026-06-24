@@ -6,11 +6,13 @@ import base64
 import json
 import logging
 import os
+import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
 import httpx
+import requests
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, Header
 from pydantic import BaseModel, Field
 
@@ -176,17 +178,32 @@ def _format_stedi_date(value: Any) -> str:
 
 
 def _stedi_error_detail(response: httpx.Response) -> str:
+    return _stedi_error_detail_from_parts(
+        response.status_code,
+        response.text or "",
+        _try_parse_json_response(response.text or ""),
+    )
+
+
+def _try_parse_json_response(text: str) -> Any:
     try:
-        data = response.json()
-        if isinstance(data, dict):
-            for key in ("message", "detail", "error"):
-                if data.get(key):
-                    return str(data[key])[:2000]
-            return json.dumps(data)[:2000]
+        return json.loads(text)
     except Exception:
-        pass
-    text = (response.text or "").strip()
-    return text[:2000] if text else f"Stedi API error (HTTP {response.status_code})"
+        return None
+
+
+def _stedi_error_detail_from_parts(
+    status_code: int,
+    text: str,
+    data: Any = None,
+) -> str:
+    if isinstance(data, dict):
+        for key in ("message", "detail", "error"):
+            if data.get(key):
+                return str(data[key])[:2000]
+        return json.dumps(data)[:2000]
+    stripped = (text or "").strip()
+    return stripped[:2000] if stripped else f"Stedi API error (HTTP {status_code})"
 
 
 def _extract_claim_reference(response_data: dict[str, Any]) -> Optional[str]:
@@ -204,6 +221,158 @@ def _extract_claim_reference(response_data: dict[str, Any]) -> Optional[str]:
     if isinstance(ref, str) and ref.strip():
         return ref.strip()
     return None
+
+
+def _submit_to_stedi(payload: dict[str, Any]) -> dict[str, Any]:
+    """Submit an 837P payload to Stedi via requests.
+
+    Returns {"ok": True, "data": ..., "reference": ...} or {"ok": False, "error": ...}.
+    """
+    api_key = _stedi_api_key()
+    if not api_key:
+        return {"ok": False, "error": "Stedi API key not configured"}
+
+    headers = _stedi_headers(api_key)
+    try:
+        response = requests.post(
+            STEDI_SUBMIT_URL,
+            json=payload,
+            headers=headers,
+            timeout=60,
+        )
+    except requests.RequestException as exc:
+        logger.exception("Stedi 837P submission request failed")
+        return {"ok": False, "error": str(exc)}
+
+    response_data = _try_parse_json_response(response.text or "")
+    if response.status_code >= 400:
+        return {
+            "ok": False,
+            "error": _stedi_error_detail_from_parts(
+                response.status_code,
+                response.text or "",
+                response_data,
+            ),
+        }
+
+    if not isinstance(response_data, dict):
+        return {"ok": False, "error": "Invalid JSON response from Stedi"}
+
+    stedi_status = str(response_data.get("status") or "").upper()
+    if stedi_status and stedi_status not in ("SUCCESS", "ACCEPTED"):
+        return {
+            "ok": False,
+            "error": _stedi_error_detail_from_parts(
+                response.status_code,
+                response.text or "",
+                response_data,
+            ),
+        }
+
+    reference = _extract_claim_reference(response_data)
+    return {"ok": True, "data": response_data, "reference": reference}
+
+
+def _generate_resubmit_claim_number(original: dict[str, Any]) -> str:
+    """Generate a replacement claim number in the same CLM-* family."""
+    next_count = int(original.get("resubmission_count") or 0) + 1
+    dos = str(original.get("first_treatment_date") or "")[:10]
+    if dos:
+        return f"CLM-{dos.replace('-', '')}-R{next_count:03d}"
+    cid = str(original.get("id") or "")[:8].upper()
+    return f"CLM-{cid}-R{next_count:03d}" if cid else f"CLM-R{next_count:03d}"
+
+
+def _apply_eob_corrections_to_claim(
+    claim: dict[str, Any],
+    eob: dict[str, Any],
+) -> dict[str, Any]:
+    """Merge EOB extraction corrections onto a copy of the original claim."""
+    merged = dict(claim)
+    raw = eob.get("raw_extraction") if isinstance(eob.get("raw_extraction"), dict) else {}
+
+    corrected_diagnosis = raw.get("corrected_diagnosis_codes") or raw.get("diagnosis_codes")
+    if isinstance(corrected_diagnosis, list):
+        diagnosis = [str(c).strip() for c in corrected_diagnosis if str(c).strip()]
+        if diagnosis:
+            merged["diagnosis_codes"] = diagnosis
+
+    eob_cpt = raw.get("corrected_cpt_codes") or raw.get("cpt_codes")
+    cpt_codes: list[str] = []
+    if isinstance(eob_cpt, list):
+        for item in eob_cpt:
+            if isinstance(item, dict):
+                code = str(item.get("code") or "").strip()
+            else:
+                code = str(item).strip()
+            if code:
+                cpt_codes.append(code)
+    if cpt_codes:
+        merged["cpt_codes"] = normalize_cpt_codes(cpt_codes)
+
+    amount: Optional[float] = None
+    if eob.get("total_billed") is not None:
+        try:
+            amount = float(eob.get("total_billed"))
+        except (TypeError, ValueError):
+            amount = None
+    if amount is None and isinstance(eob_cpt, list):
+        billed_total = 0.0
+        for item in eob_cpt:
+            if isinstance(item, dict):
+                try:
+                    billed_total += float(item.get("billed") or 0)
+                except (TypeError, ValueError):
+                    continue
+        if billed_total > 0:
+            amount = billed_total
+    if amount is not None and amount > 0:
+        merged["total_amount"] = amount
+
+    return merged
+
+
+def _claim_row_for_resubmit_insert(
+    merged_claim: dict[str, Any],
+    *,
+    new_claim_id: str,
+    original_id: str,
+    resubmission_reason: str,
+    claim_number: str,
+    reference: Optional[str],
+    now: str,
+) -> dict[str, Any]:
+    resubmission_count = int(merged_claim.get("resubmission_count") or 0) + 1
+    row: dict[str, Any] = {
+        "id": new_claim_id,
+        "clinic_id": merged_claim.get("clinic_id"),
+        "patient_id": merged_claim.get("patient_id"),
+        "clinician_id": merged_claim.get("clinician_id"),
+        "appointment_id": merged_claim.get("appointment_id"),
+        "first_treatment_date": merged_claim.get("first_treatment_date"),
+        "payer_name": merged_claim.get("payer_name"),
+        "payer_id": merged_claim.get("payer_id"),
+        "policy_number": merged_claim.get("policy_number"),
+        "member_id": merged_claim.get("member_id"),
+        "diagnosis_codes": merged_claim.get("diagnosis_codes") or [],
+        "cpt_codes": merged_claim.get("cpt_codes") or [],
+        "total_amount": merged_claim.get("total_amount") or 0,
+        "status": "submitted",
+        "resubmission_of": original_id,
+        "resubmission_reason": resubmission_reason.strip(),
+        "resubmission_count": resubmission_count,
+        "claim_number": claim_number,
+        "submission_date": now,
+        "submitted_at": now,
+        "updated_at": now,
+    }
+    if merged_claim.get("notes") is not None:
+        row["notes"] = merged_claim.get("notes")
+    if merged_claim.get("filing_deadline") is not None:
+        row["filing_deadline"] = merged_claim.get("filing_deadline")
+    if reference:
+        row["reference_number"] = reference
+    return row
 
 
 async def _fetch_stedi_cms1500_pdf_bytes(business_id: str) -> bytes:
@@ -294,6 +463,8 @@ def _patient_gender_code(patient: Optional[dict[str, Any]]) -> str:
 def _build_stedi_837p_payload(
     claim: dict[str, Any],
     patient: Optional[dict[str, Any]] = None,
+    *,
+    claim_frequency_code: str = "1",
 ) -> dict[str, Any]:
     diagnosis_codes = [
         _normalize_diagnosis_code(c)
@@ -400,7 +571,7 @@ def _build_stedi_837p_payload(
             "benefitsAssignmentCertificationIndicator": "Y",
             "claimChargeAmount": charge_str,
             "claimFilingCode": "CI",
-            "claimFrequencyCode": "1",
+            "claimFrequencyCode": claim_frequency_code,
             "healthCareCodeInformation": health_care_codes,
             "patientControlNumber": claim_id[:20] if claim_id else "CLAIM",
             "placeOfServiceCode": "11",
@@ -771,6 +942,11 @@ class ResubmissionPackageBody(BaseModel):
     eob_extraction_id: str
 
 
+class ResubmitClaimBody(BaseModel):
+    eob_extraction_id: str = Field(..., min_length=1)
+    resubmission_reason: str = Field(..., min_length=1)
+
+
 class PatientStatementBody(BaseModel):
     clinic_id: str
     patient_id: str
@@ -1070,6 +1246,191 @@ async def submit_claim(
 
     rows = upd.data or []
     return _shape_claim(rows[0] if rows else {**claim, **upd_data})
+
+
+@router.post("/claims/{claim_id}/resubmit")
+def resubmit_claim(
+    claim_id: str,
+    body: ResubmitClaimBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    original = _fetch_claim(claim_id)
+    clinic_id = str(original.get("clinic_id") or "").strip()
+    _require_billing_access(authorization, clinic_id)
+
+    eob_id = body.eob_extraction_id.strip()
+    reason = body.resubmission_reason.strip()
+    if not eob_id or not reason:
+        raise HTTPException(
+            status_code=400,
+            detail="eob_extraction_id and resubmission_reason are required",
+        )
+
+    try:
+        eob_resp = (
+            supabase.table("eob_extractions")
+            .select("*")
+            .eq("id", eob_id)
+            .eq("clinic_id", clinic_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(eob_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("resubmit fetch eob failed eob_id=%s", eob_id)
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    eob_rows = eob_resp.data or []
+    if not eob_rows:
+        raise HTTPException(status_code=404, detail="EOB extraction not found")
+    eob = eob_rows[0]
+
+    matched_claim_id = str(eob.get("claim_id") or "").strip()
+    if matched_claim_id and matched_claim_id != claim_id:
+        raise HTTPException(
+            status_code=400,
+            detail="EOB extraction is linked to a different claim",
+        )
+
+    if eob.get("resubmission_submitted") is True:
+        raise HTTPException(
+            status_code=400,
+            detail="Resubmission has already been submitted for this EOB",
+        )
+
+    merged_claim = _apply_eob_corrections_to_claim(original, eob)
+    merged_claim["cpt_codes"] = normalize_cpt_codes(merged_claim.get("cpt_codes"))
+    if not merged_claim.get("cpt_codes"):
+        merged_claim["cpt_codes"] = normalize_cpt_codes(original.get("cpt_codes")) or [
+            "99213"
+        ]
+
+    patient = _fetch_patient_for_claim(merged_claim.get("patient_id"))
+    new_claim_id = str(uuid.uuid4())
+    new_claim_number = _generate_resubmit_claim_number(original)
+    stedi_claim = {**merged_claim, "id": new_claim_id, "claim_number": new_claim_number}
+    payload = _build_stedi_837p_payload(
+        stedi_claim,
+        patient,
+        claim_frequency_code="7",
+    )
+
+    stedi_result = _submit_to_stedi(payload)
+    if not stedi_result.get("ok"):
+        return {
+            "success": False,
+            "error": str(stedi_result.get("error") or "Stedi submission failed"),
+        }
+
+    reference = stedi_result.get("reference")
+    now = _now_iso()
+    insert_row = _claim_row_for_resubmit_insert(
+        merged_claim,
+        new_claim_id=new_claim_id,
+        original_id=claim_id,
+        resubmission_reason=reason,
+        claim_number=new_claim_number,
+        reference=str(reference).strip() if reference else None,
+        now=now,
+    )
+
+    try:
+        ins = supabase.table("insurance_claims").insert(insert_row).execute()
+        _handle_supabase_error(ins)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "resubmit insert failed original_id=%s new_id=%s",
+            claim_id,
+            new_claim_id,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Stedi accepted claim but database insert failed: {exc}",
+        ) from exc
+
+    ins_rows = ins.data or []
+    if not ins_rows:
+        raise HTTPException(
+            status_code=500,
+            detail="Stedi accepted claim but database insert returned no row",
+        )
+    new_claim = ins_rows[0]
+
+    try:
+        upd_original = (
+            supabase.table("insurance_claims")
+            .update({"status": "resubmitted", "updated_at": now})
+            .eq("id", claim_id)
+            .execute()
+        )
+        _handle_supabase_error(upd_original)
+    except Exception:
+        logger.exception("resubmit update original failed claim_id=%s", claim_id)
+
+    try:
+        supabase.table("eob_extractions").update(
+            {
+                "resubmission_submitted": True,
+                "resubmission_claim_id": new_claim_id,
+            }
+        ).eq("id", eob_id).execute()
+    except Exception:
+        logger.exception("resubmit update eob failed eob_id=%s", eob_id)
+
+    task_id = str(eob.get("task_id") or "").strip()
+    try:
+        task_update = {"status": "completed", "completed_at": now, "updated_at": now}
+        if task_id:
+            supabase.table("clinic_tasks").update(task_update).eq("id", task_id).eq(
+                "clinic_id", clinic_id
+            ).execute()
+        else:
+            supabase.table("clinic_tasks").update(task_update).eq(
+                "claim_id", claim_id
+            ).eq("clinic_id", clinic_id).eq("task_type", "eob_resubmission").in_(
+                "status", ["open", "in_progress"]
+            ).execute()
+    except Exception:
+        logger.exception(
+            "resubmit update clinic_task failed claim_id=%s eob_id=%s",
+            claim_id,
+            eob_id,
+        )
+
+    try:
+        _insert_audit_log(
+            claim_id,
+            "claim_resubmitted",
+            old_status=str(original.get("status") or "").strip() or None,
+            new_status="resubmitted",
+            reference_number=str(reference).strip() if reference else None,
+            details=reason,
+        )
+        _insert_audit_log(
+            new_claim_id,
+            "claim_submitted",
+            new_status="submitted",
+            reference_number=str(reference).strip() if reference else None,
+            details=f"Resubmission of {claim_id}",
+        )
+    except Exception:
+        logger.exception(
+            "resubmit audit log failed original_id=%s new_id=%s",
+            claim_id,
+            new_claim_id,
+        )
+
+    return {
+        "success": True,
+        "new_claim_id": new_claim_id,
+        "new_claim_number": new_claim_number,
+        "stedi_reference": str(reference or "").strip(),
+        "claim": _shape_claim(new_claim if isinstance(new_claim, dict) else insert_row),
+    }
 
 
 @router.get("/claims/{claim_id}/status")
