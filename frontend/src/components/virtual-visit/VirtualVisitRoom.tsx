@@ -75,19 +75,17 @@ function visitLogError(roomId: string, message: string, detail?: unknown) {
   }
 }
 
-function isSafariBrowser(): boolean {
+function isIOSDevice(): boolean {
   if (typeof navigator === "undefined") return false;
-  const ua = navigator.userAgent;
-  return ua.includes("Safari") && !ua.includes("Chrome");
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
 }
 
 async function acquireUserMedia(roomId: string): Promise<MediaStream> {
-  const videoConstraint: MediaTrackConstraints = isSafariBrowser()
-    ? {
-        facingMode: "user",
-        width: { ideal: 1280 },
-        height: { ideal: 720 },
-      }
+  const videoConstraint: MediaTrackConstraints = isIOSDevice()
+    ? { facingMode: "user" }
     : { facingMode: "user" };
   const constraints: MediaStreamConstraints = {
     video: videoConstraint,
@@ -139,12 +137,23 @@ async function attachStreamToVideo(
     visitLogError(roomId, `${label} video element ref not ready`);
     return;
   }
-  el.srcObject = stream;
-  if (label === "local") {
-    el.muted = true;
-  } else {
-    el.muted = false;
+
+  const isIOS = isIOSDevice();
+
+  // On iOS, pause briefly to let the video element fully mount
+  if (isIOS) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
   }
+
+  el.srcObject = stream;
+  el.muted = label === "local";
+
+  // On iOS, call load() before play() to initialize the element
+  if (isIOS) {
+    el.load();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+
   try {
     await el.play();
   } catch (err) {
@@ -159,9 +168,11 @@ async function attachStreamToVideo(
       visitLogError(roomId, `${label} video play() failed`, err);
     }
   }
+
   visitLog(roomId, `${label} stream attached`, {
     streamId: stream.id,
     tracks: stream.getTracks().map((t) => `${t.kind}:${t.id}`),
+    isIOS,
   });
 }
 
