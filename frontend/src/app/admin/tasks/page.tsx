@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
-import { Loader2 } from "lucide-react";
 
 import { useClinic } from "@/app/admin/ClinicContext";
 import {
@@ -15,7 +14,7 @@ import {
   DS_TH,
   DS_TR,
 } from "@/app/admin/designSystem";
-import { downloadResubmissionPackage } from "@/components/admin/billing/resubmissionDownload";
+import ResubmissionTaskActions from "@/components/admin/billing/ResubmissionTaskActions";
 import { ClinicTaskRow } from "@/components/admin/dashboard/dashboardTypes";
 import { supabase } from "@/lib/supabase";
 
@@ -39,6 +38,17 @@ function priorityBadgeClass(priority: string): string {
   return "bg-gray-100 text-gray-700";
 }
 
+function taskStatusBadge(task: ClinicTaskRow): string | null {
+  if (
+    task.resubmission_submitted ||
+    task.status === "completed" ||
+    task.resubmission_claim_id
+  ) {
+    return "completed";
+  }
+  return task.status ?? null;
+}
+
 export default function AdminTasksPage() {
   const { clinicId } = useClinic();
   const [tasks, setTasks] = useState<ClinicTaskRow[]>([]);
@@ -48,7 +58,6 @@ export default function AdminTasksPage() {
   const [priorityFilter, setPriorityFilter] = useState("all");
   const [typeFilter, setTypeFilter] = useState("all");
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [preparingId, setPreparingId] = useState<string | null>(null);
 
   const loadTasks = useCallback(async () => {
     if (!clinicId) return;
@@ -98,33 +107,10 @@ export default function AdminTasksPage() {
       );
       if (!res.ok) throw new Error("Update failed");
       await loadTasks();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Update failed");
     } finally {
       setBusyId(null);
-    }
-  }
-
-  async function prepareResubmission(task: ClinicTaskRow) {
-    if (
-      !clinicId ||
-      !task.patient_id ||
-      !task.claim_id ||
-      !task.eob_extraction_id
-    ) {
-      return;
-    }
-    setPreparingId(task.id);
-    try {
-      const h = await authHeaders(true);
-      await downloadResubmissionPackage({
-        clinicId,
-        patientId: task.patient_id,
-        claimId: task.claim_id,
-        eobExtractionId: task.eob_extraction_id,
-        authHeaders: h,
-      });
-      await loadTasks();
-    } finally {
-      setPreparingId(null);
     }
   }
 
@@ -213,15 +199,18 @@ export default function AdminTasksPage() {
                 </tr>
               ) : (
                 tasks.map((task) => {
-                  const canPrepare =
-                    task.task_type === "eob_resubmission" &&
-                    Boolean(
-                      task.claim_id && task.patient_id && task.eob_extraction_id,
-                    );
+                  const statusBadge = taskStatusBadge(task);
                   return (
                     <tr key={task.id} className={DS_TR}>
                       <td className={DS_TD_PRIMARY}>
-                        <div className="font-medium text-gray-900">{task.title}</div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-medium text-gray-900">{task.title}</span>
+                          {statusBadge === "completed" ? (
+                            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                              Completed
+                            </span>
+                          ) : null}
+                        </div>
                         {task.description ? (
                           <div className="mt-0.5 line-clamp-2 text-xs text-gray-500">
                             {task.description}
@@ -253,34 +242,24 @@ export default function AdminTasksPage() {
                           ? new Date(task.created_at).toLocaleDateString()
                           : "—"}
                       </td>
-                      <td className={DS_TD_PRIMARY}>
-                        <div className="flex flex-wrap gap-2">
-                          {canPrepare ? (
-                            <button
-                              type="button"
-                              disabled={preparingId === task.id}
-                              className="text-teal-700 hover:underline disabled:opacity-60"
-                              onClick={() => void prepareResubmission(task)}
-                            >
-                              {preparingId === task.id ? (
-                                <span className="inline-flex items-center gap-1">
-                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                  Generating…
-                                </span>
-                              ) : (
-                                "Prepare Resubmission"
-                              )}
-                            </button>
-                          ) : null}
+                      <td className={`${DS_TD_PRIMARY} min-w-[16rem]`}>
+                        <ResubmissionTaskActions
+                          task={task}
+                          clinicId={clinicId}
+                          authHeaders={authHeaders}
+                          onUpdated={() => void loadTasks()}
+                          layout="stack"
+                        />
+                        {statusBadge !== "completed" ? (
                           <button
                             type="button"
                             disabled={busyId === task.id}
-                            className="text-gray-700 hover:text-gray-900 disabled:opacity-60"
+                            className="mt-2 block text-xs text-gray-700 hover:text-gray-900 disabled:opacity-60"
                             onClick={() => void markDone(task.id)}
                           >
                             {busyId === task.id ? "Saving…" : "Mark Done"}
                           </button>
-                        </div>
+                        ) : null}
                       </td>
                     </tr>
                   );

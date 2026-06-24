@@ -229,6 +229,25 @@ export default function AdminBillingPage() {
     setDetailClaim(claim);
   }
 
+  function openClaimById(claimId: string) {
+    const found = data?.claims.find((c) => c.id === claimId);
+    if (found) {
+      setDetailClaim(found);
+      return;
+    }
+    setDetailClaim({
+      id: claimId,
+      claim_number: claimId.slice(0, 8),
+      patient_name: "—",
+      insurance_carrier: "—",
+      date_of_service: null,
+      total_billed_cents: 0,
+      amount_paid_cents: 0,
+      amount_remaining_cents: 0,
+      status: "submitted",
+    });
+  }
+
   function closeClaimModal() {
     setIsNewClaimModalOpen(false);
     setEditingClaim(null);
@@ -523,6 +542,7 @@ export default function AdminBillingPage() {
               setPage(0);
             }}
             onView={openEditClaim}
+            onViewClaimById={openClaimById}
             onSuperbill={(claim) => void handleSuperbillForClaim(claim)}
             onSubmit={(claim) => void handleSubmitClaimToStedi(claim.id)}
             submittingClaimId={submittingClaimId}

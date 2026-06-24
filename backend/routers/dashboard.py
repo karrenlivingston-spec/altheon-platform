@@ -137,6 +137,10 @@ def _shape_clinic_task(row: dict[str, Any]) -> dict[str, Any]:
         "status": str(row.get("status") or "").strip(),
         "created_at": row.get("created_at"),
         "resubmission_generated_at": row.get("resubmission_generated_at"),
+        "resubmission_prepared": bool(row.get("resubmission_prepared")),
+        "resubmission_submitted": bool(row.get("resubmission_submitted")),
+        "eob_denial_reason": row.get("eob_denial_reason"),
+        "resubmission_claim_id": str(row.get("resubmission_claim_id") or "").strip() or None,
     }
 
 
@@ -148,7 +152,10 @@ def _enrich_tasks_with_eob_ids(
     try:
         eob_resp = supabase_execute(
             lambda: supabase.table("eob_extractions")
-            .select("id, claim_id, task_id")
+            .select(
+                "id, claim_id, task_id, resubmission_prepared, "
+                "resubmission_submitted, denial_reasons, resubmission_claim_id"
+            )
             .eq("clinic_id", cid)
             .execute()
         )
@@ -157,27 +164,46 @@ def _enrich_tasks_with_eob_ids(
         traceback.print_exc()
         return rows
 
-    by_task: dict[str, str] = {}
-    by_claim: dict[str, str] = {}
+    by_task: dict[str, dict[str, Any]] = {}
+    by_claim: dict[str, dict[str, Any]] = {}
     for item in eob_resp.data or []:
         if not isinstance(item, dict):
             continue
         eob_id = str(item.get("id") or "").strip()
         if not eob_id:
             continue
+        denial_reasons = item.get("denial_reasons")
+        denial_text = ""
+        if isinstance(denial_reasons, list):
+            parts = [str(x).strip() for x in denial_reasons if str(x).strip()]
+            if parts:
+                denial_text = "; ".join(parts[:3])
+        eob_meta = {
+            "eob_extraction_id": eob_id,
+            "resubmission_prepared": bool(item.get("resubmission_prepared")),
+            "resubmission_submitted": bool(item.get("resubmission_submitted")),
+            "eob_denial_reason": denial_text or None,
+            "resubmission_claim_id": str(item.get("resubmission_claim_id") or "").strip()
+            or None,
+        }
         task_id = str(item.get("task_id") or "").strip()
         claim_id = str(item.get("claim_id") or "").strip()
         if task_id:
-            by_task[task_id] = eob_id
+            by_task[task_id] = eob_meta
         if claim_id:
-            by_claim[claim_id] = eob_id
+            by_claim[claim_id] = eob_meta
 
     enriched: list[dict[str, Any]] = []
     for row in rows:
         copy = dict(row)
         tid = str(copy.get("id") or "").strip()
         cid_claim = str(copy.get("claim_id") or "").strip()
-        copy["eob_extraction_id"] = by_task.get(tid) or by_claim.get(cid_claim)
+        meta = by_task.get(tid) or by_claim.get(cid_claim) or {}
+        copy["eob_extraction_id"] = meta.get("eob_extraction_id")
+        copy["resubmission_prepared"] = meta.get("resubmission_prepared", False)
+        copy["resubmission_submitted"] = meta.get("resubmission_submitted", False)
+        copy["eob_denial_reason"] = meta.get("eob_denial_reason")
+        copy["resubmission_claim_id"] = meta.get("resubmission_claim_id")
         enriched.append(copy)
     return enriched
 

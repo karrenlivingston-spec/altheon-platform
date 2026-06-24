@@ -117,6 +117,7 @@ def _normalize_insurance_claim(row: dict[str, Any]) -> dict[str, Any]:
         "total_paid_cents": paid,
         "created_at": row.get("created_at"),
         "updated_at": row.get("updated_at"),
+        "resubmission_of": row.get("resubmission_of"),
         "patients": row.get("patients"),
     }
 
@@ -127,13 +128,24 @@ def _claim_dos(row: dict[str, Any]) -> str:
     ]
 
 
-def _shape_claim_row(row: dict[str, Any], *, index: int) -> dict[str, Any]:
+def _shape_claim_row(
+    row: dict[str, Any],
+    *,
+    index: int,
+    claim_numbers_by_id: Optional[dict[str, str]] = None,
+    resubmission_children: Optional[dict[str, dict[str, str]]] = None,
+) -> dict[str, Any]:
     claim_number = str(row.get("claim_number") or "").strip()
     dos = str(row.get("date_of_service") or "")[:10]
     if not claim_number:
         claim_number = f"CLM-{dos.replace('-', '')}-{index + 1:03d}" if dos else f"CLM-{index + 1:03d}"
-    return {
-        "id": str(row.get("id") or ""),
+    claim_id = str(row.get("id") or "")
+    numbers = claim_numbers_by_id or {}
+    children = resubmission_children or {}
+    resubmission_of = str(row.get("resubmission_of") or "").strip() or None
+    child = children.get(claim_id) if claim_id else None
+    shaped = {
+        "id": claim_id,
         "claim_number": claim_number,
         "patient_name": _patient_name(row),
         "insurance_carrier": str(row.get("insurance_carrier") or "—").strip() or "—",
@@ -143,7 +155,12 @@ def _shape_claim_row(row: dict[str, Any], *, index: int) -> dict[str, Any]:
         "amount_remaining_cents": _remaining_cents(row),
         "status": str(row.get("status") or "draft").strip().lower(),
         "created_at": row.get("created_at"),
+        "resubmission_of": resubmission_of,
+        "resubmission_of_claim_number": numbers.get(resubmission_of or "") if resubmission_of else None,
+        "resubmission_child_id": child.get("id") if child else None,
+        "resubmission_child_claim_number": child.get("claim_number") if child else None,
     }
+    return shaped
 
 
 @router.get("/billing/dashboard")
@@ -170,6 +187,7 @@ def billing_dashboard(
             .select(
                 "id, clinic_id, patient_id, appointment_id, "
                 "payer_name, first_treatment_date, status, total_amount, "
+                "claim_number, resubmission_of, "
                 "created_at, updated_at, "
                 "patients(first_name, last_name)"
             )
@@ -332,7 +350,35 @@ def billing_dashboard(
         claims_total = len(filtered)
         start_idx = page * page_size
         page_rows = filtered[start_idx : start_idx + page_size]
-        claims = [_shape_claim_row(r, index=start_idx + i) for i, r in enumerate(page_rows)]
+
+        claim_numbers_by_id: dict[str, str] = {}
+        resubmission_children: dict[str, dict[str, str]] = {}
+        for idx, row in enumerate(all_records):
+            rid = str(row.get("id") or "").strip()
+            if not rid:
+                continue
+            num = str(row.get("claim_number") or "").strip()
+            if not num:
+                dos = _claim_dos(row)
+                num = (
+                    f"CLM-{dos.replace('-', '')}-{idx + 1:03d}"
+                    if dos
+                    else f"CLM-{idx + 1:03d}"
+                )
+            claim_numbers_by_id[rid] = num
+            parent_id = str(row.get("resubmission_of") or "").strip()
+            if parent_id:
+                resubmission_children[parent_id] = {"id": rid, "claim_number": num}
+
+        claims = [
+            _shape_claim_row(
+                r,
+                index=start_idx + i,
+                claim_numbers_by_id=claim_numbers_by_id,
+                resubmission_children=resubmission_children,
+            )
+            for i, r in enumerate(page_rows)
+        ]
 
         status_counts = {
             "all": len(
@@ -347,6 +393,7 @@ def billing_dashboard(
             "denied": 0,
             "paid": 0,
             "draft": 0,
+            "resubmitted": 0,
         }
         for r in all_records:
             dos = _claim_dos(r)
@@ -355,6 +402,8 @@ def billing_dashboard(
             st = str(r.get("status") or "draft").lower()
             if st == "submitted":
                 status_counts["submitted"] += 1
+            elif st == "resubmitted":
+                status_counts["resubmitted"] += 1
             elif st in ("partial", "pending"):
                 status_counts["pending"] += 1
             elif st == "denied":

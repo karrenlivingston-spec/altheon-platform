@@ -42,6 +42,7 @@ type ClaimsListProps = {
   onPageChange: (page: number) => void;
   onPageSizeChange: (size: number) => void;
   onView: (claim: BillingClaimRow) => void;
+  onViewClaimById?: (claimId: string) => void;
   onSuperbill: (claim: BillingClaimRow) => void;
   onSubmit?: (claim: BillingClaimRow) => void;
   submittingClaimId?: string | null;
@@ -86,6 +87,7 @@ export default function ClaimsList({
   onPageChange,
   onPageSizeChange,
   onView,
+  onViewClaimById,
   onSuperbill,
   onSubmit,
   submittingClaimId,
@@ -193,9 +195,38 @@ export default function ClaimsList({
                     {formatUsdFromCentsPrecise(claim.total_billed_cents)}
                   </td>
                   <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
-                    <span className={claimStatusBadgeClass(claim.status)}>
-                      {claimStatusLabel(claim.status)}
-                    </span>
+                    <div className="space-y-1">
+                      <span className={claimStatusBadgeClass(claim.status)}>
+                        {claimStatusLabel(claim.status)}
+                      </span>
+                      {claim.status === "resubmitted" &&
+                      claim.resubmission_child_id ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onViewClaimById
+                              ? onViewClaimById(claim.resubmission_child_id!)
+                              : onView({
+                                  ...claim,
+                                  id: claim.resubmission_child_id!,
+                                  claim_number:
+                                    claim.resubmission_child_claim_number ??
+                                    claim.claim_number,
+                                  status: "submitted",
+                                })
+                          }
+                          className="block text-xs text-teal-700 hover:underline"
+                        >
+                          View resubmission →
+                        </button>
+                      ) : null}
+                      {claim.resubmission_of &&
+                      claim.resubmission_of_claim_number ? (
+                        <p className="text-xs text-gray-500">
+                          Resubmission of {claim.resubmission_of_claim_number}
+                        </p>
+                      ) : null}
+                    </div>
                   </td>
                   <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
                     {formatSubmitted(claim.created_at)}

@@ -6,7 +6,7 @@ import { CheckCircle2, ChevronRight, Loader2 } from "lucide-react";
 
 import { useClinic } from "@/app/admin/ClinicContext";
 import { DS_CARD } from "@/app/admin/designSystem";
-import { downloadResubmissionPackage } from "@/components/admin/billing/resubmissionDownload";
+import ResubmissionTaskActions from "@/components/admin/billing/ResubmissionTaskActions";
 import {
   ClinicTaskRow,
   DashboardSummary,
@@ -49,7 +49,6 @@ async function authHeaders(json = false): Promise<Record<string, string>> {
 export default function TasksAlerts({ data, onRefresh }: TasksAlertsProps) {
   const { clinicId } = useClinic();
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
-  const [preparingTaskId, setPreparingTaskId] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
 
   const claimsNeed =
@@ -138,41 +137,14 @@ export default function TasksAlerts({ data, onRefresh }: TasksAlertsProps) {
     }
   }
 
-  async function prepareResubmission(task: ClinicTaskRow) {
-    if (
-      !clinicId ||
-      !task.patient_id ||
-      !task.claim_id ||
-      !task.eob_extraction_id
-    ) {
-      setActionError("Missing claim or EOB data for this task.");
-      return;
-    }
-    setPreparingTaskId(task.id);
-    setActionError(null);
-    try {
-      const h = await authHeaders(true);
-      await downloadResubmissionPackage({
-        clinicId,
-        patientId: task.patient_id,
-        claimId: task.claim_id,
-        eobExtractionId: task.eob_extraction_id,
-        authHeaders: h,
-      });
-      onRefresh?.();
-    } catch (e) {
-      setActionError(
-        e instanceof Error ? e.message : "Could not generate resubmission package",
-      );
-    } finally {
-      setPreparingTaskId(null);
-    }
-  }
-
   function renderClinicTask(task: ClinicTaskRow) {
     const canPrepare =
       task.task_type === "eob_resubmission" &&
       Boolean(task.claim_id && task.patient_id && task.eob_extraction_id);
+    const isCompleted =
+      task.resubmission_submitted ||
+      task.status === "completed" ||
+      Boolean(task.resubmission_claim_id);
 
     return (
       <li key={task.id} className="py-3">
@@ -188,6 +160,11 @@ export default function TasksAlerts({ data, onRefresh }: TasksAlertsProps) {
               >
                 {task.priority}
               </span>
+              {isCompleted ? (
+                <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-800">
+                  Completed
+                </span>
+              ) : null}
             </div>
             {task.description ? (
               <p className="mt-1 line-clamp-2 text-gray-600">{task.description}</p>
@@ -201,22 +178,21 @@ export default function TasksAlerts({ data, onRefresh }: TasksAlertsProps) {
                   View patient →
                 </Link>
               ) : null}
-              {canPrepare ? (
-                <button
-                  type="button"
-                  disabled={preparingTaskId === task.id}
-                  className="text-teal-700 hover:underline disabled:opacity-60"
-                  onClick={() => void prepareResubmission(task)}
-                >
-                  {preparingTaskId === task.id
-                    ? "Generating…"
-                    : "Prepare Resubmission →"}
-                </button>
-              ) : null}
+            </div>
+            {canPrepare ? (
+              <ResubmissionTaskActions
+                task={task}
+                clinicId={clinicId}
+                authHeaders={authHeaders}
+                onUpdated={onRefresh}
+                layout="stack"
+              />
+            ) : null}
+            {!isCompleted ? (
               <button
                 type="button"
                 disabled={busyTaskId === task.id}
-                className="inline-flex items-center gap-1 text-gray-700 hover:text-gray-900 disabled:opacity-60"
+                className="mt-2 inline-flex items-center gap-1 text-gray-700 hover:text-gray-900 disabled:opacity-60"
                 onClick={() => void markTaskDone(task.id)}
               >
                 {busyTaskId === task.id ? (
@@ -226,7 +202,7 @@ export default function TasksAlerts({ data, onRefresh }: TasksAlertsProps) {
                 )}
                 Mark Done
               </button>
-            </div>
+            ) : null}
           </div>
         </div>
       </li>

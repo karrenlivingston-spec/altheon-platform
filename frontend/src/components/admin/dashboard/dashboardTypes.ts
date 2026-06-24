@@ -31,6 +31,10 @@ export type ClinicTaskRow = {
   status?: string;
   created_at?: string | null;
   resubmission_generated_at?: string | null;
+  resubmission_prepared?: boolean | null;
+  resubmission_submitted?: boolean | null;
+  eob_denial_reason?: string | null;
+  resubmission_claim_id?: string | null;
 };
 
 export type DashboardSummary = {

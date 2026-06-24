@@ -14,6 +14,10 @@ export type BillingClaimRow = {
   amount_remaining_cents: number;
   status: string;
   created_at?: string | null;
+  resubmission_of?: string | null;
+  resubmission_of_claim_number?: string | null;
+  resubmission_child_id?: string | null;
+  resubmission_child_claim_number?: string | null;
 };
 
 /** Full insurance claim from GET /billing/claims/{id} */
@@ -231,6 +235,7 @@ export type BillingDashboardData = {
     denied: number;
     paid: number;
     draft: number;
+    resubmitted?: number;
   };
   recent_payments: RecentPaymentRow[];
 };
@@ -254,6 +259,7 @@ export function claimStatusLabel(status: string): string {
   const s = status.toLowerCase();
   if (s === "partial" || s === "pending") return "Pending";
   if (s === "draft") return "Draft";
+  if (s === "resubmitted") return "Resubmitted";
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
@@ -264,6 +270,7 @@ export function claimStatusBadgeClass(status: string): string {
   if (s === "partial" || s === "pending") return `${base} bg-amber-50 text-amber-700`;
   if (s === "denied") return `${base} bg-red-50 text-red-600`;
   if (s === "submitted") return `${base} bg-blue-50 text-blue-700`;
+  if (s === "resubmitted") return `${base} bg-gray-100 text-gray-600`;
   return `${base} bg-gray-100 text-gray-600`;
 }
 
