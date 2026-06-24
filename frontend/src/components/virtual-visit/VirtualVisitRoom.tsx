@@ -75,9 +75,22 @@ function visitLogError(roomId: string, message: string, detail?: unknown) {
   }
 }
 
+function isSafariBrowser(): boolean {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent;
+  return ua.includes("Safari") && !ua.includes("Chrome");
+}
+
 async function acquireUserMedia(roomId: string): Promise<MediaStream> {
+  const videoConstraint: MediaTrackConstraints = isSafariBrowser()
+    ? {
+        facingMode: "user",
+        width: { ideal: 1280 },
+        height: { ideal: 720 },
+      }
+    : { facingMode: "user" };
   const constraints: MediaStreamConstraints = {
-    video: { facingMode: "user" },
+    video: videoConstraint,
     audio: { echoCancellation: true },
   };
   try {
@@ -115,20 +128,35 @@ function applyVp8Preference(peer: InstanceType<typeof SimplePeer>, roomId: strin
   }
 }
 
-function attachStreamToVideo(
+async function attachStreamToVideo(
   el: HTMLVideoElement | null,
   stream: MediaStream,
   roomId: string,
   label: "local" | "remote",
-) {
+  onLocalPlayBlocked?: () => void,
+): Promise<void> {
   if (!el) {
     visitLogError(roomId, `${label} video element ref not ready`);
     return;
   }
   el.srcObject = stream;
-  void el.play().catch((err) => {
-    visitLogError(roomId, `${label} video play() failed`, err);
-  });
+  if (label === "local") {
+    el.muted = true;
+  }
+  try {
+    await el.play();
+  } catch (err) {
+    if (
+      label === "local" &&
+      err instanceof DOMException &&
+      err.name === "NotAllowedError"
+    ) {
+      onLocalPlayBlocked?.();
+      visitLogError(roomId, "local video play() blocked — tap required", err);
+    } else {
+      visitLogError(roomId, `${label} video play() failed`, err);
+    }
+  }
   visitLog(roomId, `${label} stream attached`, {
     streamId: stream.id,
     tracks: stream.getTracks().map((t) => `${t.kind}:${t.id}`),
@@ -173,6 +201,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
     "idle" | "recording" | "processing" | "complete" | "failed"
   >("idle");
   const [chartAppointmentId, setChartAppointmentId] = useState<string | null>(null);
+  const [localVideoTapRequired, setLocalVideoTapRequired] = useState(false);
   const [browserSupported] = useState(
     () => typeof window !== "undefined" && typeof window.RTCPeerConnection !== "undefined",
   );
@@ -191,6 +220,21 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
   const pendingSignalsRef = useRef<SimplePeer.SignalData[]>([]);
   const remoteReadyRef = useRef(false);
   const localReadyRef = useRef(false);
+
+  const onLocalPlayBlocked = useCallback(() => {
+    setLocalVideoTapRequired(true);
+  }, []);
+
+  const enableLocalVideoPlayback = useCallback(async () => {
+    const el = localVideoRef.current;
+    if (!el) return;
+    try {
+      await el.play();
+      setLocalVideoTapRequired(false);
+    } catch (err) {
+      visitLogError(roomId, "local video play() failed after tap", err);
+    }
+  }, [roomId]);
 
   const cleanupRecordingResources = useCallback(() => {
     if (mediaRecorderRef.current?.state !== "inactive") {
@@ -301,7 +345,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
   useEffect(() => {
     if (!browserSupported) {
       setLoadError(
-        "Browser not supported — please use Chrome or Firefox for your virtual visit.",
+        "Browser not supported — please use Chrome, Firefox, or Safari for your virtual visit.",
       );
       setPhase("error");
     }
@@ -309,7 +353,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
 
   useEffect(() => {
     if (pendingRemoteStreamRef.current && remoteVideoRef.current) {
-      attachStreamToVideo(
+      void attachStreamToVideo(
         remoteVideoRef.current,
         pendingRemoteStreamRef.current,
         roomId,
@@ -398,7 +442,14 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
       }
 
       localStreamRef.current = stream;
-      attachStreamToVideo(localVideoRef.current, stream, roomId, "local");
+      setLocalVideoTapRequired(false);
+      void attachStreamToVideo(
+        localVideoRef.current,
+        stream,
+        roomId,
+        "local",
+        onLocalPlayBlocked,
+      );
 
       const joinRes = await fetch(
         `${API_BASE}/visits/${encodeURIComponent(roomId)}/join`,
@@ -443,7 +494,12 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
         });
         remoteStreamRef.current = remoteStream;
         pendingRemoteStreamRef.current = remoteStream;
-        attachStreamToVideo(remoteVideoRef.current, remoteStream, roomId, "remote");
+        void attachStreamToVideo(
+          remoteVideoRef.current,
+          remoteStream,
+          roomId,
+          "remote",
+        );
         setConnectionStatus("Connected");
       };
 
@@ -628,7 +684,7 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
         role === "clinician" ? "Waiting for patient…" : "Waiting for clinician…",
       );
     },
-    [info?.started_at, roomId, clinicIdParam, getClinicianToken],
+    [info?.started_at, roomId, clinicIdParam, getClinicianToken, onLocalPlayBlocked],
   );
 
   useEffect(() => {
@@ -890,13 +946,24 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
               playsInline
               className="absolute inset-0 h-full w-full object-cover"
             />
-            <video
-              ref={localVideoRef}
-              autoPlay
-              playsInline
-              muted
-              className="absolute right-3 top-3 z-10 h-[160px] w-[120px] rounded-lg border-2 border-teal-500/50 object-cover shadow-md sm:bottom-3 sm:top-auto sm:h-28 sm:w-40"
-            />
+            <div className="absolute right-3 top-3 z-10 h-[160px] w-[120px] sm:bottom-3 sm:top-auto sm:h-28 sm:w-40">
+              <video
+                ref={localVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="h-full w-full rounded-lg border-2 border-teal-500/50 object-cover shadow-md"
+              />
+              {localVideoTapRequired ? (
+                <button
+                  type="button"
+                  className="absolute inset-0 z-20 flex items-center justify-center rounded-lg bg-black/70 px-2 text-center text-xs font-medium text-white"
+                  onClick={() => void enableLocalVideoPlayback()}
+                >
+                  Tap to enable video
+                </button>
+              ) : null}
+            </div>
           </div>
 
           {isClinician && clinicIdParam && phase === "in_call" ? (
