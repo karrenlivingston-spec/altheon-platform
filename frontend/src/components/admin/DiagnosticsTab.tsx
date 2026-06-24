@@ -454,6 +454,7 @@ export function DiagnosticsTab({
   );
   const [toast, setToast] = useState<string | null>(null);
   const [sendLinkBusy, setSendLinkBusy] = useState(false);
+  const [confirmSendLink, setConfirmSendLink] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const highlightRef = useRef<HTMLDivElement | null>(null);
@@ -719,14 +720,35 @@ export function DiagnosticsTab({
           <h2 className="text-sm font-semibold uppercase tracking-wider text-gray-900">
             Upload document
           </h2>
-          <button
-            type="button"
-            disabled={sendLinkBusy}
-            onClick={() => void sendUploadLink()}
-            className={`${DS_SECONDARY_BTN} text-sm disabled:opacity-60`}
-          >
-            {sendLinkBusy ? "Sending…" : "Send Upload Link to Patient"}
-          </button>
+          {confirmSendLink ? (
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-gray-700">Send upload link via SMS?</span>
+              <button
+                type="button"
+                disabled={sendLinkBusy}
+                onClick={() => { setConfirmSendLink(false); void sendUploadLink(); }}
+                className={`${DS_PRIMARY_BTN} text-sm disabled:opacity-60`}
+              >
+                {sendLinkBusy ? "Sending…" : "Confirm"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmSendLink(false)}
+                className={`${DS_SECONDARY_BTN} text-sm`}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              disabled={sendLinkBusy}
+              onClick={() => setConfirmSendLink(true)}
+              className={`${DS_SECONDARY_BTN} text-sm disabled:opacity-60`}
+            >
+              Send Upload Link to Patient
+            </button>
+          )}
         </div>
 
         <label className="mb-3 block text-sm font-medium text-gray-700">
