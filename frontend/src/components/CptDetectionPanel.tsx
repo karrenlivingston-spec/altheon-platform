@@ -11,6 +11,7 @@ export type CptCode = {
   cpt_code: string;
   description: string;
   charge: number;
+  units?: number;
   modifiers: string[];
   reason: string;
 };
@@ -133,6 +134,9 @@ export default function CptDetectionPanel({
                       {mod}
                     </span>
                   ))}
+                  <span className="rounded bg-teal-50 px-1.5 py-0.5 text-xs font-semibold text-teal-700 border border-teal-200">
+                    {code.units ?? 1} unit{(code.units ?? 1) !== 1 ? "s" : ""}
+                  </span>
                 </div>
                 <p className="mt-0.5 text-xs text-gray-600">{code.description}</p>
                 <p className="mt-0.5 text-xs italic text-gray-400">{code.reason}</p>
