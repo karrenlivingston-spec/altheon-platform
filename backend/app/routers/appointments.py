@@ -1259,7 +1259,7 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
 
     print(f"Looking up patient by phone: {patient_phone}")
 
-    clinic_id_for_lookup = STTPDN_CLINIC_ID
+    clinic_id_for_lookup = (payload.clinic_id or STTPDN_CLINIC_ID).strip()
     try:
         all_patients = (
             supabase.table("patients")
@@ -1607,37 +1607,25 @@ def create_appointment(
                 detail="patient_phone is required when patient_id is not provided",
             )
         try:
-            patient_lookup = (
-                supabase.table("patients")
-                .select("id, phone")
-                .eq("phone", phone)
-                .limit(1)
+            # Clinic-scoped phone lookup via patient_clinic_access
+            access_resp = (
+                supabase.table("patient_clinic_access")
+                .select("patient_id, patients(id, phone)")
+                .eq("clinic_id", clinic_id)
                 .execute()
             )
-            _handle_supabase_error(patient_lookup)
+            _handle_supabase_error(access_resp)
+            patient_data = [
+                row["patients"]
+                for row in (access_resp.data or [])
+                if row.get("patients")
+                and re.sub(r"\D", "", str(row["patients"].get("phone") or "")) == phone
+            ][:1]
         except HTTPException:
             raise
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-        patient_data = patient_lookup.data or []
-        if not patient_data:
-            try:
-                all_patients_resp = (
-                    supabase.table("patients")
-                    .select("id, phone")
-                    .execute()
-                )
-                _handle_supabase_error(all_patients_resp)
-                patient_data = [
-                    row
-                    for row in (all_patients_resp.data or [])
-                    if re.sub(r"\D", "", str(row.get("phone") or "")) == phone
-                ][:1]
-            except HTTPException:
-                raise
-            except Exception as exc:
-                raise HTTPException(status_code=500, detail=str(exc)) from exc
         if patient_data:
             patient_id = str(patient_data[0]["id"])
             stored_phone = str(patient_data[0].get("phone") or "")
@@ -1678,7 +1666,6 @@ def create_appointment(
                 raise
             except Exception as exc:
                 raise HTTPException(status_code=500, detail=str(exc)) from exc
-
             inserted_patients = patient_insert.data or []
             if not inserted_patients:
                 raise HTTPException(status_code=500, detail="Failed to create patient")
