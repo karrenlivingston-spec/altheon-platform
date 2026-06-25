@@ -21,13 +21,13 @@ from app.retry_utils import supabase_execute
 from app.services.waitlist import run_waitlist_notify_for_freed_slot
 from app.sms import send_sms
 
-router = APIRouter(dependencies=[Depends(require_role(*ALL_ROLES))])
+router = APIRouter()
 logger = logging.getLogger(__name__)
 # SQL migration (run manually):
 # ALTER TABLE appointments ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'aria';
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_role(*ALL_ROLES))])
 def list_appointments(clinic_id: str = Query(...)):
     """Return all appointments for a clinic with patient names and treatment type name."""
     try:
@@ -108,7 +108,7 @@ def _assert_user_has_clinic_access(user_id: str, clinic_id: str) -> None:
     assert_clinic_role(user_id, clinic_id, ALL_ROLES)
 
 
-@router.get("/patient-flow")
+@router.get("/patient-flow", dependencies=[Depends(require_role(*ALL_ROLES))])
 def get_patient_flow(
     clinic_id: str = Query(...),
     date_ymd: Optional[str] = Query(default=None, alias="date"),
@@ -317,7 +317,7 @@ def _format_calendar_appt_row(
     }
 
 
-@router.get("/calendar")
+@router.get("/calendar", dependencies=[Depends(require_role(*ALL_ROLES))])
 def get_appointments_calendar(
     start_date: str = Query(...),
     end_date: str = Query(...),
@@ -451,7 +451,7 @@ def _duration_minutes_from_appt_row(row: dict[str, Any]) -> int:
         return 30
 
 
-@router.get("/{appointment_id}")
+@router.get("/{appointment_id}", dependencies=[Depends(require_role(*ALL_ROLES))])
 def get_appointment(
     appointment_id: str,
     clinic_id: str = Query(...),
@@ -524,7 +524,7 @@ def _maybe_notify_waitlist_for_freed_slot(
     )
 
 
-@router.patch("/{appointment_id}/time")
+@router.patch("/{appointment_id}/time", dependencies=[Depends(require_role(*ALL_ROLES))])
 def update_appointment_time(
     appointment_id: str,
     body: AppointmentTimePatchBody,
@@ -654,7 +654,7 @@ def update_appointment_time(
     return _format_calendar_appt_row(r0, first_map, clinic_tz)
 
 
-@router.post("/swap")
+@router.post("/swap", dependencies=[Depends(require_role(*ALL_ROLES))])
 def swap_appointment_times(
     body: AppointmentSwapBody,
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
@@ -821,7 +821,7 @@ def _maybe_decrement_patient_package(patient_id: str, clinic_id: str) -> None:
         raise RuntimeError(getattr(upd_err, "message", None) or str(upd_err))
 
 
-@router.patch("/{appointment_id}/status")
+@router.patch("/{appointment_id}/status", dependencies=[Depends(require_role(*ALL_ROLES))])
 def update_appointment_status(
     appointment_id: str,
     body: AppointmentStatusPatchBody,
@@ -1250,7 +1250,7 @@ def _clinician_name_from_row(row: dict[str, Any]) -> str:
     return f"{fn} {ln}".strip() or "Unknown"
 
 
-@router.post("/reschedule")
+@router.post("/reschedule", dependencies=[Depends(require_role(*ALL_ROLES))])
 def reschedule_appointment(payload: RescheduleAppointmentRequest):
     """Cancel the patient's next upcoming visit and book a new one; clinician, treatment, and location carry over."""
     patient_phone = re.sub(r"\D", "", (payload.patient_phone or "").strip())
@@ -1541,7 +1541,7 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
     }
 
 
-@router.patch("/{appointment_id}/virtual")
+@router.patch("/{appointment_id}/virtual", dependencies=[Depends(require_role(*ALL_ROLES))])
 def patch_appointment_virtual(
     appointment_id: str,
     body: PatchAppointmentVirtualRequest,
