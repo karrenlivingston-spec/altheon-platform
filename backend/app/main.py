@@ -312,49 +312,19 @@ def patient_lookup(phone: str, clinic_id: str):
     try:
         normalized_phone = re.sub(r"\D", "", phone)
 
-        patient_resp = (
-            supabase.table("patients")
-            .select("id, first_name, last_name, phone, preferred_language")
-            .execute()
-        )
-        patients = patient_resp.data or []
-        patient = next(
-            (
-                row
-                for row in patients
-                if re.sub(r"\D", "", str(row.get("phone") or "")) == normalized_phone
-            ),
-            None,
-        )
-        if not patient:
-            try:
-                secondary_resp = (
-                    supabase.table("patients")
-                    .select("id, first_name, last_name, phone, preferred_language")
-                    .eq("phone", normalized_phone)
-                    .eq("clinic_id", clinic_id)
-                    .limit(1)
-                    .execute()
-                )
-                secondary_rows = secondary_resp.data or []
-                if secondary_rows:
-                    patient = secondary_rows[0]
-            except Exception:
-                pass
-        if not patient:
+        try:
+            rpc_resp = supabase.rpc(
+                "find_patient_by_clinic_phone",
+                {"p_clinic_id": clinic_id, "p_phone": normalized_phone}
+            ).execute()
+            rpc_rows = rpc_resp.data or []
+        except Exception:
+            rpc_rows = []
+
+        if not rpc_rows:
             return {"found": False}
 
-        access_resp = (
-            supabase.table("patient_clinic_access")
-            .select("patient_id")
-            .eq("patient_id", patient["id"])
-            .eq("clinic_id", clinic_id)
-            .limit(1)
-            .execute()
-        )
-        access_rows = access_resp.data or []
-        if not access_rows:
-            return {"found": False}
+        patient = rpc_rows[0]
 
         stored_phone = str(patient.get("phone") or "")
         normalized_stored = re.sub(r"\D", "", stored_phone)
