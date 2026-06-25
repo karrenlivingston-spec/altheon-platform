@@ -1587,7 +1587,7 @@ def patch_appointment_virtual(
     return {"id": appointment_id, "is_virtual": bool(body.is_virtual)}
 
 
-@router.post("")
+@router.post("", dependencies=[])
 def create_appointment(
     payload: CreateAppointmentRequest,
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
