@@ -24,6 +24,8 @@ Your job is to read a clinical SOAP note and match the treatments described to C
 Rules:
 - Only return CPT codes that are present in the provided fee schedule
 - Match based on treatment descriptions, procedures, and interventions mentioned in the note
+- IMPORTANT: Look for unit quantities explicitly documented in the note (e.g. "2 units therapeutic exercise", "1 unit manual therapy", "x2", "x 2", "2 units of", "performed for 30 minutes" = 2 units at 15 min each). Capture the correct unit count for each service.
+- If no unit count is explicitly documented, default to 1 unit
 - If multiple services are billed in the same visit, suggest appropriate modifiers (59, 25, XS, XU) when applicable
 - Return ONLY valid JSON, no explanation text, no markdown
 
@@ -33,8 +35,9 @@ Return a JSON array like this:
     "cpt_code": "97110",
     "description": "Therapeutic Exercise",
     "charge": 85.00,
+    "units": 2,
     "modifiers": ["GP"],
-    "reason": "Patient performed therapeutic exercises for strengthening"
+    "reason": "Patient performed 2 units of therapeutic exercise for strengthening"
   }
 ]
 
@@ -209,6 +212,9 @@ def detect_cpt_codes(
                 continue
             if allowed_codes and code not in allowed_codes:
                 continue
+            # Ensure units field is present, default to 1
+            if "units" not in item or not isinstance(item.get("units"), int) or item["units"] < 1:
+                item["units"] = 1
             filtered.append(item)
 
         upd = (
