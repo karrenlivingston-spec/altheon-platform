@@ -1607,22 +1607,11 @@ def create_appointment(
                 detail="patient_phone is required when patient_id is not provided",
             )
         try:
-            # Clinic-scoped phone lookup via patient_clinic_access
-            access_resp = (
-                supabase.table("patient_clinic_access")
-                .select("patient_id, patients(id, phone)")
-                .eq("clinic_id", clinic_id)
-                .execute()
-            )
-            _handle_supabase_error(access_resp)
-            patient_data = [
-                row["patients"]
-                for row in (access_resp.data or [])
-                if row.get("patients")
-                and re.sub(r"\D", "", str(row["patients"].get("phone") or "")) == phone
-            ][:1]
-        except HTTPException:
-            raise
+            rpc_resp = supabase.rpc(
+                "find_patient_by_clinic_phone",
+                {"p_clinic_id": clinic_id, "p_phone": phone}
+            ).execute()
+            patient_data = rpc_resp.data or []
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
