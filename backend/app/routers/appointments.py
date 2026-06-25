@@ -1595,8 +1595,9 @@ def create_appointment(
     clinic_id = (payload.clinic_id or "").strip()
     if not clinic_id:
         raise HTTPException(status_code=400, detail="clinic_id is required")
-    enforce_clinic_role_from_auth_header(authorization, clinic_id, *ALL_ROLES)
     source = (payload.source or "ai").strip().lower() or "ai"
+    if (authorization or "").strip() or source != "ai":
+        enforce_clinic_role_from_auth_header(authorization, clinic_id, *ALL_ROLES)
     patient_id = (payload.patient_id or "").strip()
     if not patient_id:
         phone = re.sub(r"\D", "", (payload.patient_phone or "").strip())
@@ -1667,7 +1668,7 @@ def create_appointment(
                             "last_name": last_name,
                             "phone": phone,
                             "email": payload.patient_email,
-                            "clinic_id": STTPDN_CLINIC_ID,
+                            "clinic_id": payload.clinic_id,
                         }
                     )
                     .execute()
