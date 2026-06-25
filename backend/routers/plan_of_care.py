@@ -95,6 +95,8 @@ class PlanOfCareRequest(BaseModel):
     diagnosis_code: str = ""
     diagnosis_description: str = ""
     clinician_signature: str = ""
+    pt_license: str = ""
+    referring_physician: str = ""
 
 
 class PocAISuggestBody(BaseModel):
@@ -310,64 +312,96 @@ def _build_poc_pdf(
     builder = PocPdfBuilder()
     builder.title("PLAN OF CARE")
 
+    # Clinic + referring physician header
     clinic_name = str(clinic.get("name") or "Clinic").strip()
     clinic_address = str(clinic.get("address") or "").strip()
     clinic_phone = str(clinic.get("phone") or "").strip()
-    builder.two_col_row(f"Clinic: {clinic_name}", f"Date: {today}")
+    builder.two_col_row(f"Clinic: {clinic_name}", f"Date of Care: {start_date}")
     if clinic_address:
         builder.field_line("Address", clinic_address)
     if clinic_phone:
         builder.field_line("Phone", clinic_phone)
+    ref_phys = body.referring_physician.strip()
+    builder.field_line("Referring Physician/NPP", ref_phys if ref_phys else "___________________________")
     builder.y += 6
 
+    # Patient info
     builder.section_header("Patient Information")
     builder.two_col_row(
         f"Name: {first} {last}".strip(),
         f"DOB: {_fmt_date(patient.get('date_of_birth'))}",
     )
     builder.two_col_row(
+        f"Date of Original Eval: {start_date}",
+        f"Projected End of Plan: {end_date}",
+    )
+    builder.two_col_row(
         f"Insurance: {str(patient.get('insurance_carrier') or '—')}",
         f"Policy #: {str(patient.get('insurance_policy_number') or '—')}",
     )
 
+    # Diagnosis
     builder.section_header("Diagnosis")
     dx_code = body.diagnosis_code.strip() or "—"
     dx_desc = body.diagnosis_description.strip() or "—"
     builder.field_line("ICD-10", f"{dx_code} — {dx_desc}")
 
-    builder.section_header("Plan of Care")
-    builder.field_line("Frequency", body.frequency.strip() or "—")
-    builder.field_line("Duration", f"{body.duration_weeks} weeks")
-    builder.field_line("Start Date", start_date)
-    builder.field_line("Projected End Date", end_date)
-    body_region = str(note.get("body_region") or "").strip()
-    if body_region:
-        builder.field_line("Body Region", body_region)
+    # Assessment from SOAP note
+    builder.section_header("Assessment/Clinical Findings")
+    assessment_text = str(note.get("assessment") or "").strip()
+    subjective_text = str(note.get("subjective") or "").strip()
+    full_assessment = "\n\n".join(filter(None, [subjective_text, assessment_text]))
+    builder.labeled_block("", full_assessment or "—")
 
-    builder.section_header("Procedures/Interventions")
-    if procedures:
-        builder.bullet_list(procedures)
-    else:
-        builder.field_line("", "—")
-
+    # Goals
     builder.section_header("Short-Term Goals (2 weeks)")
     builder.labeled_block("", body.short_term_goals.strip() or "—")
 
     builder.section_header(f"Long-Term Goals ({body.duration_weeks} weeks)")
     builder.labeled_block("", body.long_term_goals.strip() or "—")
 
+    # Plan
+    builder.section_header("Plan of Care")
+    builder.field_line("Frequency", body.frequency.strip() or "—")
+    builder.field_line("Duration", f"{body.duration_weeks} weeks")
+    builder.field_line("Start Date", start_date)
+    builder.field_line("Projected End Date", end_date)
+
+    # Procedures/Modalities
+    builder.section_header("Procedures / Modalities")
+    if procedures:
+        builder.bullet_list(procedures)
+    else:
+        builder.field_line("", "—")
+
+    # Medical necessity
     builder.section_header("Medical Necessity")
     builder.labeled_block("", str(note.get("plan") or "").strip() or "—")
 
+    # Certification statement
+    builder.section_header("Certification of Medical Necessity")
+    cert_text = (
+        "It is be understood that the treatment plan mentioned above is certified medically necessary "
+        "by the documenting therapist and referring physician/NPP mentioned in this report. Unless the referring "
+        "physician/NPP indicated otherwise, services will be furnished while the patient is under my care. "
+        "Thank you for this referral."
+    )
+    builder.labeled_block("", cert_text)
+    builder.y += 8
+
+    # Signatures
     builder.signature_line(
-        "PHYSICIAN/THERAPIST SIGNATURE",
+        "REFERRING PHYSICIAN / NPP SIGNATURE",
+        body.referring_physician.strip(),
+        "Date: _______________",
+    )
+    pt_sig_label = "PHYSICAL THERAPIST SIGNATURE"
+    if body.pt_license.strip():
+        pt_sig_label += f"  |  License #: {body.pt_license.strip()}"
+    builder.signature_line(
+        pt_sig_label,
         body.clinician_signature.strip(),
         f"Date: {today}",
-    )
-    builder.signature_line(
-        "REFERRING PROVIDER SIGNATURE (if required)",
-        "",
-        "Date: _______________",
     )
 
     return builder.finish()

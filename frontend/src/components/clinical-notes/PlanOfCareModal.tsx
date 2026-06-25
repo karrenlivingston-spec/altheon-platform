@@ -117,6 +117,8 @@ export default function PlanOfCareModal({
   const [clinicianSignature, setClinicianSignature] = useState(
     (note.author_name ?? "").trim(),
   );
+  const [ptLicense, setPtLicense] = useState("");
+  const [referringPhysician, setReferringPhysician] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [aiSuggestBusy, setAiSuggestBusy] = useState(false);
@@ -235,6 +237,8 @@ export default function PlanOfCareModal({
             diagnosis_code: diagnosisCode.trim(),
             diagnosis_description: diagnosisDescription.trim(),
             clinician_signature: clinicianSignature.trim(),
+            pt_license: ptLicense.trim(),
+            referring_physician: referringPhysician.trim(),
           }),
         },
       );
@@ -495,6 +499,30 @@ export default function PlanOfCareModal({
             value={clinicianSignature}
             onChange={(e) => setClinicianSignature(e.target.value)}
             placeholder="Dr. Jane Smith, DPT"
+            className={DS_INPUT}
+          />
+        </div>
+        <div className="mt-4">
+          <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
+            PT License #
+          </label>
+          <input
+            type="text"
+            value={ptLicense}
+            onChange={(e) => setPtLicense(e.target.value)}
+            placeholder="e.g. PT12345"
+            className={DS_INPUT}
+          />
+        </div>
+        <div className="mt-4">
+          <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
+            Referring Physician
+          </label>
+          <input
+            type="text"
+            value={referringPhysician}
+            onChange={(e) => setReferringPhysician(e.target.value)}
+            placeholder="e.g. M. Papa, DC"
             className={DS_INPUT}
           />
         </div>
