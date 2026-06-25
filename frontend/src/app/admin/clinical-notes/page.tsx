@@ -1638,7 +1638,7 @@ export default function AdminClinicalNotesPage() {
                             planText: draftPlan,
                           });
                           setPocNote({
-                            id: editingId,
+                            id: editingId ?? "",
                             patient_id: draftPatientId,
                             note_type: draftNoteType,
                             author_name: null,
