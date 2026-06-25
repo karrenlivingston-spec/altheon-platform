@@ -1603,7 +1603,17 @@ export default function AdminClinicalNotesPage() {
                         : optimizerVisitType
                     }
                     onCodesSelected={(codes) => {
-                      setDraftCptCodes(payerCodesToCptCodes(codes));
+                      const incoming = payerCodesToCptCodes(codes);
+                      setDraftCptCodes((prev) => {
+                        const existing = prev ?? [];
+                        const merged = [...existing];
+                        for (const code of incoming) {
+                          if (!merged.find((c) => c.cpt_code === code.cpt_code)) {
+                            merged.push(code);
+                          }
+                        }
+                        return merged;
+                      });
                     }}
                   />
                   <CptDetectionPanel
@@ -1617,7 +1627,6 @@ export default function AdminClinicalNotesPage() {
                       Plan of Care
                     </h3>
                     {draftNoteType.toLowerCase().includes("evaluation") &&
-                    editingId &&
                     draftPatientId ? (
                       <button
                         type="button"
