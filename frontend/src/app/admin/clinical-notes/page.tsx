@@ -21,6 +21,10 @@ import {
   type SoapFromScribe,
 } from "@/components/clinical-notes/AmbientScribe";
 import {
+  BodyRegionSelector,
+  normalizeBodyRegion,
+} from "@/components/clinical-notes/BodyRegionSelector";
+import {
   MeasurementModule,
   type ExtractedMeasurements,
   type MeasurementModuleHandle,
@@ -383,7 +387,7 @@ export default function AdminClinicalNotesPage() {
       setDraftAssessment(soap.assessment);
       setDraftPlan(soap.plan);
       if (soap.body_region) {
-        setDraftBodyRegion(soap.body_region.trim().toLowerCase());
+        setDraftBodyRegion(normalizeBodyRegion(soap.body_region));
       }
       setSessionTranscript(soap.transcript);
       setScribeBannerVisible(true);
@@ -813,7 +817,7 @@ export default function AdminClinicalNotesPage() {
       setDraftAppointmentId((row.appointment_id ?? "").trim());
       setDraftAssessment(row.assessment ?? "");
       setDraftPlan(row.plan ?? "");
-      setDraftBodyRegion((row.body_region ?? "").trim().toLowerCase());
+      setDraftBodyRegion(normalizeBodyRegion(row.body_region));
       setDraftCptCodes(
         Array.isArray(row.cpt_codes_detected)
           ? (row.cpt_codes_detected as CptCode[])
@@ -1584,6 +1588,10 @@ export default function AdminClinicalNotesPage() {
                       ))}
                     </select>
                   </label>
+                  <BodyRegionSelector
+                    value={draftBodyRegion}
+                    onChange={setDraftBodyRegion}
+                  />
                   <label className="block text-sm font-medium text-gray-700">
                     Supervising PT (UUID)
                     <input
