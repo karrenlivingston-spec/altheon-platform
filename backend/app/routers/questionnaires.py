@@ -7,10 +7,11 @@ import os
 import secrets
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.dependencies.permissions import ALL_ROLES, enforce_clinic_role_from_auth_header
 from app.sms import send_sms
 
 router = APIRouter(prefix="/questionnaires", tags=["Questionnaires"])
@@ -313,6 +314,56 @@ def get_questionnaire_token_info(token: str = Query(default="")):
             "clinic_name": "",
             "questionnaire_type": "",
         }
+
+
+@router.get("/results")
+def get_questionnaire_results(
+    appointment_id: str = Query(..., min_length=1),
+    clinic_id: str = Query(..., min_length=1),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    try:
+        cid = clinic_id.strip()
+        aid = appointment_id.strip()
+        enforce_clinic_role_from_auth_header(authorization, cid, *ALL_ROLES)
+
+        resp = (
+            supabase.table("questionnaire_responses")
+            .select(
+                "questionnaire_type, body_region, total_score, "
+                "score_percentage, responses, submitted_at"
+            )
+            .eq("appointment_id", aid)
+            .eq("clinic_id", cid)
+            .order("submitted_at", desc=True)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+        rows = resp.data or []
+        out: list[dict[str, Any]] = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            out.append(
+                {
+                    "questionnaire_type": row.get("questionnaire_type"),
+                    "body_region": row.get("body_region"),
+                    "total_score": row.get("total_score"),
+                    "score_percentage": row.get("score_percentage"),
+                    "responses": row.get("responses") or {},
+                    "submitted_at": row.get("submitted_at"),
+                }
+            )
+        return out
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception(
+            "get_questionnaire_results failed appointment_id=%s clinic_id=%s",
+            appointment_id,
+            clinic_id,
+        )
+        return []
 
 
 @router.post("/submit")

@@ -22,7 +22,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { Printer } from "lucide-react";
+import { ChevronDown, Loader2, Printer } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import AppointmentPopup, {
@@ -155,6 +155,80 @@ type IntakeSummary = {
   goals?: string | null;
   created_at?: string | null;
 };
+
+type QuestionnaireResultRow = {
+  questionnaire_type: string;
+  body_region: string;
+  total_score: number | null;
+  score_percentage: number | null;
+  responses: Record<string, unknown>;
+  submitted_at: string | null;
+};
+
+function questionnaireDisplayName(type: string): string {
+  switch ((type || "").toLowerCase()) {
+    case "oswestry":
+      return "Modified Oswestry Low Back Pain Questionnaire";
+    case "ndi":
+      return "Neck Disability Index (NDI)";
+    case "lefs":
+      return "Lower Extremity Functional Scale (LEFS)";
+    case "quickdash":
+      return "QuickDASH";
+    default:
+      return type;
+  }
+}
+
+function questionnaireInterpretation(
+  type: string,
+  totalScore: number | null,
+  scorePct: number | null,
+): string {
+  const t = (type || "").toLowerCase();
+  if (t === "lefs") {
+    const s = totalScore ?? 0;
+    if (s <= 20) return "severe";
+    if (s <= 40) return "moderate";
+    if (s <= 60) return "mild";
+    return "minimal";
+  }
+  if (t === "quickdash") {
+    const p = scorePct ?? 0;
+    if (p <= 20) return "minimal";
+    if (p <= 40) return "mild";
+    if (p <= 60) return "moderate";
+    if (p <= 80) return "severe";
+    return "complete disability";
+  }
+  if (t === "ndi") {
+    const p = scorePct ?? 0;
+    if (p <= 8) return "no disability";
+    if (p <= 28) return "mild disability";
+    if (p <= 48) return "moderate disability";
+    if (p <= 64) return "severe disability";
+    return "complete disability";
+  }
+  const p = scorePct ?? 0;
+  if (p <= 20) return "minimal";
+  if (p <= 40) return "moderate";
+  if (p <= 60) return "severe";
+  if (p <= 80) return "crippling";
+  return "bed-bound";
+}
+
+function formatQuestionnaireScore(row: QuestionnaireResultRow): string {
+  const t = (row.questionnaire_type || "").toLowerCase();
+  if (t === "lefs") {
+    return `${row.total_score ?? "—"} / 80`;
+  }
+  if (t === "quickdash") {
+    return row.score_percentage != null ? `${row.score_percentage}` : "—";
+  }
+  return row.total_score != null
+    ? `${row.total_score}${row.score_percentage != null ? ` (${row.score_percentage}%)` : ""}`
+    : "—";
+}
 
 function pad2(n: number) {
   return String(n).padStart(2, "0");
@@ -543,6 +617,13 @@ export default function CalendarView({
   const [detailIntake, setDetailIntake] = useState<IntakeSummary | null>(null);
   const [detailIntakeLoading, setDetailIntakeLoading] = useState(false);
   const [detailIntakeError, setDetailIntakeError] = useState<string | null>(null);
+  const [intakeSummaryExpanded, setIntakeSummaryExpanded] = useState(false);
+  const [questionnaireExpanded, setQuestionnaireExpanded] = useState(false);
+  const [questionnaireResults, setQuestionnaireResults] = useState<
+    QuestionnaireResultRow[] | null
+  >(null);
+  const [questionnaireLoading, setQuestionnaireLoading] = useState(false);
+  const [questionnaireError, setQuestionnaireError] = useState<string | null>(null);
 
   const [todayYmd, setTodayYmd] = useState(() => getEasternYMD(new Date()));
 
@@ -1195,6 +1276,51 @@ export default function CalendarView({
     };
   }, [detailAppt?.id]);
 
+  useEffect(() => {
+    setIntakeSummaryExpanded(false);
+    setQuestionnaireExpanded(false);
+    setQuestionnaireResults(null);
+    setQuestionnaireLoading(false);
+    setQuestionnaireError(null);
+  }, [detailAppt?.id]);
+
+  useEffect(() => {
+    if (!questionnaireExpanded || !detailAppt?.id) return;
+    let cancelled = false;
+    void (async () => {
+      setQuestionnaireLoading(true);
+      setQuestionnaireError(null);
+      try {
+        const h = await authHeaders();
+        const params = new URLSearchParams({
+          appointment_id: detailAppt.id,
+          clinic_id: clinicId,
+        });
+        const res = await fetch(
+          `${API_BASE}/questionnaires/results?${params.toString()}`,
+          { headers: h },
+        );
+        const data = (await res.json().catch(() => [])) as QuestionnaireResultRow[];
+        if (cancelled) return;
+        if (!res.ok) {
+          throw new Error("Could not load questionnaire results");
+        }
+        setQuestionnaireResults(Array.isArray(data) ? data : []);
+      } catch (e) {
+        if (cancelled) return;
+        setQuestionnaireResults([]);
+        setQuestionnaireError(
+          e instanceof Error ? e.message : "Could not load questionnaire results",
+        );
+      } finally {
+        if (!cancelled) setQuestionnaireLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [questionnaireExpanded, detailAppt?.id, clinicId]);
+
   return (
     <div className={hideToolbar ? "space-y-2" : "space-y-4"}>
       {!hideToolbar ? (
@@ -1608,20 +1734,39 @@ export default function CalendarView({
                 </div>
               ) : (
                 <section className="mt-4 rounded-lg border border-slate-200 bg-white">
-                  <header className="flex items-center justify-between gap-3 border-l-4 border-[#16A34A] bg-slate-50 px-4 py-3">
-                    <h3 className="intake-print-doc-title text-sm font-semibold text-slate-900">
-                      Pre-Visit Intake Summary
-                    </h3>
+                  <header className="border-l-4 border-[#16A34A] bg-slate-50">
                     <button
                       type="button"
-                      className="intake-print-toolbar-btn inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#16A34A] px-2.5 py-1 text-xs font-medium text-[#16A34A] hover:bg-green-50"
-                      onClick={() => injectIntakePrintStylesAndPrint("intake-print-area")}
+                      className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                      onClick={() => setIntakeSummaryExpanded((v) => !v)}
+                      aria-expanded={intakeSummaryExpanded}
                     >
-                      <Printer className="size-3.5" aria-hidden />
-                      Download PDF
+                      <h3 className="intake-print-doc-title text-sm font-semibold text-slate-900">
+                        Pre-Visit Intake Summary
+                      </h3>
+                      <ChevronDown
+                        className={`size-4 shrink-0 text-slate-500 transition-transform ${
+                          intakeSummaryExpanded ? "rotate-180" : ""
+                        }`}
+                        aria-hidden
+                      />
                     </button>
                   </header>
-                  <div className="space-y-3 px-4 py-4">
+                  {intakeSummaryExpanded ? (
+                    <>
+                      <div className="flex justify-end border-b border-slate-100 px-4 py-2">
+                        <button
+                          type="button"
+                          className="intake-print-toolbar-btn inline-flex shrink-0 items-center gap-1.5 rounded-md border border-[#16A34A] px-2.5 py-1 text-xs font-medium text-[#16A34A] hover:bg-green-50"
+                          onClick={() =>
+                            injectIntakePrintStylesAndPrint("intake-print-area")
+                          }
+                        >
+                          <Printer className="size-3.5" aria-hidden />
+                          Download PDF
+                        </button>
+                      </div>
+                      <div className="space-y-3 px-4 py-4">
                     <div className="intake-print-field-row">
                       <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-slate-500">
                         Chief Complaint
@@ -1713,20 +1858,109 @@ export default function CalendarView({
                         {detailIntake.goals?.trim() || "Not provided"}
                       </p>
                     </div>
-                  </div>
-                  <footer className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
-                    {(() => {
-                      const submitted = safeDate(detailIntake.created_at);
-                      if (!submitted) return "Submitted —";
-                      return `Submitted ${submitted.toLocaleDateString("en-US", {
-                        month: "short",
-                        day: "numeric",
-                        year: "numeric",
-                      })}`;
-                    })()}
-                  </footer>
+                      </div>
+                      <footer className="border-t border-slate-100 px-4 py-2 text-xs text-slate-500">
+                        {(() => {
+                          const submitted = safeDate(detailIntake.created_at);
+                          if (!submitted) return "Submitted —";
+                          return `Submitted ${submitted.toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                          })}`;
+                        })()}
+                      </footer>
+                    </>
+                  ) : null}
                 </section>
               )}
+              <section className="mt-4 rounded-lg border border-slate-200 bg-white">
+                <header className="border-l-4 border-[#16A34A] bg-slate-50">
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                    onClick={() => setQuestionnaireExpanded((v) => !v)}
+                    aria-expanded={questionnaireExpanded}
+                  >
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      Questionnaire Results
+                    </h3>
+                    <ChevronDown
+                      className={`size-4 shrink-0 text-slate-500 transition-transform ${
+                        questionnaireExpanded ? "rotate-180" : ""
+                      }`}
+                      aria-hidden
+                    />
+                  </button>
+                </header>
+                {questionnaireExpanded ? (
+                  <div className="space-y-3 px-4 py-4">
+                    {questionnaireLoading ? (
+                      <div className="flex items-center justify-center gap-2 py-6 text-sm text-slate-500">
+                        <Loader2 className="size-4 animate-spin" aria-hidden />
+                        Loading questionnaire results…
+                      </div>
+                    ) : questionnaireError ? (
+                      <p className="text-sm text-amber-800">{questionnaireError}</p>
+                    ) : !questionnaireResults?.length ? (
+                      <p className="text-sm text-slate-500">
+                        No questionnaire completed yet
+                      </p>
+                    ) : (
+                      questionnaireResults.map((row, idx) => (
+                        <div
+                          key={`${row.questionnaire_type}-${row.submitted_at ?? idx}`}
+                          className={idx > 0 ? "border-t border-slate-100 pt-3" : undefined}
+                        >
+                          <div className="intake-print-field-row">
+                            <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-slate-500">
+                              Questionnaire
+                            </p>
+                            <p className="intake-print-field-value mt-1 text-sm font-semibold text-slate-900">
+                              {questionnaireDisplayName(row.questionnaire_type)}
+                            </p>
+                          </div>
+                          <div className="intake-print-field-row">
+                            <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-slate-500">
+                              Score
+                            </p>
+                            <p className="intake-print-field-value mt-1 text-sm text-slate-900">
+                              {formatQuestionnaireScore(row)}
+                            </p>
+                          </div>
+                          <div className="intake-print-field-row">
+                            <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-slate-500">
+                              Interpretation
+                            </p>
+                            <p className="intake-print-field-value mt-1 text-sm text-slate-900">
+                              {questionnaireInterpretation(
+                                row.questionnaire_type,
+                                row.total_score,
+                                row.score_percentage,
+                              )}
+                            </p>
+                          </div>
+                          <div className="intake-print-field-row">
+                            <p className="intake-print-field-label text-xs font-medium uppercase tracking-wide text-slate-500">
+                              Responses
+                            </p>
+                            <div className="intake-print-field-value mt-1 space-y-1">
+                              {Object.entries(row.responses || {}).map(([key, val]) => (
+                                <p key={key} className="text-sm text-slate-900">
+                                  <span className="font-medium text-slate-600">
+                                    {key}:
+                                  </span>{" "}
+                                  {String(val)}
+                                </p>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                ) : null}
+              </section>
               {intakePrintReady ? (
                 <div className="intake-print-print-only intake-print-confidential-footer hidden text-center text-xs text-slate-600">
                   Confidential — Clinical Use Only
