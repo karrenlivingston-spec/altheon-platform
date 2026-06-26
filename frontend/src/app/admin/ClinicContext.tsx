@@ -91,10 +91,18 @@ export function ClinicProvider({
         if (!data.clinic || !data.clinic.id) {
           throw new Error("No clinic returned from /me");
         }
+        const allClinics = Array.isArray(data.all_clinics) ? data.all_clinics : [];
+        const clinics = allClinics.length > 0 ? allClinics : [data.clinic];
+        const savedClinicId = localStorage.getItem("altheon_selected_clinic_id");
+        let clinic = data.clinic;
+        if (savedClinicId && clinics.some((c) => c.id === savedClinicId)) {
+          clinic = clinics.find((c) => c.id === savedClinicId) ?? data.clinic;
+        }
         setMe({
           ...data,
+          clinic,
           role: (data.role ?? "").trim() || "member",
-          all_clinics: Array.isArray(data.all_clinics) ? data.all_clinics : [],
+          all_clinics: allClinics,
         });
       } catch (err) {
         if (cancelled) return;
@@ -137,6 +145,7 @@ export function ClinicProvider({
         if (!prev || prev.role !== "super_admin") return prev;
         const target = (prev.all_clinics ?? []).find((c) => c.id === id);
         if (!target) return prev;
+        localStorage.setItem("altheon_selected_clinic_id", id);
         return { ...prev, clinic: target };
       });
     },
