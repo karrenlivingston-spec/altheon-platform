@@ -37,7 +37,6 @@ import DuplicatePhoneWarning from "@/components/admin/patients/DuplicatePhoneWar
 import CalendarGroupSessionCard, {
   type CalendarGroupSession,
 } from "@/components/scheduling/CalendarGroupSessionCard";
-import { MeasurementModule } from "@/components/clinical-notes/MeasurementModule";
 import VirtualVisitButton from "@/components/virtual-visit/VirtualVisitButton";
 
 import {
@@ -1662,16 +1661,21 @@ export default function CalendarView({
               ) : null}
             </div>
             <section className="mt-4 border-t border-slate-100 pt-4">
-              <h3
-                className="text-sm font-semibold uppercase tracking-wide"
-                style={{ color: "#1A6B8A" }}
+              <button
+                type="button"
+                className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
+                onClick={() => {
+                  const params = new URLSearchParams({
+                    appointment_id: detailAppt.id,
+                    patient_id: detailAppt.patient.id,
+                  });
+                  setDetailAppt(null);
+                  router.push(`/admin/clinical-notes?${params.toString()}`);
+                }}
               >
-                Objective — measurements
-              </h3>
-              <MeasurementModule
-                appointmentId={detailAppt.id}
-                clinicId={clinicId}
-              />
+                <span aria-hidden>📋</span>
+                Open Clinical Note
+              </button>
             </section>
             <section className="mt-4 space-y-3 border-t border-slate-100 pt-4">
               <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">

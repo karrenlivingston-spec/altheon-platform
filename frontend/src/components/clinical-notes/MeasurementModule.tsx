@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
 import { Loader2, Mic, Square } from "lucide-react";
 
 import { DS_INPUT } from "@/app/admin/designSystem";
@@ -126,11 +133,35 @@ type MeasurementApiRow = {
   strength?: Array<{ label: string; left?: string | null; right?: string | null }>;
   functional_outcomes?: Array<{ label: string; score?: string | null }>;
   pain_nrs?: number | null;
+  notes?: string | null;
+};
+
+export type ExtractedMeasurements = {
+  body_part?: string | null;
+  pain_nrs?: number | null;
+  rom?: Record<
+    string,
+    {
+      left_active?: number | null;
+      left_passive?: number | null;
+      right_active?: number | null;
+      right_passive?: number | null;
+    }
+  >;
+  strength?: Record<string, { left?: string | null; right?: string | null } | unknown>;
+  notes?: string | null;
+};
+
+export type MeasurementModuleHandle = {
+  save: () => Promise<boolean>;
 };
 
 export type MeasurementModuleProps = {
   appointmentId: string;
   clinicId: string;
+  prefillData?: ExtractedMeasurements | null;
+  hideDictation?: boolean;
+  hideSaveButton?: boolean;
 };
 
 async function authHeaders(): Promise<Record<string, string>> {
@@ -193,6 +224,69 @@ function numToStr(v: number | null | undefined): string {
   return String(v);
 }
 
+function findRomLabelForMotion(part: BodyPartKey, motionKey: string): string | null {
+  const motion = motionKey.trim().toLowerCase();
+  if (!motion) return null;
+  for (const row of BODY_PART_TEMPLATES[part].rom) {
+    if (row.label.toLowerCase().includes(motion)) return row.label;
+  }
+  return null;
+}
+
+function buildStateFromExtracted(data: ExtractedMeasurements): {
+  part: BodyPartKey;
+  romValues: Record<string, RomCellValues>;
+  strengthValues: Record<string, StrengthCellValues>;
+  outcomeValues: Record<string, string>;
+  painNrs: number | null;
+  notes: string;
+} {
+  const part = normalizeBodyPartKey(data.body_part);
+  const romValues = emptyRomValues(part);
+  for (const [motionKey, sides] of Object.entries(data.rom ?? {})) {
+    if (!sides || typeof sides !== "object") continue;
+    const label = findRomLabelForMotion(part, motionKey);
+    if (!label) continue;
+    romValues[label] = {
+      leftActive: numToStr(sides.left_active),
+      leftPassive: numToStr(sides.left_passive),
+      rightActive: numToStr(sides.right_active),
+      rightPassive: numToStr(sides.right_passive),
+    };
+  }
+
+  const strengthValues = emptyStrengthValues(part);
+  const strength = data.strength ?? {};
+  if (strength && typeof strength === "object" && !Array.isArray(strength)) {
+    for (const templateLabel of BODY_PART_TEMPLATES[part].strength) {
+      const matchKey = Object.keys(strength).find(
+        (k) => k.toLowerCase() === templateLabel.toLowerCase(),
+      );
+      if (!matchKey) continue;
+      const entry = strength[matchKey];
+      if (!entry || typeof entry !== "object") continue;
+      const left = (entry as { left?: string | null }).left;
+      const right = (entry as { right?: string | null }).right;
+      strengthValues[templateLabel] = {
+        left: left != null ? String(left) : "",
+        right: right != null ? String(right) : "",
+      };
+    }
+  }
+
+  return {
+    part,
+    romValues,
+    strengthValues,
+    outcomeValues: emptyOutcomeValues(part),
+    painNrs:
+      data.pain_nrs === null || data.pain_nrs === undefined
+        ? null
+        : Number(data.pain_nrs),
+    notes: (data.notes ?? "").trim(),
+  };
+}
+
 function populateFromApiRow(
   row: MeasurementApiRow,
   part: BodyPartKey,
@@ -201,6 +295,7 @@ function populateFromApiRow(
   strengthValues: Record<string, StrengthCellValues>;
   outcomeValues: Record<string, string>;
   painNrs: number | null;
+  notes: string;
 } {
   const romValues = emptyRomValues(part);
   for (const entry of row.rom ?? []) {
@@ -239,6 +334,7 @@ function populateFromApiRow(
       row.pain_nrs === null || row.pain_nrs === undefined
         ? null
         : Number(row.pain_nrs),
+    notes: (row.notes ?? "").trim(),
   };
 }
 
@@ -323,10 +419,19 @@ function romCellClass(value: string, normal: number): string {
   return base;
 }
 
-export function MeasurementModule({
-  appointmentId,
-  clinicId,
-}: MeasurementModuleProps) {
+export const MeasurementModule = forwardRef<
+  MeasurementModuleHandle,
+  MeasurementModuleProps
+>(function MeasurementModule(
+  {
+    appointmentId,
+    clinicId,
+    prefillData = null,
+    hideDictation = false,
+    hideSaveButton = false,
+  },
+  ref,
+) {
   const [selectedBodyPart, setSelectedBodyPart] = useState<BodyPartKey>("shoulder");
   const [romValues, setRomValues] = useState<Record<string, RomCellValues>>(() =>
     emptyRomValues("shoulder"),
@@ -338,6 +443,7 @@ export function MeasurementModule({
     emptyOutcomeValues("shoulder"),
   );
   const [painNrs, setPainNrs] = useState<number | null>(null);
+  const [measurementNotes, setMeasurementNotes] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [isSaving, setIsSaving] = useState(false);
@@ -348,6 +454,8 @@ export function MeasurementModule({
   const [loading, setLoading] = useState(true);
 
   const savedRowRef = useRef<MeasurementApiRow | null>(null);
+  const prefillDataRef = useRef(prefillData);
+  prefillDataRef.current = prefillData;
   const chunksRef = useRef<Blob[]>([]);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
@@ -365,13 +473,26 @@ export function MeasurementModule({
       setStrengthValues(populated.strengthValues);
       setOutcomeValues(populated.outcomeValues);
       setPainNrs(populated.painNrs);
+      setMeasurementNotes(populated.notes);
     } else {
       setRomValues(emptyRomValues(part));
       setStrengthValues(emptyStrengthValues(part));
       setOutcomeValues(emptyOutcomeValues(part));
       setPainNrs(null);
+      setMeasurementNotes("");
     }
   }, []);
+
+  useEffect(() => {
+    if (!prefillData) return;
+    const applied = buildStateFromExtracted(prefillData);
+    setSelectedBodyPart(applied.part);
+    setRomValues(applied.romValues);
+    setStrengthValues(applied.strengthValues);
+    setOutcomeValues(applied.outcomeValues);
+    setPainNrs(applied.painNrs);
+    setMeasurementNotes(applied.notes);
+  }, [prefillData]);
 
   const handleBodyPartChange = useCallback(
     (part: BodyPartKey) => {
@@ -402,13 +523,24 @@ export function MeasurementModule({
         if (json && json.data === null) {
           savedRowRef.current = null;
           applyPartState(selectedBodyPart, null);
-          return;
-        }
-        if (json?.id || json?.body_part) {
+        } else if (json?.id || json?.body_part) {
           savedRowRef.current = json;
           const part = normalizeBodyPartKey(json.body_part);
           setSelectedBodyPart(part);
           applyPartState(part, json);
+        } else {
+          savedRowRef.current = null;
+          applyPartState(selectedBodyPart, null);
+        }
+        const pendingPrefill = prefillDataRef.current;
+        if (pendingPrefill) {
+          const applied = buildStateFromExtracted(pendingPrefill);
+          setSelectedBodyPart(applied.part);
+          setRomValues(applied.romValues);
+          setStrengthValues(applied.strengthValues);
+          setOutcomeValues(applied.outcomeValues);
+          setPainNrs(applied.painNrs);
+          setMeasurementNotes(applied.notes);
         }
       } catch (e) {
         if (!cancelled) {
@@ -538,7 +670,7 @@ export function MeasurementModule({
     }
   }, [clinicId, stopStream, template.rom]);
 
-  const saveMeasurements = useCallback(async () => {
+  const saveMeasurements = useCallback(async (): Promise<boolean> => {
     setIsSaving(true);
     setSaveError(null);
     setSaveSuccess(false);
@@ -579,7 +711,7 @@ export function MeasurementModule({
           score: (outcomeValues[label] ?? "").trim() || null,
         })),
         pain_nrs: painNrs,
-        notes: null,
+        notes: measurementNotes.trim() || null,
       };
 
       const res = await fetch(
@@ -592,19 +724,22 @@ export function MeasurementModule({
       );
       if (!res.ok) {
         setSaveError(await res.text().catch(() => res.statusText));
-        return;
+        return false;
       }
       const saved = (await res.json()) as MeasurementApiRow;
       savedRowRef.current = saved;
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 2500);
+      return true;
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : "Save failed");
+      return false;
     } finally {
       setIsSaving(false);
     }
   }, [
     appointmentId,
+    measurementNotes,
     outcomeValues,
     painNrs,
     romValues,
@@ -612,6 +747,8 @@ export function MeasurementModule({
     strengthValues,
     template,
   ]);
+
+  useImperativeHandle(ref, () => ({ save: saveMeasurements }), [saveMeasurements]);
 
   if (loading) {
     return (
@@ -635,8 +772,10 @@ export function MeasurementModule({
         <p className="mt-2 text-sm text-amber-700">{loadError}</p>
       ) : null}
 
-      {/* Voice dictation bar */}
-      <div className="mt-4 rounded-lg border border-gray-100 bg-slate-50/90 p-3">
+      {!hideDictation ? (
+        <>
+          {/* Voice dictation bar */}
+          <div className="mt-4 rounded-lg border border-gray-100 bg-slate-50/90 p-3">
         <div className="flex flex-wrap items-center gap-3">
           {!isRecording ? (
             <button
@@ -677,7 +816,9 @@ export function MeasurementModule({
           rows={2}
           className={`mt-3 w-full resize-y ${DS_INPUT} bg-white text-sm text-gray-700`}
         />
-      </div>
+          </div>
+        </>
+      ) : null}
 
       {/* Body part tabs */}
       <div className="mt-4 flex flex-wrap gap-1 border-b border-gray-100 pb-2">
@@ -871,31 +1012,46 @@ export function MeasurementModule({
         </div>
       </div>
 
-      {/* Save */}
-      <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-gray-100 pt-4">
-        <button
-          type="button"
-          disabled={isSaving}
-          onClick={() => void saveMeasurements()}
-          className="inline-flex min-h-[44px] items-center justify-center rounded-lg px-5 py-2 text-sm font-medium text-white disabled:opacity-60"
-          style={{ backgroundColor: ACCENT }}
-        >
-          {isSaving ? (
-            <>
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
-              Saving…
-            </>
-          ) : (
-            "Save measurements"
-          )}
-        </button>
-        {saveSuccess ? (
-          <span className="text-sm font-medium text-green-700">Saved</span>
-        ) : null}
-        {saveError ? (
-          <span className="text-sm text-red-700">{saveError}</span>
-        ) : null}
+      {/* Notes */}
+      <div className="mt-6">
+        <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500">
+          Notes
+        </p>
+        <textarea
+          value={measurementNotes}
+          onChange={(e) => setMeasurementNotes(e.target.value)}
+          rows={3}
+          placeholder="Additional objective findings…"
+          className={`w-full resize-y ${DS_INPUT}`}
+        />
       </div>
+
+      {!hideSaveButton ? (
+        <div className="mt-6 flex flex-wrap items-center gap-3 border-t border-gray-100 pt-4">
+          <button
+            type="button"
+            disabled={isSaving}
+            onClick={() => void saveMeasurements()}
+            className="inline-flex min-h-[44px] items-center justify-center rounded-lg px-5 py-2 text-sm font-medium text-white disabled:opacity-60"
+            style={{ backgroundColor: ACCENT }}
+          >
+            {isSaving ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+                Saving…
+              </>
+            ) : (
+              "Save measurements"
+            )}
+          </button>
+          {saveSuccess ? (
+            <span className="text-sm font-medium text-green-700">Saved</span>
+          ) : null}
+          {saveError ? (
+            <span className="text-sm text-red-700">{saveError}</span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
-}
+});

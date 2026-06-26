@@ -20,7 +20,11 @@ import {
   type ScribeSpecialTestResult,
   type SoapFromScribe,
 } from "@/components/clinical-notes/AmbientScribe";
-import { MeasurementModule } from "@/components/clinical-notes/MeasurementModule";
+import {
+  MeasurementModule,
+  type ExtractedMeasurements,
+  type MeasurementModuleHandle,
+} from "@/components/clinical-notes/MeasurementModule";
 import { SpecialTestsSection } from "@/components/clinical-notes/SpecialTestsSection";
 import CptDetectionPanel, {
   type CptCode,
@@ -46,8 +50,6 @@ import {
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
-
-const MEASUREMENT_CLINIC_ID = "804e2fd2-1c5e-49ec-a036-3feedd1bad50";
 
 const UPCOMING_APPOINTMENT_STATUSES = new Set(["scheduled", "confirmed"]);
 
@@ -312,6 +314,11 @@ export default function AdminClinicalNotesPage() {
   const [infoToast, setInfoToast] = useState<string | null>(null);
   /** Special tests detected by the scribe before the note exists; flushed on first save. */
   const pendingScribeTestsRef = useRef<ScribeSpecialTestResult[]>([]);
+  const measurementModuleRef = useRef<MeasurementModuleHandle>(null);
+  const appointmentDeepLinkRef = useRef(false);
+  const preservedAppointmentIdRef = useRef<string | null>(null);
+  const [measurementPrefill, setMeasurementPrefill] =
+    useState<ExtractedMeasurements | null>(null);
   const [pendingReviewCount, setPendingReviewCount] = useState(0);
 
   const [scribeBannerVisible, setScribeBannerVisible] = useState(false);
@@ -368,25 +375,52 @@ export default function AdminClinicalNotesPage() {
     return () => window.removeEventListener("altheon:soap-prefill", onPrefill);
   }, [applySoapPrefill]);
 
-  /** Scribe now runs inside the editor modal: populate SOAP fields in place
-   *  without resetting patient/note-type selections. */
-  const handleSoapFromScribe = useCallback((soap: SoapFromScribe) => {
-    setDraftSubjective(soap.subjective);
-    setDraftObjective(soap.objective);
-    setDraftAssessment(soap.assessment);
-    setDraftPlan(soap.plan);
-    setSessionTranscript(soap.transcript);
-    setScribeBannerVisible(true);
-    setTranscriptPanelOpen(false);
+  const handleSoapFromScribe = useCallback(
+    (soap: SoapFromScribe) => {
+      setDraftSubjective(soap.subjective);
+      setDraftObjective(soap.objective);
+      setDraftAssessment(soap.assessment);
+      setDraftPlan(soap.plan);
+      setSessionTranscript(soap.transcript);
+      setScribeBannerVisible(true);
+      setTranscriptPanelOpen(false);
 
-    pendingScribeTestsRef.current = soap.special_test_results ?? [];
-    const names = soap.auto_populated_special_tests ?? [];
-    if (names.length > 0) {
-      setInfoToast(
-        `Special tests auto-detected: ${names.join(", ")} — review in Special Tests section`,
-      );
-    }
-  }, []);
+      pendingScribeTestsRef.current = soap.special_test_results ?? [];
+      const names = soap.auto_populated_special_tests ?? [];
+      if (names.length > 0) {
+        setInfoToast(
+          `Special tests auto-detected: ${names.join(", ")} — review in Special Tests section`,
+        );
+      }
+
+      const transcript = soap.transcript.trim();
+      if (transcript && clinicId) {
+        void (async () => {
+          try {
+            const res = await fetch(
+              `${API_BASE}/api/clinical-notes/extract-measurements`,
+              {
+                method: "POST",
+                headers: await authHeaders(),
+                body: JSON.stringify({
+                  transcript,
+                  appointment_id: draftAppointmentId.trim(),
+                  clinic_id: clinicId,
+                  patient_id: draftPatientId.trim(),
+                }),
+              },
+            );
+            if (!res.ok) return;
+            const data = (await res.json()) as ExtractedMeasurements;
+            setMeasurementPrefill(data);
+          } catch {
+            /* keep existing measurement fields */
+          }
+        })();
+      }
+    },
+    [clinicId, draftAppointmentId, draftPatientId],
+  );
 
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -587,7 +621,7 @@ export default function AdminClinicalNotesPage() {
     }
     try {
       const params = new URLSearchParams({
-        clinic_id: MEASUREMENT_CLINIC_ID,
+        clinic_id: clinicId,
         patient_id: pid,
       });
       const res = await fetch(`${API_BASE}/appointments?${params.toString()}`, {
@@ -603,13 +637,63 @@ export default function AdminClinicalNotesPage() {
     } catch {
       setDraftAppointmentId("");
     }
-  }, []);
+  }, [clinicId]);
+
+  useEffect(() => {
+    if (appointmentDeepLinkRef.current) return;
+    const params = new URLSearchParams(window.location.search);
+    const appointmentId = params.get("appointment_id")?.trim() ?? "";
+    const patientId = params.get("patient_id")?.trim() ?? "";
+    if (!appointmentId && !patientId) return;
+    appointmentDeepLinkRef.current = true;
+    if (appointmentId) {
+      preservedAppointmentIdRef.current = appointmentId;
+    }
+
+    setEditingId(null);
+    setDraftNoteType("daily_note");
+    setDraftSupervisingPtId("");
+    setDraftSubjective("");
+    setDraftObjective("");
+    setDraftAssessment("");
+    setDraftPlan("");
+    setDraftCptCodes(null);
+    setEditorTab(1);
+    setDraftNoteStatus("draft");
+    setDraftAiFeedback("");
+    setScribeBannerVisible(false);
+    setSessionTranscript("");
+    setTranscriptPanelOpen(false);
+    setMeasurementPrefill(null);
+    pendingScribeTestsRef.current = [];
+
+    if (patientId) {
+      setDraftPatientId(patientId);
+      const picked = patients.find((x) => x.id === patientId);
+      setPatientInputValue(
+        picked ? patientDisplayName(picked) : "Patient",
+      );
+    } else {
+      setDraftPatientId("");
+      setPatientInputValue("");
+    }
+    setDraftAppointmentId(appointmentId);
+    setPatientPickerOpen(false);
+    setEditorOpen(true);
+    setScribePanelOpen(true);
+    window.history.replaceState(null, "", "/admin/clinical-notes");
+  }, [patients]);
 
   useEffect(() => {
     if (!editorOpen || editingId) return;
     const pid = draftPatientId.trim();
     if (!pid) {
       setDraftAppointmentId("");
+      return;
+    }
+    if (preservedAppointmentIdRef.current) {
+      setDraftAppointmentId(preservedAppointmentIdRef.current);
+      preservedAppointmentIdRef.current = null;
       return;
     }
     void resolveAppointmentForPatient(pid);
@@ -681,6 +765,7 @@ export default function AdminClinicalNotesPage() {
     setScribeBannerVisible(false);
     setSessionTranscript("");
     setTranscriptPanelOpen(false);
+    setMeasurementPrefill(null);
     pendingScribeTestsRef.current = [];
   }
 
@@ -796,6 +881,9 @@ export default function AdminClinicalNotesPage() {
       if (draftSupervisingPtId.trim()) {
         body.supervising_pt_id = draftSupervisingPtId.trim();
       }
+      if (draftAppointmentId.trim()) {
+        body.appointment_id = draftAppointmentId.trim();
+      }
 
       if (editingId) {
         const res = await fetch(
@@ -818,6 +906,9 @@ export default function AdminClinicalNotesPage() {
           return null;
         }
         await flushPendingScribeTests(editingId);
+        if (draftAppointmentId.trim()) {
+          await measurementModuleRef.current?.save();
+        }
         await refreshDashboard();
         return editingId;
       }
@@ -835,6 +926,9 @@ export default function AdminClinicalNotesPage() {
       const newId = created.id;
       setEditingId(newId);
       await flushPendingScribeTests(newId);
+      if (draftAppointmentId.trim()) {
+        await measurementModuleRef.current?.save();
+      }
       await refreshDashboard();
       return newId;
     } catch (e) {
@@ -1518,6 +1612,22 @@ export default function AdminClinicalNotesPage() {
                       ) : null}
                     </div>
                   ) : null}
+
+                  {draftAppointmentId.trim() ? (
+                    <MeasurementModule
+                      ref={measurementModuleRef}
+                      appointmentId={draftAppointmentId.trim()}
+                      clinicId={clinicId}
+                      prefillData={measurementPrefill}
+                      hideDictation
+                      hideSaveButton
+                    />
+                  ) : (
+                    <p className="rounded-lg border border-dashed border-gray-200 bg-gray-50/80 px-4 py-3 text-xs text-gray-600">
+                      Select a patient to link an appointment before recording
+                      smart measurements.
+                    </p>
+                  )}
                 </div>
               ) : null}
 
@@ -1541,12 +1651,6 @@ export default function AdminClinicalNotesPage() {
                       className={`mt-1 min-h-[120px] ${DS_INPUT}`}
                     />
                   </label>
-                  {draftAppointmentId.trim() ? (
-                    <MeasurementModule
-                      appointmentId={draftAppointmentId.trim()}
-                      clinicId={MEASUREMENT_CLINIC_ID}
-                    />
-                  ) : null}
                   <label className="block text-sm font-medium text-gray-700">
                     Assessment — clinical reasoning
                     <textarea

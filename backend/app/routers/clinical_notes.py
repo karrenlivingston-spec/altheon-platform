@@ -46,6 +46,141 @@ A note FAILS if any section is missing, blank, or lacks clinical specificity. \
 List each specific issue in the feedback."""
 
 
+_EXTRACT_MEASUREMENTS_SYSTEM = """You are a physical therapy documentation assistant. Extract any measurable clinical values from the transcript and return ONLY a JSON object with this exact structure:
+{
+  "body_part": "shoulder|cervical|hip|knee|lumbar|wrist_elbow or null",
+  "pain_nrs": number or null (0-10),
+  "rom": {
+    "flexion": {"left_active": number|null, "left_passive": number|null, "right_active": number|null, "right_passive": number|null},
+    "extension": {"left_active": number|null, "left_passive": number|null, "right_active": number|null, "right_passive": number|null},
+    "abduction": {"left_active": number|null, "left_passive": number|null, "right_active": number|null, "right_passive": number|null}
+  },
+  "strength": {},
+  "notes": "any other relevant clinical observations not captured above or null"
+}
+Return null for any value not mentioned in the transcript. Return ONLY the JSON, no preamble."""
+
+_VALID_BODY_PARTS = frozenset(
+    {"shoulder", "cervical", "hip", "knee", "lumbar", "wrist_elbow"}
+)
+
+
+def _default_rom_side() -> dict[str, Optional[float]]:
+    return {
+        "left_active": None,
+        "left_passive": None,
+        "right_active": None,
+        "right_passive": None,
+    }
+
+
+def _default_extracted_measurements() -> dict[str, Any]:
+    return {
+        "body_part": None,
+        "pain_nrs": None,
+        "rom": {
+            "flexion": _default_rom_side(),
+            "extension": _default_rom_side(),
+            "abduction": _default_rom_side(),
+        },
+        "strength": {},
+        "notes": None,
+    }
+
+
+def _normalize_rom_motion(value: Any) -> dict[str, Optional[float]]:
+    base = _default_rom_side()
+    if not isinstance(value, dict):
+        return base
+    for key in base:
+        raw = value.get(key)
+        if raw is None:
+            continue
+        try:
+            base[key] = float(raw)
+        except (TypeError, ValueError):
+            continue
+    return base
+
+
+def _normalize_extracted_measurements(data: Any) -> dict[str, Any]:
+    out = _default_extracted_measurements()
+    if not isinstance(data, dict):
+        return out
+
+    body_part = data.get("body_part")
+    if body_part is not None:
+        bp = str(body_part).strip().lower()
+        if bp in _VALID_BODY_PARTS:
+            out["body_part"] = bp
+
+    pain = data.get("pain_nrs")
+    if pain is not None:
+        try:
+            pain_nrs = int(float(pain))
+            if 0 <= pain_nrs <= 10:
+                out["pain_nrs"] = pain_nrs
+        except (TypeError, ValueError):
+            pass
+
+    rom_in = data.get("rom")
+    if isinstance(rom_in, dict):
+        for motion in ("flexion", "extension", "abduction"):
+            out["rom"][motion] = _normalize_rom_motion(rom_in.get(motion))
+
+    strength = data.get("strength")
+    if isinstance(strength, dict):
+        out["strength"] = strength
+
+    notes = data.get("notes")
+    if notes is not None:
+        note_text = str(notes).strip()
+        out["notes"] = note_text or None
+
+    return out
+
+
+def _call_claude_extract_measurements(transcript: str) -> dict[str, Any]:
+    api_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if not api_key:
+        return _default_extracted_measurements()
+
+    try:
+        import anthropic
+    except ImportError:
+        return _default_extracted_measurements()
+
+    text = (transcript or "").strip()
+    if not text:
+        return _default_extracted_measurements()
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        message = client.messages.create(
+            model=_ANTHROPIC_MODEL,
+            max_tokens=2048,
+            system=_EXTRACT_MEASUREMENTS_SYSTEM,
+            messages=[{"role": "user", "content": text}],
+        )
+        blocks = getattr(message, "content", None) or []
+        raw_parts: list[str] = []
+        for block in blocks:
+            if hasattr(block, "text"):
+                raw_parts.append(str(block.text))
+            elif isinstance(block, dict) and block.get("text"):
+                raw_parts.append(str(block["text"]))
+        raw = "".join(raw_parts).strip()
+        if not raw:
+            return _default_extracted_measurements()
+        data = _extract_json_object(raw)
+        return _normalize_extracted_measurements(data)
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        return _default_extracted_measurements()
+
+
 def _handle_supabase_error(response: Any) -> None:
     error = getattr(response, "error", None)
     if error:
@@ -915,6 +1050,36 @@ def create_clinical_note(
     if not rows:
         raise HTTPException(status_code=500, detail="Insert returned no row")
     return rows[0]
+
+
+class ExtractMeasurementsBody(BaseModel):
+    transcript: str = ""
+    appointment_id: str = ""
+    clinic_id: str = ""
+    patient_id: str = ""
+
+
+# NOTE: must be registered before GET /clinical-notes/{note_id} so the literal
+# "extract-measurements" segment is not captured as a note_id.
+@router.post("/clinical-notes/extract-measurements")
+def extract_measurements_from_transcript(
+    body: ExtractMeasurementsBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    clinic_id = body.clinic_id.strip()
+    if not clinic_id:
+        raise HTTPException(status_code=400, detail="clinic_id is required")
+    enforce_clinic_role_from_auth_header(authorization, clinic_id, *CLINICAL_ROLES)
+
+    try:
+        return _call_claude_extract_measurements(body.transcript)
+    except HTTPException:
+        raise
+    except Exception:
+        import traceback
+
+        traceback.print_exc()
+        return _default_extracted_measurements()
 
 
 # NOTE: must be registered before GET /clinical-notes/{note_id} so the literal
