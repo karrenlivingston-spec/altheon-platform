@@ -51,6 +51,7 @@ from app.routers import (
     outcome_measures as outcome_measures_router,
     virtual_visits as virtual_visits_router,
     hep as hep_router,
+    questionnaires as questionnaires_router,
 )
 from app.routers.virtual_visit_transcription import router as vv_transcription_router
 from app.routers.appointments import _fetch_clinic_sms_context
@@ -78,6 +79,7 @@ app.add_middleware(
     allow_origins=[
         "https://altheon-platform.vercel.app",
         "https://www.altheon.app",
+        "https://altheon.app",
         "http://localhost:3000",
         "http://127.0.0.1:3000",
     ],
@@ -152,6 +154,11 @@ app.include_router(
     appointment_reminders_router.router,
     prefix="",
     tags=["Appointment Reminders"],
+)
+app.include_router(
+    questionnaires_router.router,
+    prefix="",
+    tags=["Questionnaires"],
 )
 app.include_router(pi_cases_api_router.router, prefix="/api", tags=["PI Cases"])
 app.include_router(

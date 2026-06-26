@@ -17,6 +17,7 @@ from app.dependencies.permissions import (
     enforce_clinic_role_from_auth_header,
     require_role,
 )
+from app.routers.questionnaires import maybe_send_questionnaire_sms_for_note
 
 router = APIRouter(dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 
@@ -520,7 +521,7 @@ def _enrich_notes_for_list(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         shaped["visit_date"] = (
             appt.get("start_time") if appt else item.get("created_at")
         )
-        shaped["body_region"] = None
+        shaped["body_region"] = item.get("body_region")
         shaped["clinician_name"] = (
             item.get("supervising_pt_name")
             or item.get("author_name")
@@ -895,6 +896,7 @@ class CreateClinicalNoteBody(BaseModel):
     supervising_pt_id: Optional[str] = None
     appointment_id: Optional[str] = None
     note_type: Optional[str] = None
+    body_region: Optional[str] = None
     subjective: Optional[str] = None
     objective: Optional[str] = None
     assessment: Optional[str] = None
@@ -908,6 +910,7 @@ class PatchClinicalNoteBody(BaseModel):
     plan: Optional[str] = None
     supervising_pt_id: Optional[str] = None
     note_type: Optional[str] = None
+    body_region: Optional[str] = None
 
 
 class SignNoteBody(BaseModel):
@@ -1033,6 +1036,10 @@ def create_clinical_note(
         a = body.appointment_id.strip()
         if a:
             row["appointment_id"] = a
+    if body.body_region is not None:
+        br = body.body_region.strip()
+        if br:
+            row["body_region"] = br.lower()
     for key in ("subjective", "objective", "assessment", "plan"):
         val = getattr(body, key)
         if val is not None:
@@ -1049,7 +1056,12 @@ def create_clinical_note(
     rows = ins.data or []
     if not rows:
         raise HTTPException(status_code=500, detail="Insert returned no row")
-    return rows[0]
+    saved = rows[0]
+    try:
+        maybe_send_questionnaire_sms_for_note(saved)
+    except Exception:
+        pass
+    return saved
 
 
 class ExtractMeasurementsBody(BaseModel):
@@ -1614,6 +1626,9 @@ def patch_clinical_note(note_id: str, body: PatchClinicalNoteBody):
     payload = body.model_dump(exclude_unset=True)
     if "note_type" in payload:
         payload["note_type"] = _validate_note_type(payload["note_type"])
+    if "body_region" in payload and payload["body_region"] is not None:
+        br = str(payload["body_region"]).strip()
+        payload["body_region"] = br.lower() if br else None
 
     data = {k: v for k, v in payload.items() if v is not None}
     if not data:
@@ -1632,7 +1647,28 @@ def patch_clinical_note(note_id: str, body: PatchClinicalNoteBody):
     urows = upd.data or []
     if not urows:
         raise HTTPException(status_code=404, detail="Clinical note not found")
-    return urows[0]
+
+    try:
+        full_resp = (
+            supabase.table("clinical_notes")
+            .select("*")
+            .eq("id", nid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(full_resp)
+        full_rows = full_resp.data or []
+        saved = full_rows[0] if full_rows else urows[0]
+    except HTTPException:
+        saved = urows[0]
+    except Exception:
+        saved = urows[0]
+
+    try:
+        maybe_send_questionnaire_sms_for_note(saved)
+    except Exception:
+        pass
+    return saved
 
 
 @router.post("/clinical-notes/{note_id}/submit")

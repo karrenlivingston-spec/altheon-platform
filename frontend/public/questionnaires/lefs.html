@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lower Extremity Functional Scale</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; }
+    body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f4f4f5; color: #18181b; line-height: 1.5; }
+    .wrap { max-width: 480px; margin: 0 auto; padding: 16px 16px 40px; }
+    header { background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    header h1 { font-size: 1.05rem; margin: 0 0 6px; }
+    header .meta { margin: 0; font-size: 0.875rem; color: #52525b; }
+    .intro { font-size: 0.875rem; color: #52525b; margin: 0 0 16px; }
+    .question { background: #fff; border-radius: 12px; padding: 14px 16px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); border: none; }
+    .question legend { font-weight: 600; font-size: 0.9375rem; margin-bottom: 10px; padding: 0; }
+    .scale { display: flex; flex-direction: column; gap: 8px; }
+    .scale label { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 8px 10px; border: 1px solid #e4e4e7; border-radius: 8px; cursor: pointer; font-size: 0.875rem; }
+    .scale label:has(input:checked) { border-color: #2563eb; background: #eff6ff; }
+    .scale input { width: 20px; height: 20px; flex-shrink: 0; margin: 0; }
+    .submit-row { margin-top: 20px; }
+    button[type=submit] { width: 100%; min-height: 48px; font-size: 1rem; font-weight: 600; border: none; border-radius: 10px; background: #2563eb; color: #fff; cursor: pointer; }
+    button[type=submit]:disabled { opacity: 0.55; cursor: not-allowed; }
+    .error { color: #b91c1c; font-size: 0.875rem; margin-top: 10px; }
+    .thanks { text-align: center; padding: 48px 20px; background: #fff; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+    .thanks h2 { margin: 0 0 8px; font-size: 1.25rem; }
+    .loading, .invalid { text-align: center; padding: 32px 16px; color: #71717a; font-size: 0.9375rem; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div id="loading" class="loading">Loading your questionnaire…</div>
+    <div id="invalid" class="invalid hidden">This link is invalid or has already been used.</div>
+    <div id="app" class="hidden">
+      <header>
+        <h1>Lower Extremity Functional Scale (LEFS)</h1>
+        <p class="meta"><span id="clinicName"></span></p>
+        <p class="meta">Patient: <span id="patientName"></span></p>
+      </header>
+      <p class="intro">Rate your ability to do each activity today (0 = unable, 4 = no difficulty).</p>
+      <form id="form"></form>
+      <p id="formError" class="error hidden"></p>
+    </div>
+    <div id="thanks" class="thanks hidden">
+      <h2>Thank you!</h2>
+      <p>Your responses have been submitted. Your care team will review them before your visit.</p>
+    </div>
+  </div>
+  <script>
+(function () {
+  var TYPE = "lefs";
+  var API = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+    ? "http://127.0.0.1:8000"
+    : "https://altheon-platform.onrender.com";
+  var OPTIONS = [
+    { v: 0, l: "Unable to perform activity" },
+    { v: 1, l: "Extreme difficulty" },
+    { v: 2, l: "Moderate difficulty" },
+    { v: 3, l: "A little bit of difficulty" },
+    { v: 4, l: "No difficulty" }
+  ];
+  var QUESTIONS = [
+    { id: "q1", text: "Any of your usual work, housework, or school activities" },
+    { id: "q2", text: "Your usual hobbies, recreational or sporting activities" },
+    { id: "q3", text: "Getting into or out of the bath" },
+    { id: "q4", text: "Walking between rooms" },
+    { id: "q5", text: "Putting on your shoes or socks" },
+    { id: "q6", text: "Squatting" },
+    { id: "q7", text: "Lifting an object from the floor" },
+    { id: "q8", text: "Performing light activities around your home" },
+    { id: "q9", text: "Performing heavy activities around your home" },
+    { id: "q10", text: "Getting into or out of a car" },
+    { id: "q11", text: "Walking 2 blocks" },
+    { id: "q12", text: "Walking a mile" },
+    { id: "q13", text: "Going up or down 10 stairs" },
+    { id: "q14", text: "Standing for 1 hour" },
+    { id: "q15", text: "Sitting for 1 hour" },
+    { id: "q16", text: "Running on even ground" },
+    { id: "q17", text: "Running on uneven ground" },
+    { id: "q18", text: "Making sharp turns while running fast" },
+    { id: "q19", text: "Hopping" },
+    { id: "q20", text: "Rolling over in bed" }
+  ];
+  var params = new URLSearchParams(location.search);
+  var token = (params.get("token") || "").trim();
+  var loading = document.getElementById("loading");
+  var invalid = document.getElementById("invalid");
+  var app = document.getElementById("app");
+  var thanks = document.getElementById("thanks");
+  var form = document.getElementById("form");
+  var formError = document.getElementById("formError");
+
+  function showInvalid() {
+    loading.classList.add("hidden");
+    invalid.classList.remove("hidden");
+  }
+
+  function buildForm() {
+    QUESTIONS.forEach(function (q, idx) {
+      var field = document.createElement("fieldset");
+      field.className = "question";
+      var legend = document.createElement("legend");
+      legend.textContent = (idx + 1) + ". " + q.text;
+      field.appendChild(legend);
+      var scale = document.createElement("div");
+      scale.className = "scale";
+      OPTIONS.forEach(function (opt) {
+        var label = document.createElement("label");
+        var input = document.createElement("input");
+        input.type = "radio";
+        input.name = q.id;
+        input.value = String(opt.v);
+        input.required = true;
+        label.appendChild(input);
+        label.appendChild(document.createTextNode(opt.v + " — " + opt.l));
+        scale.appendChild(label);
+      });
+      field.appendChild(scale);
+      form.appendChild(field);
+    });
+    var row = document.createElement("div");
+    row.className = "submit-row";
+    var btn = document.createElement("button");
+    btn.type = "submit";
+    btn.textContent = "Submit questionnaire";
+    row.appendChild(btn);
+    form.appendChild(row);
+  }
+
+  form.addEventListener("submit", function (e) {
+    e.preventDefault();
+    formError.classList.add("hidden");
+    var responses = {};
+    QUESTIONS.forEach(function (q) {
+      var picked = form.querySelector('input[name="' + q.id + '"]:checked');
+      if (picked) responses[q.id] = Number(picked.value);
+    });
+    var btn = form.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    btn.textContent = "Submitting…";
+    fetch(API + "/questionnaires/submit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token: token, questionnaire_type: TYPE, responses: responses })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data && data.success) {
+          app.classList.add("hidden");
+          thanks.classList.remove("hidden");
+          return;
+        }
+        formError.textContent = "Unable to submit. Please try again or contact your clinic.";
+        formError.classList.remove("hidden");
+        btn.disabled = false;
+        btn.textContent = "Submit questionnaire";
+      })
+      .catch(function () {
+        formError.textContent = "Network error. Please check your connection and try again.";
+        formError.classList.remove("hidden");
+        btn.disabled = false;
+        btn.textContent = "Submit questionnaire";
+      });
+  });
+
+  if (!token) { showInvalid(); return; }
+  buildForm();
+  fetch(API + "/questionnaires/token-info?token=" + encodeURIComponent(token))
+    .then(function (r) { return r.json(); })
+    .then(function (info) {
+      loading.classList.add("hidden");
+      if (!info || !info.questionnaire_type || info.questionnaire_type !== TYPE) {
+        showInvalid();
+        return;
+      }
+      document.getElementById("clinicName").textContent = info.clinic_name || "Your clinic";
+      document.getElementById("patientName").textContent = info.patient_first_name || "Patient";
+      app.classList.remove("hidden");
+    })
+    .catch(function () { showInvalid(); });
+})();
+  </script>
+</body>
+</html>

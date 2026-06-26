@@ -286,6 +286,7 @@ export default function AdminClinicalNotesPage() {
   const [draftAppointmentId, setDraftAppointmentId] = useState("");
   const [draftAssessment, setDraftAssessment] = useState("");
   const [draftPlan, setDraftPlan] = useState("");
+  const [draftBodyRegion, setDraftBodyRegion] = useState("");
   const [draftCptCodes, setDraftCptCodes] = useState<CptCode[] | null>(null);
   const [editorBusy, setEditorBusy] = useState(false);
   const [editorTab, setEditorTab] = useState(1);
@@ -381,6 +382,9 @@ export default function AdminClinicalNotesPage() {
       setDraftObjective(soap.objective);
       setDraftAssessment(soap.assessment);
       setDraftPlan(soap.plan);
+      if (soap.body_region) {
+        setDraftBodyRegion(soap.body_region.trim().toLowerCase());
+      }
       setSessionTranscript(soap.transcript);
       setScribeBannerVisible(true);
       setTranscriptPanelOpen(false);
@@ -657,6 +661,7 @@ export default function AdminClinicalNotesPage() {
     setDraftObjective("");
     setDraftAssessment("");
     setDraftPlan("");
+    setDraftBodyRegion("");
     setDraftCptCodes(null);
     setEditorTab(1);
     setDraftNoteStatus("draft");
@@ -756,6 +761,7 @@ export default function AdminClinicalNotesPage() {
     setDraftAppointmentId("");
     setDraftAssessment("");
     setDraftPlan("");
+    setDraftBodyRegion("");
     setDraftCptCodes(null);
     setEditorTab(1);
     setDraftNoteStatus("draft");
@@ -807,6 +813,7 @@ export default function AdminClinicalNotesPage() {
       setDraftAppointmentId((row.appointment_id ?? "").trim());
       setDraftAssessment(row.assessment ?? "");
       setDraftPlan(row.plan ?? "");
+      setDraftBodyRegion((row.body_region ?? "").trim().toLowerCase());
       setDraftCptCodes(
         Array.isArray(row.cpt_codes_detected)
           ? (row.cpt_codes_detected as CptCode[])
@@ -878,6 +885,9 @@ export default function AdminClinicalNotesPage() {
         assessment: draftAssessment.trim() || null,
         plan: draftPlan.trim() || null,
       };
+      if (draftBodyRegion.trim()) {
+        body.body_region = draftBodyRegion.trim().toLowerCase();
+      }
       if (draftSupervisingPtId.trim()) {
         body.supervising_pt_id = draftSupervisingPtId.trim();
       }
@@ -898,6 +908,9 @@ export default function AdminClinicalNotesPage() {
               plan: body.plan,
               supervising_pt_id: body.supervising_pt_id ?? null,
               note_type: draftNoteType,
+              body_region: draftBodyRegion.trim()
+                ? draftBodyRegion.trim().toLowerCase()
+                : null,
             }),
           },
         );

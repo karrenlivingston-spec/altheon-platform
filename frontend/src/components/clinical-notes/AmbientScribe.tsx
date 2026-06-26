@@ -28,6 +28,7 @@ export type SoapFromScribe = {
   assessment: string;
   plan: string;
   transcript: string;
+  body_region?: string | null;
   auto_populated_special_tests: string[];
   special_test_results: ScribeSpecialTestResult[];
 };
@@ -258,6 +259,7 @@ export function AmbientScribe({
           assessment: String(data.assessment ?? ""),
           plan: String(data.plan ?? ""),
           transcript: String(data.transcript ?? ""),
+          body_region: data.body_region ? String(data.body_region) : null,
           auto_populated_special_tests: autoNames,
           special_test_results: testResults,
         });
