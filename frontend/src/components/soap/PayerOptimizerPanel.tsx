@@ -102,11 +102,16 @@ function LoadingSkeleton() {
   );
 }
 
-function CodePill({ code }: { code: string }) {
+function CodePill({ code, count }: { code: string; count?: number }) {
   const description = CPT_DESCRIPTIONS[code] ?? code;
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-2.5 py-1 text-xs">
       <span className="font-mono font-semibold text-teal-700">{code}</span>
+      {count != null && count > 1 ? (
+        <span className="rounded border border-teal-200 bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-700">
+          ×{count}
+        </span>
+      ) : null}
       <span className="text-gray-600">{description}</span>
     </span>
   );
@@ -121,6 +126,14 @@ function PayerColumn({
   payer: PayerResult;
   category: string;
 }) {
+  const collapsedCodes = payer.cpt_codes.reduce(
+    (acc, code) => {
+      acc[code] = (acc[code] || 0) + 1;
+      return acc;
+    },
+    {} as Record<string, number>,
+  );
+
   return (
     <div className="rounded-xl border border-gray-200 bg-white p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -141,7 +154,9 @@ function PayerColumn({
         <>
           <div className="flex flex-wrap gap-2">
             {payer.cpt_codes.length > 0 ? (
-              payer.cpt_codes.map((code) => <CodePill key={code} code={code} />)
+              Object.entries(collapsedCodes).map(([code, count]) => (
+                <CodePill key={code} code={code} count={count} />
+              ))
             ) : (
               <p className="text-xs text-gray-500">No CPT codes in rule set</p>
             )}
