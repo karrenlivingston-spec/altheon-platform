@@ -31,6 +31,7 @@ from app.routers import (
     billing_payments as billing_payments_router,
     surveys,
     intake as intake_router,
+    appointment_reminders as appointment_reminders_router,
     pi_cases as pi_cases_api_router,
     clinical_notes as clinical_notes_api_router,
     appointments_dashboard as appointments_dashboard_router,
@@ -147,6 +148,11 @@ app.include_router(billing_claims_router.router, prefix="/billing", tags=["billi
 app.include_router(legal_router)
 app.include_router(surveys.router)
 app.include_router(intake_router.router, prefix="", tags=["intake"])
+app.include_router(
+    appointment_reminders_router.router,
+    prefix="",
+    tags=["Appointment Reminders"],
+)
 app.include_router(pi_cases_api_router.router, prefix="/api", tags=["PI Cases"])
 app.include_router(
     clinical_notes_api_router.router, prefix="/api", tags=["Clinical Notes"]
