@@ -50,6 +50,7 @@ from pydantic import BaseModel, Field, model_validator
 from zoneinfo import ZoneInfo
 
 from app.db import supabase
+from app.routers.questionnaires import _questionnaire_for_body_region
 from app.sms import send_sms
 
 router = APIRouter()
@@ -166,6 +167,96 @@ def _to_e164_us(phone: str) -> str:
         return f"+{d}"
     p = (phone or "").strip()
     return p if p.startswith("+") else f"+{d}"
+
+
+_QUESTIONNAIRE_BASE_URL = (
+    os.environ.get("QUESTIONNAIRE_BASE_URL") or "https://altheon.app"
+).rstrip("/")
+
+
+def _maybe_send_questionnaire_sms_after_intake(
+    *,
+    patient_id: str,
+    appointment_id: str,
+    clinic_id: str,
+    symptom_location: Optional[str],
+) -> None:
+    """Best-effort questionnaire SMS after intake submit; never raises."""
+    try:
+        questionnaire_type = _questionnaire_for_body_region(symptom_location or "")
+        if not questionnaire_type:
+            return
+
+        existing = (
+            supabase.table("questionnaire_tokens")
+            .select("id")
+            .eq("appointment_id", appointment_id.strip())
+            .eq("questionnaire_type", questionnaire_type.strip())
+            .eq("used", False)
+            .limit(1)
+            .execute()
+        )
+        if existing.data:
+            return
+
+        pt_resp = (
+            supabase.table("patients")
+            .select("first_name, phone")
+            .eq("id", patient_id.strip())
+            .limit(1)
+            .execute()
+        )
+        pt_rows = pt_resp.data or []
+        if not pt_rows:
+            return
+        patient = pt_rows[0]
+        phone_raw = str(patient.get("phone") or "").strip()
+        if not phone_raw:
+            return
+        first_name = str(patient.get("first_name") or "").strip() or "there"
+
+        _clinic_name = _fetch_clinic_display_name(clinic_id)
+
+        token = secrets.token_hex(32)
+        ins = (
+            supabase.table("questionnaire_tokens")
+            .insert(
+                {
+                    "token": token,
+                    "patient_id": patient_id.strip(),
+                    "appointment_id": appointment_id.strip(),
+                    "clinic_id": clinic_id.strip(),
+                    "questionnaire_type": questionnaire_type,
+                    "used": False,
+                }
+            )
+            .execute()
+        )
+        if getattr(ins, "error", None):
+            return
+
+        url = (
+            f"{_QUESTIONNAIRE_BASE_URL}/questionnaires/{questionnaire_type}.html"
+            f"?token={token}"
+        )
+        message = (
+            f"Hi {first_name}! Thanks for completing your intake. Your clinician "
+            f"has one more short questionnaire for you — it takes about 3 minutes: "
+            f"{url} — Reply STOP to opt out."
+        )
+        send_sms(
+            clinic_id.strip(),
+            _to_e164_us(phone_raw),
+            message,
+            patient_id=patient_id.strip(),
+            appointment_id=appointment_id.strip(),
+            message_type=f"questionnaire_{questionnaire_type}",
+        )
+    except Exception:
+        logger.exception(
+            "questionnaire SMS after intake failed appointment_id=%s",
+            appointment_id,
+        )
 
 
 def _normalize_pref_lang(code: Optional[str]) -> str:
@@ -914,6 +1005,7 @@ class IntakeTokenSubmitBody(BaseModel):
     allergies: Optional[str] = None
     medical_conditions: Optional[str] = None
     previous_treatments: Optional[str] = None
+    symptom_location: Optional[str] = None
     consent_to_treatment: bool
 
     @model_validator(mode="after")
@@ -983,6 +1075,8 @@ def submit_intake_token_form(body: IntakeTokenSubmitBody):
         }
         if body.pain_scale is not None:
             intake_row["pain_scale"] = int(body.pain_scale)
+        if body.symptom_location is not None and str(body.symptom_location).strip():
+            intake_row["symptom_location"] = str(body.symptom_location).strip()
 
         ins = supabase.table("intake_forms").insert(intake_row).execute()
         _handle_supabase_error(ins)
@@ -996,6 +1090,16 @@ def submit_intake_token_form(body: IntakeTokenSubmitBody):
             .execute()
         )
         _handle_supabase_error(mark)
+
+        try:
+            _maybe_send_questionnaire_sms_after_intake(
+                patient_id=pid,
+                appointment_id=aid,
+                clinic_id=cid,
+                symptom_location=body.symptom_location,
+            )
+        except Exception:
+            pass
 
         return {"status": "success", "message": "Intake submitted successfully"}
     except HTTPException:

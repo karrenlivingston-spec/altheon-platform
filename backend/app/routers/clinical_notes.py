@@ -17,7 +17,6 @@ from app.dependencies.permissions import (
     enforce_clinic_role_from_auth_header,
     require_role,
 )
-from app.routers.questionnaires import maybe_send_questionnaire_sms_for_note
 
 router = APIRouter(dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 
@@ -1056,12 +1055,7 @@ def create_clinical_note(
     rows = ins.data or []
     if not rows:
         raise HTTPException(status_code=500, detail="Insert returned no row")
-    saved = rows[0]
-    try:
-        maybe_send_questionnaire_sms_for_note(saved)
-    except Exception:
-        pass
-    return saved
+    return rows[0]
 
 
 class ExtractMeasurementsBody(BaseModel):
@@ -1664,10 +1658,6 @@ def patch_clinical_note(note_id: str, body: PatchClinicalNoteBody):
     except Exception:
         saved = urows[0]
 
-    try:
-        maybe_send_questionnaire_sms_for_note(saved)
-    except Exception:
-        pass
     return saved
 
 
