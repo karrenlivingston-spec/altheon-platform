@@ -59,6 +59,18 @@ const GENDER_OPTIONS = [
   { value: "other", label: "Other" },
 ] as const;
 
+const SYMPTOM_LOCATION_OPTIONS = [
+  { value: "cervical", label: "Cervical (Neck)" },
+  { value: "lumbar", label: "Lumbar (Low Back)" },
+  { value: "shoulder", label: "Shoulder" },
+  { value: "elbow", label: "Elbow" },
+  { value: "wrist", label: "Wrist / Hand" },
+  { value: "hip", label: "Hip" },
+  { value: "knee", label: "Knee" },
+  { value: "ankle", label: "Ankle / Foot" },
+  { value: "other", label: "Other" },
+] as const;
+
 const STEP_LABELS = [
   "Your Information",
   "About Your Visit",
@@ -92,6 +104,7 @@ function IntakeFormInner() {
   const [address, setAddress] = useState("");
 
   const [chiefComplaint, setChiefComplaint] = useState("");
+  const [symptomLocation, setSymptomLocation] = useState("");
   const [symptomDuration, setSymptomDuration] = useState("");
   const [mechanismOfInjury, setMechanismOfInjury] = useState("");
   const [painScale, setPainScale] = useState<number>(5);
@@ -189,6 +202,7 @@ function IntakeFormInner() {
       if (gender.trim()) body.gender = gender.trim();
       if (email.trim()) body.email = email.trim();
       if (address.trim()) body.address = address.trim();
+      if (symptomLocation.trim()) body.symptom_location = symptomLocation.trim();
       if (symptomDuration.trim()) body.symptom_duration = symptomDuration.trim();
       if (mechanismOfInjury.trim()) body.mechanism_of_injury = mechanismOfInjury.trim();
       if (medications.trim()) body.medications = medications.trim();
@@ -433,6 +447,41 @@ function IntakeFormInner() {
                   placeholder="Describe your main reason for visiting"
                 />
               </Field>
+              <div>
+                <p className="mb-1.5 text-sm font-medium text-gray-700">
+                  Where are you having symptoms?{" "}
+                  <span className="font-normal text-gray-500">(optional)</span>
+                </p>
+                <div
+                  className="grid grid-cols-3 gap-2"
+                  role="group"
+                  aria-label="Symptom location"
+                >
+                  {SYMPTOM_LOCATION_OPTIONS.map((opt) => {
+                    const isSelected = symptomLocation === opt.value;
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        aria-pressed={isSelected}
+                        onClick={() =>
+                          setSymptomLocation(isSelected ? "" : opt.value)
+                        }
+                        className={`min-h-[44px] rounded-full px-2 py-2 text-xs font-medium leading-tight transition-colors ${
+                          isSelected
+                            ? "text-white shadow-sm"
+                            : "border border-gray-200 bg-gray-100 text-gray-700 hover:bg-gray-200"
+                        }`}
+                        style={
+                          isSelected ? { backgroundColor: BRAND } : undefined
+                        }
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <Field label="How long have you had this issue?">
                 <input
                   className="min-h-[44px] w-full rounded-xl border border-gray-200 px-4 py-3 text-base text-gray-900 focus:border-[#16A34A] focus:outline-none focus:ring-2 focus:ring-[#16A34A]/25"
