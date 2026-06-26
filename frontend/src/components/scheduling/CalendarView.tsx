@@ -267,6 +267,38 @@ function calendarApptToPopupData(a: CalendarAppointment): AppointmentPopupData {
   };
 }
 
+function fetchedAppointmentToCalendar(row: Record<string, unknown>): CalendarAppointment {
+  const patientName = String(row.patient_name ?? "").trim();
+  const [pFirst, ...pRest] = patientName.split(/\s+/);
+  const clinicianName = String(row.clinician_name ?? "").trim();
+  const [cFirst, ...cRest] = clinicianName.split(/\s+/);
+
+  return {
+    id: String(row.id ?? ""),
+    start_time: String(row.start_time ?? ""),
+    end_time: String(row.end_time ?? ""),
+    status: String(row.status ?? "scheduled"),
+    source: "",
+    patient: {
+      id: String(row.patient_id ?? ""),
+      first_name: pFirst || null,
+      last_name: pRest.join(" ") || null,
+      phone: (row.patient_phone as string | null | undefined) ?? null,
+    },
+    clinician: {
+      id: "",
+      first_name: cFirst || null,
+      last_name: cRest.join(" ") || null,
+      title: null,
+      color: null,
+    },
+    treatment_type: {
+      name: (row.appointment_type as string | null | undefined) ?? null,
+      duration_minutes: null,
+    },
+  };
+}
+
 function safeDate(value: string | Date | null | undefined): Date | null {
   if (!value) return null;
   const d = new Date(value);
@@ -1027,14 +1059,55 @@ export default function CalendarView({
 
   useEffect(() => {
     if (!openAppointmentId || openAppointmentId.startsWith("block-")) return;
-    const appt = appointments.find((a) => a.id === openAppointmentId);
-    if (appt) {
+
+    const openPopup = (appt: CalendarAppointment) => {
       setDetailAppt(appt);
       setPopupAppt(appt);
       setPopupAnchor(new DOMRect(window.innerWidth / 2, 160, 0, 0));
+      onOpenAppointmentHandled?.();
+    };
+
+    const local = appointments.find((a) => a.id === openAppointmentId);
+    if (local) {
+      openPopup(local);
+      return;
     }
-    onOpenAppointmentHandled?.();
-  }, [openAppointmentId, appointments, onOpenAppointmentHandled]);
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const h = await authHeaders();
+        const res = await fetch(
+          `${API_BASE}/appointments/${encodeURIComponent(openAppointmentId)}?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers: h },
+        );
+        if (cancelled) return;
+        if (!res.ok) {
+          console.error(
+            "Failed to load appointment for openAppointmentId",
+            openAppointmentId,
+            res.status,
+          );
+          onOpenAppointmentHandled?.();
+          return;
+        }
+        const row = (await res.json()) as Record<string, unknown>;
+        if (cancelled) return;
+        openPopup(fetchedAppointmentToCalendar(row));
+      } catch (e) {
+        console.error(
+          "Failed to load appointment for openAppointmentId",
+          openAppointmentId,
+          e,
+        );
+        onOpenAppointmentHandled?.();
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [openAppointmentId, appointments, onOpenAppointmentHandled, clinicId]);
 
   useEffect(() => {
     if (!detailAppt?.id) return;
