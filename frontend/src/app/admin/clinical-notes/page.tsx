@@ -30,6 +30,7 @@ import {
   type MeasurementModuleHandle,
 } from "@/components/clinical-notes/MeasurementModule";
 import { SpecialTestsSection } from "@/components/clinical-notes/SpecialTestsSection";
+import { QuestionnaireResultsSection } from "@/components/clinical-notes/QuestionnaireResultsSection";
 import CptDetectionPanel, {
   type CptCode,
 } from "@/components/CptDetectionPanel";
@@ -1699,7 +1700,7 @@ export default function AdminClinicalNotesPage() {
               ) : null}
 
               {editorTab === 3 ? (
-                <div>
+                <div className="space-y-4">
                   {showSpecialTestsForNoteType(draftNoteType) ? (
                     <SpecialTestsSection
                       noteId={editingId}
@@ -1712,6 +1713,12 @@ export default function AdminClinicalNotesPage() {
                       on Capture if needed.
                     </p>
                   )}
+                  {draftAppointmentId.trim() ? (
+                    <QuestionnaireResultsSection
+                      appointmentId={draftAppointmentId.trim()}
+                      clinicId={clinicId}
+                    />
+                  ) : null}
                 </div>
               ) : null}
 
