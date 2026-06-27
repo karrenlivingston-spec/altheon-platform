@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import type SimplePeer from "simple-peer";
 
 import { supabase } from "@/lib/supabase";
+import { virtualVisitInviteSentKey } from "@/components/virtual-visit/VirtualVisitButton";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
@@ -652,39 +653,49 @@ export default function VirtualVisitRoom({ roomId }: VirtualVisitRoomProps) {
       });
 
       if (role === "clinician" && clinicIdParam) {
-        // Signaling channel is live — tell the backend to send the patient SMS now.
-        try {
-          const token = await getClinicianToken();
-          if (!token) {
-            visitLogError(roomId, "ready: missing auth token, patient SMS not sent");
-          } else {
-            const readyRes = await fetch(
-              `${API_BASE}/visits/${encodeURIComponent(roomId)}/ready?clinic_id=${encodeURIComponent(clinicIdParam)}`,
-              {
-                method: "POST",
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  "Content-Type": "application/json",
-                },
-              },
-            );
-            const readyJson = (await readyRes.json().catch(() => ({}))) as {
-              sms_sent?: boolean;
-              already_sent?: boolean;
-              detail?: string;
-            };
-            if (readyRes.ok) {
-              visitLog(roomId, "ready: patient SMS triggered", readyJson);
+        const inviteAlreadySent = Boolean(
+          sessionStorage.getItem(virtualVisitInviteSentKey(roomId)),
+        );
+        if (inviteAlreadySent) {
+          sessionStorage.removeItem(virtualVisitInviteSentKey(roomId));
+          visitLog(roomId, "ready: skipped — invite already sent from calendar");
+        } else {
+          // Signaling channel is live — tell the backend to send the patient SMS now.
+          try {
+            const token = await getClinicianToken();
+            if (!token) {
+              visitLogError(roomId, "ready: missing auth token, patient SMS not sent");
             } else {
-              visitLogError(roomId, "ready endpoint failed", {
-                status: readyRes.status,
-                detail: readyJson.detail,
-              });
-              setConnectionStatus("Could not send patient link. Retry from the calendar.");
+              const readyRes = await fetch(
+                `${API_BASE}/visits/${encodeURIComponent(roomId)}/ready?clinic_id=${encodeURIComponent(clinicIdParam)}`,
+                {
+                  method: "POST",
+                  headers: {
+                    Authorization: `Bearer ${token}`,
+                    "Content-Type": "application/json",
+                  },
+                  body: JSON.stringify({ delivery_method: "sms" }),
+                },
+              );
+              const readyJson = (await readyRes.json().catch(() => ({}))) as {
+                sms_sent?: boolean;
+                email_sent?: boolean;
+                already_sent?: boolean;
+                detail?: string;
+              };
+              if (readyRes.ok) {
+                visitLog(roomId, "ready: patient invite triggered", readyJson);
+              } else {
+                visitLogError(roomId, "ready endpoint failed", {
+                  status: readyRes.status,
+                  detail: readyJson.detail,
+                });
+                setConnectionStatus("Could not send patient link. Retry from the calendar.");
+              }
             }
+          } catch (err) {
+            visitLogError(roomId, "ready: unexpected error", err);
           }
-        } catch (err) {
-          visitLogError(roomId, "ready: unexpected error", err);
         }
       }
 
