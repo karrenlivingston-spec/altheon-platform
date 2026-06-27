@@ -18,6 +18,7 @@ import {
   DS_SECONDARY_BTN,
 } from "@/app/admin/designSystem";
 import { useClinic } from "@/app/admin/ClinicContext";
+import { usePermissions } from "@/hooks/usePermissions";
 import AppointmentsDaySchedule from "@/components/admin/appointments/AppointmentsDaySchedule";
 import AppointmentsSidePanels from "@/components/admin/appointments/AppointmentsSidePanels";
 import AppointmentsStatCards from "@/components/admin/appointments/AppointmentsStatCards";
@@ -87,6 +88,7 @@ function formatDayTitle(ymd: string): string {
 
 export default function AdminAppointmentsPage() {
   const { clinicId } = useClinic();
+  const { isBiller } = usePermissions();
   const [view, setView] = useState<ViewMode>("day");
   const [anchorYmd, setAnchorYmd] = useState(() => getEasternYMD(new Date()));
   const [providerId, setProviderId] = useState("");
@@ -347,6 +349,7 @@ export default function AdminAppointmentsPage() {
             Patient Flow
           </button>
           <div className="relative">
+            {!isBiller ? (
             <button
               type="button"
               className={`${DS_PRIMARY_BTN} inline-flex items-center gap-1`}
@@ -365,7 +368,8 @@ export default function AdminAppointmentsPage() {
                 }}
               />
             </button>
-            {newApptMenuOpen ? (
+            ) : null}
+            {!isBiller && newApptMenuOpen ? (
               <div className="absolute right-0 top-full z-20 mt-1 min-w-[160px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
                 <button
                   type="button"
@@ -394,6 +398,7 @@ export default function AdminAppointmentsPage() {
       </div>
 
       <div className="mt-4 flex flex-col gap-3 rounded-xl border border-gray-200 bg-white p-3 lg:flex-row lg:items-center lg:justify-between">
+        {!isBiller ? (
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
@@ -431,6 +436,9 @@ export default function AdminAppointmentsPage() {
             + Group Session
           </button>
         </div>
+        ) : (
+        <div className="text-sm text-gray-500">View-only schedule for billing context</div>
+        )}
         <div className="flex flex-wrap items-center gap-2">
           <select
             value={providerId}

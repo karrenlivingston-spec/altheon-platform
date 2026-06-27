@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.constants import STTPDN_CLINIC_ID
 from app.db import supabase
-from app.dependencies.permissions import ALL_ROLES, assert_clinic_role, enforce_clinic_role_from_auth_header, require_role
+from app.dependencies.permissions import ALL_ROLES, READ_CONTEXT_ROLES, assert_clinic_role, enforce_clinic_role_from_auth_header, require_role
 from app.google_calendar import (
     create_calendar_event,
     delete_calendar_event,
@@ -27,7 +27,7 @@ logger = logging.getLogger(__name__)
 # ALTER TABLE appointments ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'aria';
 
 
-@router.get("", dependencies=[Depends(require_role(*ALL_ROLES))])
+@router.get("", dependencies=[Depends(require_role(*READ_CONTEXT_ROLES))])
 def list_appointments(clinic_id: str = Query(...)):
     """Return all appointments for a clinic with patient names and treatment type name."""
     try:
@@ -108,7 +108,7 @@ def _assert_user_has_clinic_access(user_id: str, clinic_id: str) -> None:
     assert_clinic_role(user_id, clinic_id, ALL_ROLES)
 
 
-@router.get("/patient-flow", dependencies=[Depends(require_role(*ALL_ROLES))])
+@router.get("/patient-flow", dependencies=[Depends(require_role(*READ_CONTEXT_ROLES))])
 def get_patient_flow(
     clinic_id: str = Query(...),
     date_ymd: Optional[str] = Query(default=None, alias="date"),
@@ -317,7 +317,7 @@ def _format_calendar_appt_row(
     }
 
 
-@router.get("/calendar", dependencies=[Depends(require_role(*ALL_ROLES))])
+@router.get("/calendar", dependencies=[Depends(require_role(*READ_CONTEXT_ROLES))])
 def get_appointments_calendar(
     start_date: str = Query(...),
     end_date: str = Query(...),
@@ -451,7 +451,7 @@ def _duration_minutes_from_appt_row(row: dict[str, Any]) -> int:
         return 30
 
 
-@router.get("/{appointment_id}", dependencies=[Depends(require_role(*ALL_ROLES))])
+@router.get("/{appointment_id}", dependencies=[Depends(require_role(*READ_CONTEXT_ROLES))])
 def get_appointment(
     appointment_id: str,
     clinic_id: str = Query(...),

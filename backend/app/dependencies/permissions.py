@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated, FrozenSet, Optional
+from typing import Annotated, Any, FrozenSet, Optional
 
 from fastapi import Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -12,18 +12,17 @@ from routers.fee_schedule import _resolve_bearer_user_id
 
 ADMIN_ROLES: list[str] = ["super_admin", "clinic_admin"]
 BILLING_ROLES: list[str] = ["super_admin", "clinic_admin", "clinician"]
+BILLER_ROLE = "biller"
+BILLING_READ_ROLES: list[str] = [*BILLING_ROLES, BILLER_ROLE]
+BILLING_CLAIM_SUBMIT_ROLES: list[str] = [*BILLING_ROLES, BILLER_ROLE]
 CLINICAL_ROLES: list[str] = ["super_admin", "clinic_admin", "clinician"]
+CLINICAL_READ_ROLES: list[str] = [*CLINICAL_ROLES, BILLER_ROLE]
 ALL_ROLES: list[str] = ["super_admin", "clinic_admin", "clinician", "front_desk"]
+READ_CONTEXT_ROLES: list[str] = [*ALL_ROLES, BILLER_ROLE]
 
 STAFF_ASSIGNABLE_ROLES: frozenset[str] = frozenset(
-    {"clinic_admin", "clinician", "front_desk"}
+    {"clinic_admin", "clinician", "front_desk", BILLER_ROLE}
 )
-
-
-class AuthorizedClinicUser(BaseModel):
-    user_id: str
-    clinic_id: str
-    role: str
 
 
 def _handle_supabase_error(response) -> None:
@@ -33,8 +32,19 @@ def _handle_supabase_error(response) -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
-def get_current_user_role(clinic_id: str, user_id: str) -> str:
-    """Fetch the user's role from clinic_users for the given clinic."""
+class AuthorizedClinicUser(BaseModel):
+    user_id: str
+    clinic_id: str
+    role: str
+    billing_only: bool = False
+
+
+def _parse_billing_only(value: Any) -> bool:
+    return bool(value) if value is not None else False
+
+
+def get_clinic_user_access(clinic_id: str, user_id: str) -> dict[str, Any]:
+    """Fetch role and billing_only from clinic_users for the given clinic."""
     cid = (clinic_id or "").strip()
     uid = (user_id or "").strip()
     if not cid or not uid:
@@ -43,7 +53,7 @@ def get_current_user_role(clinic_id: str, user_id: str) -> str:
     try:
         resp = (
             supabase.table("clinic_users")
-            .select("role")
+            .select("role,billing_only")
             .eq("user_id", uid)
             .eq("clinic_id", cid)
             .limit(1)
@@ -59,10 +69,31 @@ def get_current_user_role(clinic_id: str, user_id: str) -> str:
     if not rows:
         raise HTTPException(status_code=403, detail="No clinic access for user")
 
-    role = str(rows[0].get("role") or "").strip()
+    row = rows[0]
+    role = str(row.get("role") or "").strip()
     if not role:
         raise HTTPException(status_code=403, detail="No clinic access for user")
-    return role
+    return {
+        "role": role,
+        "billing_only": _parse_billing_only(row.get("billing_only")),
+    }
+
+
+def get_current_user_role(clinic_id: str, user_id: str) -> str:
+    """Fetch the user's role from clinic_users for the given clinic."""
+    return str(get_clinic_user_access(clinic_id, user_id)["role"])
+
+
+def assert_can_read_clinical_notes(user_id: str, clinic_id: str, role: str) -> None:
+    """Block billing-only billers from clinical note content."""
+    if role != BILLER_ROLE:
+        return
+    access = get_clinic_user_access(clinic_id, user_id)
+    if access.get("billing_only"):
+        raise HTTPException(
+            status_code=403,
+            detail="Billing-only accounts cannot access clinical notes.",
+        )
 
 
 def assert_clinic_role(
@@ -102,10 +133,12 @@ def require_role(*allowed_roles: str):
             return None
 
         role = assert_clinic_role(user_id, clinic_id, allowed)
+        access = get_clinic_user_access(clinic_id, user_id)
         return AuthorizedClinicUser(
             user_id=user_id,
             clinic_id=clinic_id,
             role=role,
+            billing_only=_parse_billing_only(access.get("billing_only")),
         )
 
     return dependency
@@ -120,7 +153,13 @@ def require_role_with_clinic_id(
     user_id = _resolve_bearer_user_id(authorization)
     cid = clinic_id.strip()
     role = assert_clinic_role(user_id, cid, allowed_roles)
-    return AuthorizedClinicUser(user_id=user_id, clinic_id=cid, role=role)
+    access = get_clinic_user_access(cid, user_id)
+    return AuthorizedClinicUser(
+        user_id=user_id,
+        clinic_id=cid,
+        role=role,
+        billing_only=_parse_billing_only(access.get("billing_only")),
+    )
 
 
 def enforce_clinic_role_from_auth_header(
@@ -134,7 +173,42 @@ def enforce_clinic_role_from_auth_header(
     if not cid:
         raise HTTPException(status_code=400, detail="clinic_id is required")
     role = assert_clinic_role(user_id, cid, allowed_roles)
-    return AuthorizedClinicUser(user_id=user_id, clinic_id=cid, role=role)
+    access = get_clinic_user_access(cid, user_id)
+    return AuthorizedClinicUser(
+        user_id=user_id,
+        clinic_id=cid,
+        role=role,
+        billing_only=_parse_billing_only(access.get("billing_only")),
+    )
+
+
+def enforce_clinical_notes_read_from_auth_header(
+    authorization: Optional[str],
+    clinic_id: str,
+) -> AuthorizedClinicUser:
+    """Read access to clinical notes; blocks billing-only billers."""
+    auth = enforce_clinic_role_from_auth_header(
+        authorization,
+        clinic_id,
+        *CLINICAL_READ_ROLES,
+    )
+    assert_can_read_clinical_notes(auth.user_id, auth.clinic_id, auth.role)
+    return auth
+
+
+def require_clinical_notes_read():
+    """Dependency: clinical note read roles + billing-only biller block when clinic_id is present."""
+
+    def dependency(
+        request: Request,
+        authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    ) -> Optional[AuthorizedClinicUser]:
+        auth = require_role(*CLINICAL_READ_ROLES)(request, authorization)
+        if auth is not None:
+            assert_can_read_clinical_notes(auth.user_id, auth.clinic_id, auth.role)
+        return auth
+
+    return dependency
 
 
 RequireAdminRoles = Annotated[
@@ -143,7 +217,7 @@ RequireAdminRoles = Annotated[
 ]
 RequireBillingRoles = Annotated[
     Optional[AuthorizedClinicUser],
-    Depends(require_role(*BILLING_ROLES)),
+    Depends(require_role(*BILLING_READ_ROLES)),
 ]
 RequireClinicalRoles = Annotated[
     Optional[AuthorizedClinicUser],

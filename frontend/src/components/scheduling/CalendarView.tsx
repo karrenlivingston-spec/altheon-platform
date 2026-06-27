@@ -46,6 +46,7 @@ import {
 } from "@/components/adminEastern";
 import { injectIntakePrintStylesAndPrint, intakeMedicalHistoryPills, painDotClass } from "@/lib/intakePrint";
 import { apiAuthHeaders } from "@/lib/apiAuth";
+import { usePermissions } from "@/hooks/usePermissions";
 import {
   formatQuestionnaireScore,
   questionnaireDisplayName,
@@ -471,6 +472,7 @@ export default function CalendarView({
   refreshNonce = 0,
 }: CalendarViewProps) {
   const router = useRouter();
+  const { isBiller } = usePermissions();
   const [internalView, setInternalView] = useState<ViewMode>("week");
   const [internalAnchorYmd, setInternalAnchorYmd] = useState(() => getEasternYMD(new Date()));
   const [internalProviderId, setInternalProviderId] = useState<string>("");
@@ -1131,13 +1133,13 @@ export default function CalendarView({
   }, [appointments, detailAppt?.id]);
 
   useEffect(() => {
-    if (openBookingNonce <= 0) return;
+    if (openBookingNonce <= 0 || isBiller) return;
     waitlistEntryIdRef.current = null;
     setBookModalOpen(true);
-  }, [openBookingNonce]);
+  }, [openBookingNonce, isBiller]);
 
   useEffect(() => {
-    if (bookPrefillNonce <= 0 || !bookPrefill) return;
+    if (bookPrefillNonce <= 0 || !bookPrefill || isBiller) return;
     setBookingPrefill({
       date: bookPrefill.date || getEasternYMD(new Date()),
       time: bookPrefill.time || "09:00",
@@ -1147,7 +1149,7 @@ export default function CalendarView({
     waitlistEntryIdRef.current = bookPrefill.waitlistEntryId ?? null;
     setBookModalOpen(true);
     onBookPrefillConsumed?.();
-  }, [bookPrefillNonce, bookPrefill, onBookPrefillConsumed]);
+  }, [bookPrefillNonce, bookPrefill, onBookPrefillConsumed, isBiller]);
 
   useEffect(() => {
     if (openBlockNonce <= 0) return;
@@ -1396,6 +1398,7 @@ export default function CalendarView({
           onCardClick={handleApptCardClick}
           onGroupSessionClick={handleGroupSessionClick}
           onSlotClick={(ctx) => {
+            if (isBiller) return;
             setBookingPrefill({
               date: ctx.ymd,
               time: slotIndexToHm(ctx.slotIndex),
@@ -1465,6 +1468,7 @@ export default function CalendarView({
           context={slotAction}
           onClose={() => setSlotAction(null)}
           onNewAppointment={(ctx) => {
+            if (isBiller) return;
             setBookingPrefill({
               date: ctx.ymd,
               time: slotIndexToHm(ctx.slotIndex),
@@ -1474,6 +1478,7 @@ export default function CalendarView({
             setBookModalOpen(true);
           }}
           onBlockTime={(ctx) => {
+            if (isBiller) return;
             setSlotAction(null);
             setBlockTimeContext(ctx);
           }}
@@ -1498,6 +1503,7 @@ export default function CalendarView({
           appointment={calendarApptToPopupData(popupAppt)}
           anchorRect={popupAnchor}
           clinicId={clinicId}
+          readOnly={isBiller}
           onClose={closeAppointmentPopup}
           onCheckIn={(id) => void handlePopupCheckIn(id)}
           onCheckOut={(id) => void handlePopupCheckOut(id)}
@@ -1900,6 +1906,7 @@ export default function CalendarView({
               ) : null}
             </div>
             <section className="mt-4 border-t border-slate-100 pt-4">
+              {!isBiller ? (
               <button
                 type="button"
                 className="inline-flex min-h-[44px] w-full items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm font-medium text-slate-800 hover:bg-slate-50"
@@ -1915,7 +1922,9 @@ export default function CalendarView({
                 <span aria-hidden>📋</span>
                 Open Clinical Note
               </button>
+              ) : null}
             </section>
+            {!isBiller ? (
             <section className="mt-4 space-y-3 border-t border-slate-100 pt-4">
               <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
                 <input
@@ -1975,6 +1984,7 @@ export default function CalendarView({
                 onError={(message) => setToast({ kind: "error", message })}
               />
             </section>
+            ) : null}
             <button
               type="button"
               className="intake-print-close-btn mt-4 w-full rounded-lg border border-black/10 py-2 text-sm"

@@ -8,8 +8,9 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
 
+from app.dependencies.permissions import BILLING_READ_ROLES, assert_clinic_role
 from app.db import supabase
-from routers.fee_schedule import _assert_user_has_clinic_access, _resolve_bearer_user_id
+from routers.fee_schedule import _resolve_bearer_user_id
 
 router = APIRouter()
 
@@ -186,7 +187,7 @@ def billing_recommendation(
 ):
     user_id = _resolve_bearer_user_id(authorization)
     cid = clinic_id.strip()
-    _assert_user_has_clinic_access(user_id, cid)
+    assert_clinic_role(user_id, cid, BILLING_READ_ROLES)
 
     vt = visit_type.strip().lower()
     if vt not in _VALID_VISIT_TYPES:
@@ -249,7 +250,7 @@ def list_payers(
     user_id = _resolve_bearer_user_id(authorization)
     cid = (clinic_id or "").strip()
     if cid:
-        _assert_user_has_clinic_access(user_id, cid)
+        assert_clinic_role(user_id, cid, BILLING_READ_ROLES)
 
     payers = _fetch_distinct_payers(cid or None)
     return {"payers": payers}

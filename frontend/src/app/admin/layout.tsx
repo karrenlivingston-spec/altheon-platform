@@ -119,6 +119,8 @@ function AdminAuthenticatedShellInner({
   } = useClinic();
   const {
     isAdmin,
+    isBiller,
+    isBillingOnly,
     canViewBilling,
     canViewClinicalNotes,
     canManageStaff,
@@ -130,6 +132,17 @@ function AdminAuthenticatedShellInner({
   const isSuperAdmin = roleReady && role === "super_admin";
   const isPlatformAnalyticsAdmin =
     roleReady && (role === "super_admin" || role === "platform_admin");
+
+  useEffect(() => {
+    if (!roleReady || !isBiller) return;
+    if (pathname.startsWith("/admin/settings")) {
+      router.replace("/admin/billing");
+      return;
+    }
+    if (isBillingOnly && pathname.startsWith("/admin/clinical-notes")) {
+      router.replace("/admin/billing");
+    }
+  }, [roleReady, isBiller, isBillingOnly, pathname, router]);
 
   function isNavLinkActive(href: string): boolean {
     if (href === "/dashboard/clinics") {
@@ -309,6 +322,44 @@ function AdminAuthenticatedShellInner({
             </div>
           )}
           <nav className="flex flex-1 flex-col gap-1 px-3 py-8">
+            {isBiller ? (
+              <>
+                <Link
+                  href="/admin/billing"
+                  className={navLinkClass("/admin/billing")}
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <span className="flex items-center gap-3">
+                    <Receipt className={navIconClass("/admin/billing")} aria-hidden />
+                    Billing
+                  </span>
+                </Link>
+                <Link
+                  href="/admin/billing"
+                  className={navLinkClass("/admin/billing")}
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <span className="flex items-center gap-3">
+                    <Briefcase className={navIconClass("/admin/billing")} aria-hidden />
+                    Claims
+                  </span>
+                </Link>
+                <Link
+                  href="/admin/billing/payer-optimizer"
+                  className={navLinkClass("/admin/billing/payer-optimizer")}
+                  onClick={() => setSidebarOpen(false)}
+                >
+                  <span className="flex items-center gap-3">
+                    <BarChart2
+                      className={navIconClass("/admin/billing/payer-optimizer")}
+                      aria-hidden
+                    />
+                    Payer Optimizer
+                  </span>
+                </Link>
+              </>
+            ) : (
+              <>
             <Link
               href="/admin"
               className={navLinkClass("/admin")}
@@ -520,6 +571,8 @@ function AdminAuthenticatedShellInner({
             </Link>
               </>
             ) : null}
+              </>
+            )}
           </nav>
           <div className="border-t border-slate-700/60 px-3 py-5">
             <button

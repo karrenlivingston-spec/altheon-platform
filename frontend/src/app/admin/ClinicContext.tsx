@@ -23,6 +23,7 @@ export type MeResponse = {
   /** `clinic_users.id` for the current clinic (use as clinical_notes.author_id). */
   clinic_user_id?: string;
   role: string;
+  billing_only?: boolean;
   clinic: ClinicSummary;
   all_clinics?: ClinicSummary[];
 };
@@ -38,6 +39,7 @@ type ClinicContextValue = {
   primary_color: string;
   agent_name: string;
   role: string;
+  billing_only: boolean;
   all_clinics: ClinicSummary[];
   loading: boolean;
   error: string | null;
@@ -102,6 +104,7 @@ export function ClinicProvider({
           ...data,
           clinic,
           role: (data.role ?? "").trim() || "member",
+          billing_only: Boolean(data.billing_only),
           all_clinics: allClinics,
         });
       } catch (err) {
@@ -157,6 +160,7 @@ export function ClinicProvider({
       me,
       ...clinicState,
       role: (me?.role ?? "").trim() || "member",
+      billing_only: Boolean(me?.billing_only),
       all_clinics: me?.all_clinics ?? [],
       loading,
       error,

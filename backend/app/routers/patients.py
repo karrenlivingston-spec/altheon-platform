@@ -11,12 +11,13 @@ from app.db import supabase
 from app.retry_utils import supabase_execute
 from app.dependencies.permissions import (
     ALL_ROLES,
+    READ_CONTEXT_ROLES,
     enforce_clinic_role_from_auth_header,
     require_role,
 )
 from routers.fee_schedule import ClinicUserDep
 
-router = APIRouter(dependencies=[Depends(require_role(*ALL_ROLES))])
+router = APIRouter()
 
 
 def _now_iso() -> str:
@@ -387,7 +388,7 @@ def _related_pi_cases(patient_id: str, clinic_id: str) -> list[dict[str, Any]]:
     return out
 
 
-@router.get("/referral-source/summary")
+@router.get("/referral-source/summary", dependencies=[Depends(require_role(*READ_CONTEXT_ROLES))])
 def referral_source_summary(
     clinic: ClinicUserDep,
     platform_wide: bool = Query(False),
@@ -424,7 +425,7 @@ def referral_source_summary(
         return []
 
 
-@router.get("/{patient_id}/insurance")
+@router.get("/{patient_id}/insurance", dependencies=[Depends(require_role(*READ_CONTEXT_ROLES))])
 def get_patient_insurance(patient_id: str, clinic_id: str = Query(...)):
     """Primary insurance carrier for appointment popup / scheduling context."""
     if not _has_clinic_access(clinic_id, patient_id):
@@ -439,7 +440,7 @@ def get_patient_insurance(patient_id: str, clinic_id: str = Query(...)):
     }
 
 
-@router.get("/{patient_id}/surveys")
+@router.get("/{patient_id}/surveys", dependencies=[Depends(require_role(*READ_CONTEXT_ROLES))])
 def list_patient_surveys(patient_id: str, clinic_id: str = Query(...)):
     """Return survey_responses for a patient (newest first)."""
     if not _has_clinic_access(clinic_id, patient_id):
@@ -461,7 +462,7 @@ def list_patient_surveys(patient_id: str, clinic_id: str = Query(...)):
     return resp.data or []
 
 
-@router.get("")
+@router.get("", dependencies=[Depends(require_role(*READ_CONTEXT_ROLES))])
 def list_patients(clinic_id: str = Query(...), search: Optional[str] = Query(default=None)):
     """Return patients for the requested clinic (clinic_id on patient row)."""
     try:
@@ -483,7 +484,7 @@ def list_patients(clinic_id: str = Query(...), search: Optional[str] = Query(def
     return resp.data or []
 
 
-@router.post("")
+@router.post("", dependencies=[Depends(require_role(*ALL_ROLES))])
 def create_patient(
     body: dict = Body(...),
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
@@ -558,7 +559,7 @@ def create_patient(
     return JSONResponse(status_code=201, content=_normalize_patient_row(new_row))
 
 
-@router.get("/{patient_id}")
+@router.get("/{patient_id}", dependencies=[Depends(require_role(*READ_CONTEXT_ROLES))])
 def get_patient(patient_id: str, clinic_id: str = Query(...)):
     if not _has_clinic_access(clinic_id, patient_id):
         raise HTTPException(status_code=404, detail="Patient not found")
@@ -585,7 +586,7 @@ def get_patient(patient_id: str, clinic_id: str = Query(...)):
     return _normalize_patient_row(dict(row))
 
 
-@router.patch("/{patient_id}")
+@router.patch("/{patient_id}", dependencies=[Depends(require_role(*ALL_ROLES))])
 def patch_patient(patient_id: str, clinic_id: str = Query(...), body: dict = Body(...)):
     if not _has_clinic_access(clinic_id, patient_id):
         raise HTTPException(status_code=404, detail="Patient not found")

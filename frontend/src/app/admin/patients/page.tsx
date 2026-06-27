@@ -13,6 +13,7 @@ import NewPatientModal, {
   type CreatedPatient,
 } from "@/components/admin/patients/NewPatientModal";
 import { useClinic } from "@/app/admin/ClinicContext";
+import { usePermissions } from "@/hooks/usePermissions";
 import { apiAuthHeaders } from "@/lib/apiAuth";
 import {
   DS_INPUT,
@@ -57,6 +58,7 @@ function sortPatients(list: PatientRow[], sort: SortOption): PatientRow[] {
 
 export default function AdminPatientsPage() {
   const { clinicId } = useClinic();
+  const { isBiller } = usePermissions();
   const [patients, setPatients] = useState<PatientRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -190,13 +192,15 @@ export default function AdminPatientsPage() {
             <p className="text-sm font-medium text-[#64748b]">
               {loading ? "…" : `${filteredCount} Patient${filteredCount === 1 ? "" : "s"}`}
             </p>
-            <button
-              type="button"
-              className={`${DS_SECONDARY_BTN} shrink-0 py-1.5 text-xs`}
-              onClick={() => setNewPatientModalOpen(true)}
-            >
-              + New Patient
-            </button>
+            {!isBiller ? (
+              <button
+                type="button"
+                className={`${DS_SECONDARY_BTN} shrink-0 py-1.5 text-xs`}
+                onClick={() => setNewPatientModalOpen(true)}
+              >
+                + New Patient
+              </button>
+            ) : null}
           </div>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
@@ -315,6 +319,7 @@ export default function AdminPatientsPage() {
             patientId={selectedId}
             clinicId={clinicId}
             embedded
+            readOnly={isBiller}
             onBack={() => setSelectedId(null)}
           />
         )}

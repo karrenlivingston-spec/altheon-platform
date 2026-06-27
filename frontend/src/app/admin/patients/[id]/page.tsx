@@ -4,6 +4,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 
 import { PatientDetailView, type PageTab } from "@/components/admin/PatientDetailView";
 import { useClinic } from "@/app/admin/ClinicContext";
+import { usePermissions } from "@/hooks/usePermissions";
 
 const VALID_TABS = new Set<PageTab>([
   "overview",
@@ -29,6 +30,7 @@ export default function PatientDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { clinicId } = useClinic();
+  const { isBiller } = usePermissions();
   const patientId = typeof params.id === "string" ? params.id : "";
   const initialTab = tabFromParam(searchParams.get("tab"));
 
@@ -39,6 +41,7 @@ export default function PatientDetailPage() {
       clinicId={clinicId}
       embedded={false}
       initialTab={initialTab}
+      readOnly={isBiller}
       onBack={() => router.push("/admin/patients")}
     />
   );

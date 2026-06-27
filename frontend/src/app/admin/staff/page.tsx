@@ -31,6 +31,7 @@ const STAFF_ROLES = [
   { value: "clinic_admin", label: "Clinic admin" },
   { value: "clinician", label: "Clinician" },
   { value: "front_desk", label: "Front desk" },
+  { value: "biller", label: "Biller" },
 ] as const;
 
 type StaffRow = {
@@ -80,6 +81,7 @@ export default function StaffManagementPage() {
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] =
     useState<(typeof STAFF_ROLES)[number]["value"]>("clinician");
+  const [inviteBillingOnly, setInviteBillingOnly] = useState(false);
   const [inviteBusy, setInviteBusy] = useState(false);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [inviteToken, setInviteToken] = useState<string | null>(null);
@@ -191,6 +193,7 @@ export default function StaffManagementPage() {
       email,
       role: inviteRole,
       invited_by: invitedBy,
+      billing_only: inviteRole === "biller" ? inviteBillingOnly : false,
     };
 
     console.log("[staff/invite] payload", { ...payload, invitedBy });
@@ -435,11 +438,12 @@ export default function StaffManagementPage() {
                   <select
                     className={DS_INPUT}
                     value={inviteRole}
-                    onChange={(e) =>
-                      setInviteRole(
-                        e.target.value as (typeof STAFF_ROLES)[number]["value"],
-                      )
-                    }
+                    onChange={(e) => {
+                      const next = e.target
+                        .value as (typeof STAFF_ROLES)[number]["value"];
+                      setInviteRole(next);
+                      if (next !== "biller") setInviteBillingOnly(false);
+                    }}
                   >
                     {STAFF_ROLES.map((option) => (
                       <option key={option.value} value={option.value}>
@@ -448,6 +452,20 @@ export default function StaffManagementPage() {
                     ))}
                   </select>
                 </div>
+                {inviteRole === "biller" ? (
+                  <label className="flex items-start gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      className="mt-0.5 size-4 rounded border-gray-300"
+                      checked={inviteBillingOnly}
+                      onChange={(e) => setInviteBillingOnly(e.target.checked)}
+                    />
+                    <span>
+                      External billing company (billing only — no clinical note
+                      access)
+                    </span>
+                  </label>
+                ) : null}
                 <div className="flex flex-wrap gap-2 pt-2">
                   <button
                     type="submit"

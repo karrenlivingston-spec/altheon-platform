@@ -20,6 +20,7 @@ type PatientHeaderProps = {
   onSave?: () => void;
   onCancel?: () => void;
   saveBusy?: boolean;
+  readOnly?: boolean;
 };
 
 export default function PatientHeader({
@@ -30,6 +31,7 @@ export default function PatientHeader({
   onSave,
   onCancel,
   saveBusy,
+  readOnly = false,
 }: PatientHeaderProps) {
   const age = ageFromDob(patient.date_of_birth);
   const dobLine = [
@@ -67,7 +69,7 @@ export default function PatientHeader({
         </div>
 
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {editMode ? (
+          {readOnly ? null : editMode ? (
             <>
               <button
                 type="button"

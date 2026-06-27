@@ -27,6 +27,7 @@ type Props = {
   appointment: AppointmentPopupData;
   anchorRect: DOMRect;
   clinicId: string;
+  readOnly?: boolean;
   onClose: () => void;
   onCheckIn: (id: string) => void;
   onCheckOut: (id: string) => void;
@@ -147,6 +148,7 @@ export default function AppointmentPopup({
   appointment,
   anchorRect,
   clinicId,
+  readOnly = false,
   onClose,
   onCheckIn,
   onCheckOut,
@@ -432,6 +434,14 @@ export default function AppointmentPopup({
           </div>
         ) : (
           <div className="border-t border-gray-100 px-2 py-2">
+            {readOnly ? (
+              <ActionButton
+                icon="📋"
+                label="Open Chart"
+                onClick={() => onOpenChart(appointment.patient_id)}
+              />
+            ) : (
+              <>
             {showCheckIn ? (
               <ActionButton
                 icon="✅"
@@ -474,6 +484,8 @@ export default function AppointmentPopup({
               label="Open Chart"
               onClick={() => onOpenChart(appointment.patient_id)}
             />
+              </>
+            )}
           </div>
         )}
       </div>

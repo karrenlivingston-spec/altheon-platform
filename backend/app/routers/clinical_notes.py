@@ -14,11 +14,13 @@ from pydantic import BaseModel, Field
 from app.db import supabase
 from app.dependencies.permissions import (
     CLINICAL_ROLES,
+    enforce_clinical_notes_read_from_auth_header,
     enforce_clinic_role_from_auth_header,
+    require_clinical_notes_read,
     require_role,
 )
 
-router = APIRouter(dependencies=[Depends(require_role(*CLINICAL_ROLES))])
+router = APIRouter()
 
 _ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
 
@@ -546,7 +548,7 @@ def _fetch_clinic_notes_rows(clinic_id: str) -> list[dict[str, Any]]:
     return [r for r in (resp.data or []) if isinstance(r, dict)]
 
 
-@router.get("/clinical-notes/stats")
+@router.get("/clinical-notes/stats", dependencies=[Depends(require_clinical_notes_read())])
 def get_clinical_notes_stats(clinic_id: str = Query(..., min_length=1)):
     cid = clinic_id.strip()
     try:
@@ -796,7 +798,7 @@ def _note_matches_filters(
     return True
 
 
-@router.get("/clinical-notes")
+@router.get("/clinical-notes", dependencies=[Depends(require_clinical_notes_read())])
 def list_clinical_notes(
     clinic_id: str = Query(..., min_length=1),
     author_id: Optional[str] = Query(default=None),
@@ -992,7 +994,7 @@ def _resolve_clinic_users_pk(
     raise HTTPException(status_code=404, detail=not_found_detail)
 
 
-@router.post("/clinical-notes")
+@router.post("/clinical-notes", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 def create_clinical_note(
     body: CreateClinicalNoteBody,
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
@@ -1067,7 +1069,7 @@ class ExtractMeasurementsBody(BaseModel):
 
 # NOTE: must be registered before GET /clinical-notes/{note_id} so the literal
 # "extract-measurements" segment is not captured as a note_id.
-@router.post("/clinical-notes/extract-measurements")
+@router.post("/clinical-notes/extract-measurements", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 def extract_measurements_from_transcript(
     body: ExtractMeasurementsBody,
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
@@ -1090,7 +1092,7 @@ def extract_measurements_from_transcript(
 
 # NOTE: must be registered before GET /clinical-notes/{note_id} so the literal
 # "special-tests" segment is not captured as a note_id.
-@router.get("/clinical-notes/special-tests")
+@router.get("/clinical-notes/special-tests", dependencies=[Depends(require_clinical_notes_read())])
 def list_special_tests_catalog():
     """All orthopedic special tests grouped by region, then subcategory.
 
@@ -1186,7 +1188,7 @@ def _fetch_note_for_clinic(note_id: str, clinic_id: str) -> dict[str, Any]:
     return rows[0]
 
 
-@router.post("/clinical-notes/{note_id}/special-tests")
+@router.post("/clinical-notes/{note_id}/special-tests", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 def save_note_special_tests(
     note_id: str,
     body: SaveSpecialTestsBody,
@@ -1235,7 +1237,7 @@ def save_note_special_tests(
     return {"saved": True, "count": len(resp.data or rows)}
 
 
-@router.get("/clinical-notes/{note_id}/special-tests")
+@router.get("/clinical-notes/{note_id}/special-tests", dependencies=[Depends(require_clinical_notes_read())])
 def get_note_special_tests(
     note_id: str,
     clinic_id: str = Query(..., min_length=1),
@@ -1407,7 +1409,7 @@ class SuggestGoalsBody(BaseModel):
     assessment_text: str = ""
 
 
-@router.get("/clinical-notes/{note_id}/goals")
+@router.get("/clinical-notes/{note_id}/goals", dependencies=[Depends(require_clinical_notes_read())])
 def list_note_goals(note_id: str):
     try:
         resp = (
@@ -1428,7 +1430,7 @@ def list_note_goals(note_id: str):
         return []
 
 
-@router.post("/clinical-notes/{note_id}/goals", status_code=201)
+@router.post("/clinical-notes/{note_id}/goals", status_code=201, dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 def create_note_goal(note_id: str, body: CreateNoteGoalBody):
     nid = note_id.strip()
     gt = (body.goal_type or "short_term").strip().lower()
@@ -1472,7 +1474,7 @@ def create_note_goal(note_id: str, body: CreateNoteGoalBody):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.patch("/clinical-notes/{note_id}/goals/{goal_id}")
+@router.patch("/clinical-notes/{note_id}/goals/{goal_id}", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 def patch_note_goal(note_id: str, goal_id: str, body: PatchNoteGoalBody):
     data = body.model_dump(exclude_unset=True)
     if not data:
@@ -1505,7 +1507,7 @@ def patch_note_goal(note_id: str, goal_id: str, body: PatchNoteGoalBody):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.delete("/clinical-notes/{note_id}/goals/{goal_id}")
+@router.delete("/clinical-notes/{note_id}/goals/{goal_id}", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 def delete_note_goal(note_id: str, goal_id: str):
     try:
         dele = (
@@ -1523,7 +1525,7 @@ def delete_note_goal(note_id: str, goal_id: str):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.post("/clinical-notes/{note_id}/suggest-goals")
+@router.post("/clinical-notes/{note_id}/suggest-goals", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 def suggest_note_goals(note_id: str, body: SuggestGoalsBody):
     nid = note_id.strip()
     try:
@@ -1555,8 +1557,11 @@ def suggest_note_goals(note_id: str, body: SuggestGoalsBody):
         return []
 
 
-@router.get("/clinical-notes/{note_id}")
-def get_clinical_note(note_id: str):
+@router.get("/clinical-notes/{note_id}", dependencies=[Depends(require_clinical_notes_read())])
+def get_clinical_note(
+    note_id: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     nid = note_id.strip()
     if not nid:
         raise HTTPException(status_code=400, detail="Invalid note_id")
@@ -1578,10 +1583,14 @@ def get_clinical_note(note_id: str):
     rows = resp.data or []
     if not rows:
         raise HTTPException(status_code=404, detail="Clinical note not found")
-    return rows[0]
+    note = rows[0]
+    clinic_id = str(note.get("clinic_id") or "").strip()
+    if clinic_id:
+        enforce_clinical_notes_read_from_auth_header(authorization, clinic_id)
+    return note
 
 
-@router.patch("/clinical-notes/{note_id}")
+@router.patch("/clinical-notes/{note_id}", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 def patch_clinical_note(note_id: str, body: PatchClinicalNoteBody):
     nid = note_id.strip()
     if not nid:
@@ -1661,7 +1670,7 @@ def patch_clinical_note(note_id: str, body: PatchClinicalNoteBody):
     return saved
 
 
-@router.post("/clinical-notes/{note_id}/submit")
+@router.post("/clinical-notes/{note_id}/submit", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 def submit_clinical_note(note_id: str):
     nid = note_id.strip()
     if not nid:
@@ -1785,7 +1794,7 @@ def submit_clinical_note(note_id: str):
     return out_rows[0]
 
 
-@router.post("/clinical-notes/{note_id}/sign")
+@router.post("/clinical-notes/{note_id}/sign", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 def sign_clinical_note(note_id: str, body: SignNoteBody):
     nid = note_id.strip()
     signed_by = body.signed_by.strip()
@@ -1849,7 +1858,7 @@ def sign_clinical_note(note_id: str, body: SignNoteBody):
     return urows[0]
 
 
-@router.post("/clinical-notes/{note_id}/request-correction")
+@router.post("/clinical-notes/{note_id}/request-correction", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 def request_correction(note_id: str, body: RequestCorrectionBody):
     nid = note_id.strip()
     notes = body.correction_notes.strip()
@@ -1919,7 +1928,7 @@ def _author_id_for_clinical_notes_filter(clinic_id: str, author_id: str) -> str:
         return key
 
 
-@router.get("/clinics/{clinic_id}/clinical-notes")
+@router.get("/clinics/{clinic_id}/clinical-notes", dependencies=[Depends(require_clinical_notes_read())])
 def list_clinic_clinical_notes(
     clinic_id: str,
     status: Optional[str] = Query(default=None),
@@ -1947,8 +1956,11 @@ def list_clinic_clinical_notes(
     return _enrich_notes_rows(rows)
 
 
-@router.get("/patients/{patient_id}/clinical-notes")
-def list_patient_clinical_notes(patient_id: str):
+@router.get("/patients/{patient_id}/clinical-notes", dependencies=[Depends(require_clinical_notes_read())])
+def list_patient_clinical_notes(
+    patient_id: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     pid = patient_id.strip()
     if not pid:
         raise HTTPException(status_code=400, detail="Invalid patient_id")
@@ -1968,4 +1980,30 @@ def list_patient_clinical_notes(patient_id: str):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     rows = [r for r in (resp.data or []) if isinstance(r, dict)]
+    if rows:
+        clinic_id = str(rows[0].get("clinic_id") or "").strip()
+        if clinic_id:
+            enforce_clinical_notes_read_from_auth_header(authorization, clinic_id)
+        else:
+            try:
+                patient_resp = (
+                    supabase.table("patients")
+                    .select("clinic_id")
+                    .eq("id", pid)
+                    .limit(1)
+                    .execute()
+                )
+                _handle_supabase_error(patient_resp)
+                patient_rows = patient_resp.data or []
+                if patient_rows:
+                    patient_clinic_id = str(patient_rows[0].get("clinic_id") or "").strip()
+                    if patient_clinic_id:
+                        enforce_clinical_notes_read_from_auth_header(
+                            authorization,
+                            patient_clinic_id,
+                        )
+            except HTTPException:
+                raise
+            except Exception as patient_exc:
+                raise HTTPException(status_code=500, detail=str(patient_exc)) from patient_exc
     return _enrich_notes_rows(rows)

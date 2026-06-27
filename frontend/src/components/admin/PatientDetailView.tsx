@@ -312,6 +312,7 @@ export type PatientDetailViewProps = {
   clinicId: string;
   embedded?: boolean;
   initialTab?: PageTab;
+  readOnly?: boolean;
   onBack?: () => void;
 };
 
@@ -320,6 +321,7 @@ export function PatientDetailView({
   clinicId,
   embedded = false,
   initialTab,
+  readOnly = false,
   onBack,
 }: PatientDetailViewProps) {
   const [patient, setPatient] = useState<PatientRecord | null>(null);
@@ -738,6 +740,7 @@ export function PatientDetailView({
   }
 
   function beginEdit() {
+    if (readOnly) return;
     if (patient) setDraft({ ...patient });
     setEditMode(true);
   }
@@ -1312,6 +1315,7 @@ export function PatientDetailView({
           onSave={() => void saveEdit()}
           onCancel={cancelEdit}
           saveBusy={saveBusy}
+          readOnly={readOnly}
         />
 
         <PatientQuickStats stats={headerStats} loading={headerStatsLoading} />
@@ -1364,6 +1368,7 @@ export function PatientDetailView({
               patient={patient}
               stats={headerStats}
               onEditProfile={beginEdit}
+              readOnly={readOnly}
             />
           ) : headerStatsLoading ? (
             <div className={`${DS_CARD} mb-6`}>
@@ -1767,7 +1772,7 @@ export function PatientDetailView({
               <h2 className="text-xs font-semibold uppercase tracking-[0.05em] text-gray-500">
                 Visit packages
               </h2>
-              {!showPackageForm ? (
+              {!showPackageForm && !readOnly ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -1840,7 +1845,7 @@ export function PatientDetailView({
                             {formatDob(row.purchase_date)}
                           </td>
                           <td className={DS_TD_PRIMARY}>
-                            {isActive ? (
+                            {isActive && !readOnly ? (
                               <button
                                 type="button"
                                 disabled={packageActionBusyId === row.id}
@@ -1901,7 +1906,7 @@ export function PatientDetailView({
               <h2 className="text-xs font-semibold uppercase tracking-[0.08em] text-gray-500">
                 Legal / PI Information
               </h2>
-              {!legalEdit ? (
+              {!legalEdit && !readOnly ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -2009,7 +2014,7 @@ export function PatientDetailView({
                   </dd>
                 </div>
               </dl>
-            ) : (
+            ) : !readOnly ? (
               <button
                 type="button"
                 onClick={() => {
@@ -2025,6 +2030,8 @@ export function PatientDetailView({
               >
                 Assign lawyer
               </button>
+            ) : (
+              <p className="text-sm text-gray-500">No legal information on file.</p>
             )}
           </div>
           <div className={DS_TABLE_WRAP}>

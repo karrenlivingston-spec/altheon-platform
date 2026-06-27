@@ -19,6 +19,7 @@ type PatientOverviewTabProps = {
   patient: PatientRecord;
   stats: PatientHeaderStats;
   onEditProfile: () => void;
+  readOnly?: boolean;
 };
 
 function statusDot(status: string) {
@@ -32,6 +33,7 @@ export default function PatientOverviewTab({
   patient,
   stats,
   onEditProfile,
+  readOnly = false,
 }: PatientOverviewTabProps) {
   const { clinical_summary: cs, account_summary: ac } = stats;
 
@@ -41,14 +43,16 @@ export default function PatientOverviewTab({
         <div className={DS_CARD}>
           <div className="mb-4 flex items-center justify-between">
             <h2 className="text-base font-semibold text-gray-900">Patient Overview</h2>
-            <button
-              type="button"
-              onClick={onEditProfile}
-              className="inline-flex items-center gap-1 text-sm font-medium text-teal-600 hover:text-teal-700"
-            >
-              <Pencil className="h-4 w-4" aria-hidden />
-              Edit
-            </button>
+            {!readOnly ? (
+              <button
+                type="button"
+                onClick={onEditProfile}
+                className="inline-flex items-center gap-1 text-sm font-medium text-teal-600 hover:text-teal-700"
+              >
+                <Pencil className="h-4 w-4" aria-hidden />
+                Edit
+              </button>
+            ) : null}
           </div>
           <div className="grid gap-6 md:grid-cols-2">
             <div>

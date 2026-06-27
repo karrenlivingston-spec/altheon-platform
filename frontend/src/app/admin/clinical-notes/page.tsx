@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ChevronDown, ChevronRight, Filter, Mic, Search, X } from "lucide-react";
 
 import {
@@ -14,6 +15,7 @@ import {
 } from "@/app/admin/designSystem";
 
 import { useClinic } from "@/app/admin/ClinicContext";
+import { usePermissions } from "@/hooks/usePermissions";
 import { supabase } from "@/lib/supabase";
 import {
   AmbientScribe,
@@ -250,7 +252,10 @@ function clinicalNoteStatusLabel(status: string): string {
 }
 
 export default function AdminClinicalNotesPage() {
+  const router = useRouter();
   const { clinic_id: clinicId, me } = useClinic();
+  const { isBiller, isBillingOnly } = usePermissions();
+  const noteReadOnly = isBiller;
   const supabaseUserId = (me?.user_id ?? "").trim();
   /** clinical_notes.author_id is clinic_users.id; /me exposes clinic_user_id for list/save. */
   const notesAuthorId = (me?.clinic_user_id ?? "").trim() || supabaseUserId;
@@ -1187,6 +1192,12 @@ export default function AdminClinicalNotesPage() {
   }, [editorOpen, editingId, draftPatientId, patients]);
 
   useEffect(() => {
+    if (isBillingOnly) {
+      router.replace("/admin/billing");
+    }
+  }, [isBillingOnly, router]);
+
+  useEffect(() => {
     if (!toast) return;
     const t = window.setTimeout(() => setToast(null), 5000);
     return () => window.clearTimeout(t);
@@ -1226,6 +1237,7 @@ export default function AdminClinicalNotesPage() {
             <Filter className="h-4 w-4" />
             Filters
           </button>
+          {!noteReadOnly ? (
           <button
             type="button"
             onClick={openNewNote}
@@ -1233,6 +1245,7 @@ export default function AdminClinicalNotesPage() {
           >
             + New Note
           </button>
+          ) : null}
         </div>
       </div>
 
@@ -1318,6 +1331,7 @@ export default function AdminClinicalNotesPage() {
             >
               All Clinic Notes
             </button>
+            {!noteReadOnly ? (
             <button
               type="button"
               role="tab"
@@ -1336,6 +1350,7 @@ export default function AdminClinicalNotesPage() {
                 </span>
               ) : null}
             </button>
+            ) : null}
           </div>
 
           {scopeTab === "my" && !notesAuthorId ? (
@@ -1361,8 +1376,8 @@ export default function AdminClinicalNotesPage() {
               setShowCorrectionField(false);
             }}
             exportingNoteId={exportingNoteId}
-            canEdit={(n) => canEditNote(n.status)}
-            scopeReview={scopeTab === "review"}
+            canEdit={(n) => !noteReadOnly && canEditNote(n.status)}
+            scopeReview={scopeTab === "review" && !noteReadOnly}
           />
         </div>
 
@@ -1377,7 +1392,7 @@ export default function AdminClinicalNotesPage() {
         ) : null}
       </div>
 
-      <ClinicalNotesInsights stats={stats} onNewNote={openNewNote} />
+      <ClinicalNotesInsights stats={stats} onNewNote={openNewNote} readOnly={noteReadOnly} />
 
       {/* Note editor — 6-tab workflow */}
       {editorOpen ? (
@@ -1405,6 +1420,11 @@ export default function AdminClinicalNotesPage() {
                   <X className="h-5 w-5" />
                 </button>
               </div>
+              {noteReadOnly ? (
+                <p className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                  Viewing as Biller — read only
+                </p>
+              ) : null}
               <nav
                 className="mt-4 flex flex-wrap gap-1"
                 aria-label="Editor steps"
@@ -1427,6 +1447,7 @@ export default function AdminClinicalNotesPage() {
             </div>
 
             <div className="min-h-0 flex-1 overflow-y-auto pt-4">
+              <fieldset disabled={noteReadOnly} className="min-h-0 border-0 p-0 disabled:opacity-100">
               {editorTab === 1 ? (
                 <div className="space-y-4">
                   <div className="rounded-xl border border-gray-200">
@@ -1892,8 +1913,10 @@ export default function AdminClinicalNotesPage() {
                   ) : null}
                 </div>
               ) : null}
+              </fieldset>
             </div>
 
+            {!noteReadOnly ? (
             <div className="shrink-0 border-t border-gray-100 pt-4">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <button
@@ -1928,6 +1951,19 @@ export default function AdminClinicalNotesPage() {
                 </div>
               </div>
             </div>
+            ) : (
+            <div className="shrink-0 border-t border-gray-100 pt-4">
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  onClick={closeEditor}
+                  className="text-sm font-medium text-gray-600 hover:text-gray-900"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            )}
           </div>
         </div>
       ) : null}
@@ -1968,6 +2004,12 @@ export default function AdminClinicalNotesPage() {
               </button>
             </div>
 
+            {noteReadOnly ? (
+              <p className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                Viewing as Biller — read only
+              </p>
+            ) : null}
+
             {viewLoading ? (
               <p className="mt-4 text-sm text-gray-500">Refreshing…</p>
             ) : null}
@@ -1985,6 +2027,8 @@ export default function AdminClinicalNotesPage() {
                   {viewNote.ai_feedback?.trim() || "—"}
                 </p>
                 <div className="mt-3 flex flex-wrap gap-2">
+                  {!noteReadOnly ? (
+                  <>
                   <button
                     type="button"
                     onClick={() => {
@@ -2003,6 +2047,8 @@ export default function AdminClinicalNotesPage() {
                   >
                     {signAnywayBusy ? "Signing…" : "Sign Anyway"}
                   </button>
+                  </>
+                  ) : null}
                 </div>
                 <p className="mt-2 text-xs text-red-700">
                   Signing anyway overrides the AI flag and will be recorded on the note for review.
@@ -2016,6 +2062,7 @@ export default function AdminClinicalNotesPage() {
                 <p className="mt-1 whitespace-pre-wrap">
                   {viewNote.correction_notes?.trim() || "—"}
                 </p>
+                {!noteReadOnly ? (
                 <button
                   type="button"
                   onClick={() => {
@@ -2026,6 +2073,7 @@ export default function AdminClinicalNotesPage() {
                 >
                   Edit Note
                 </button>
+                ) : null}
               </div>
             ) : null}
 
@@ -2156,6 +2204,12 @@ export default function AdminClinicalNotesPage() {
               </button>
             </div>
 
+            {noteReadOnly ? (
+              <p className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+                Viewing as Biller — read only
+              </p>
+            ) : null}
+
             <div className="mt-6 space-y-4 text-sm">
               <div>
                 <p className="text-xs font-semibold uppercase text-gray-500">
@@ -2194,7 +2248,7 @@ export default function AdminClinicalNotesPage() {
               {formatNoteDate(reviewNote.created_at)}
             </p>
 
-            {showCorrectionField ? (
+            {showCorrectionField && !noteReadOnly ? (
               <label className="mt-6 block text-sm font-medium text-gray-700">
                 Correction notes
                 <textarea
@@ -2207,6 +2261,7 @@ export default function AdminClinicalNotesPage() {
               </label>
             ) : null}
 
+            {!noteReadOnly ? (
             <div className="mt-8 flex flex-wrap gap-3 border-t border-gray-100 pt-6">
               <button
                 type="button"
@@ -2236,6 +2291,17 @@ export default function AdminClinicalNotesPage() {
                 </button>
               )}
             </div>
+            ) : (
+            <div className="mt-8 border-t border-gray-100 pt-6">
+              <button
+                type="button"
+                onClick={() => setReviewNote(null)}
+                className={DS_SECONDARY_BTN}
+              >
+                Close
+              </button>
+            </div>
+            )}
           </div>
         </div>
       ) : null}

@@ -61,6 +61,7 @@ class StaffInviteBody(BaseModel):
     email: EmailStr
     role: str = Field(..., min_length=1)
     invited_by: str = Field(..., min_length=1)
+    billing_only: bool = False
 
 
 class StaffRolePatchBody(BaseModel):
@@ -153,7 +154,7 @@ def invite_staff(
     if role not in STAFF_ASSIGNABLE_ROLES:
         raise HTTPException(
             status_code=400,
-            detail="role must be one of: clinic_admin, clinician, front_desk",
+            detail="role must be one of: clinic_admin, clinician, front_desk, biller",
         )
 
     token = secrets.token_urlsafe(32)
@@ -168,6 +169,7 @@ def invite_staff(
         "token": token,
         "invited_by": invited_by,
         "expires_at": expires_at,
+        "billing_only": bool(body.billing_only),
     }
     logger.info(
         "invite_staff insert clinic_id=%s invited_by=%s role=%s email=%s",
@@ -274,7 +276,7 @@ def update_staff_role(
     if new_role not in STAFF_ASSIGNABLE_ROLES:
         raise HTTPException(
             status_code=400,
-            detail="role must be one of: clinic_admin, clinician, front_desk",
+            detail="role must be one of: clinic_admin, clinician, front_desk, biller",
         )
 
     try:
@@ -364,6 +366,7 @@ def accept_staff_invite(body: AcceptInviteBody):
         email = str(invite.get("email") or "").strip().lower()
         clinic_id = str(invite.get("clinic_id") or "").strip()
         role = str(invite.get("role") or "").strip().lower()
+        billing_only = bool(invite.get("billing_only"))
 
         if not email or not clinic_id or role not in STAFF_ASSIGNABLE_ROLES:
             print(
@@ -424,24 +427,27 @@ def accept_staff_invite(body: AcceptInviteBody):
 
         print(f"accept_staff_invite auth user created user_id={new_user_id}")
 
-        clinician_row = {
-            "first_name": first_name,
-            "last_name": last_name,
-            "email": email,
-            "clinic_id": clinic_id,
-            "location_id": location_id,
-        }
-        print(f"accept_staff_invite clinician_row={clinician_row}")
-        clin_ins = supabase.table("clinicians").insert(clinician_row).execute()
-        _handle_supabase_error(clin_ins)
-        if not (clin_ins.data or []):
-            raise HTTPException(status_code=500, detail="Failed to create clinician")
+        if role != "biller":
+            clinician_row = {
+                "first_name": first_name,
+                "last_name": last_name,
+                "email": email,
+                "clinic_id": clinic_id,
+                "location_id": location_id,
+            }
+            print(f"accept_staff_invite clinician_row={clinician_row}")
+            clin_ins = supabase.table("clinicians").insert(clinician_row).execute()
+            _handle_supabase_error(clin_ins)
+            if not (clin_ins.data or []):
+                raise HTTPException(status_code=500, detail="Failed to create clinician")
 
         clinic_user_row = {
             "user_id": new_user_id,
             "clinic_id": clinic_id,
             "role": role,
         }
+        if role == "biller":
+            clinic_user_row["billing_only"] = billing_only
         print(f"accept_staff_invite clinic_user_row={clinic_user_row}")
         cu_ins = supabase.table("clinic_users").insert(clinic_user_row).execute()
         _handle_supabase_error(cu_ins)

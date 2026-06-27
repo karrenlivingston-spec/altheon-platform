@@ -11,6 +11,7 @@ import {
 type ClinicalNotesInsightsProps = {
   stats: ClinicalNotesStats | null;
   onNewNote: () => void;
+  readOnly?: boolean;
 };
 
 function Sparkline({ values }: { values: number[] }) {
@@ -39,6 +40,7 @@ function Sparkline({ values }: { values: number[] }) {
 export default function ClinicalNotesInsights({
   stats,
   onNewNote,
+  readOnly = false,
 }: ClinicalNotesInsightsProps) {
   const insights = stats?.insights;
 
@@ -107,7 +109,7 @@ export default function ClinicalNotesInsights({
         <ul className="mt-3 divide-y divide-gray-100">
           {(
             [
-              { label: "Create New Note", action: onNewNote },
+              { label: "Create New Note", action: readOnly ? null : onNewNote },
               { label: "Note Templates", action: null as (() => void) | null },
               { label: "AI Settings", action: null },
               { label: "Note Audit Log", action: null },
