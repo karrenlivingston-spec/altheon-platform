@@ -2647,6 +2647,7 @@ const BookPatientModal = memo(function BookPatientModal({
   }, [treatmentTypes, treatmentTypeId]);
 
   useEffect(() => {
+    if (!clinicId) return;
     let cancelled = false;
     (async () => {
       setLoadingTreatmentTypes(true);
@@ -2667,7 +2668,7 @@ const BookPatientModal = memo(function BookPatientModal({
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [clinicId]);
 
   useEffect(() => {
     if (!selectedClinicianId && modalClinicians.length > 0) {
