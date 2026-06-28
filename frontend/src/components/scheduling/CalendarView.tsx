@@ -22,7 +22,7 @@ import {
   useRef,
   useState,
 } from "react";
-import { ChevronDown, Loader2, Printer } from "lucide-react";
+import { ChevronDown, Loader2, MoreHorizontal, Printer } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import AppointmentPopup, {
@@ -88,6 +88,7 @@ export type CalendarAppointment = {
     color?: string | null;
   };
   treatment_type: {
+    id?: string | null;
     name?: string | null;
     duration_minutes?: number | null;
   };
@@ -159,6 +160,35 @@ function snapBookingDuration(minutes: number): number {
     Math.abs(option - minutes) < Math.abs(best - minutes) ? option : best,
   );
 }
+
+function durationMinutesFromAppt(appt: CalendarAppointment): number {
+  const start = Date.parse(appt.start_time);
+  const end = Date.parse(appt.end_time);
+  if (Number.isFinite(start) && Number.isFinite(end) && end > start) {
+    return snapBookingDuration(Math.round((end - start) / 60000));
+  }
+  return snapBookingDuration(appt.treatment_type.duration_minutes ?? 30);
+}
+
+async function patchAppointmentDetails(
+  apptId: string,
+  payload: {
+    start_time: string;
+    treatment_type_id?: string;
+    duration_minutes?: number;
+  },
+) {
+  const h = await authHeaders();
+  const res = await fetch(`${API_BASE}/appointments/${encodeURIComponent(apptId)}/time`, {
+    method: "PATCH",
+    headers: h,
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = (await res.json().catch(() => ({}))) as { detail?: string };
+    throw new Error(err.detail || "Failed to update appointment");
+  }
+}
 type IntakeSummary = {
   id: string;
   appointment_id: string;
@@ -196,6 +226,14 @@ function moveDatePreserveEasternTime(isoUtc: string, newYmd: string): string {
 
 function easternYmdOfIso(iso: string): string {
   return formatInTimeZone(new Date(iso), NY, "yyyy-MM-dd");
+}
+
+function easternHmOfIso(iso: string): string {
+  return formatInTimeZone(new Date(iso), NY, "HH:mm");
+}
+
+function easternLocalToUtcIso(ymd: string, hm: string): string {
+  return toDate(`${ymd}T${hm}:00`, { timeZone: NY }).toISOString();
 }
 
 function blockDateYmd(iso: string): string {
@@ -312,6 +350,7 @@ function fetchedAppointmentToCalendar(row: Record<string, unknown>): CalendarApp
       color: null,
     },
     treatment_type: {
+      id: (row.treatment_type_id as string | null | undefined) ?? null,
       name: (row.appointment_type as string | null | undefined) ?? null,
       duration_minutes: null,
     },
@@ -624,6 +663,7 @@ export default function CalendarView({
   } | null>(null);
   const [detailAppt, setDetailAppt] = useState<CalendarAppointment | null>(null);
   const [popupAppt, setPopupAppt] = useState<CalendarAppointment | null>(null);
+  const [editAppt, setEditAppt] = useState<CalendarAppointment | null>(null);
   const [popupAnchor, setPopupAnchor] = useState<DOMRect | null>(null);
   const [selectedGroupSessionId, setSelectedGroupSessionId] = useState<string | null>(
     null,
@@ -880,18 +920,13 @@ export default function CalendarView({
   }
 
   async function patchAppointmentTime(apptId: string, startIso: string) {
-    const h = await authHeaders();
-    const res = await fetch(`${API_BASE}/appointments/${encodeURIComponent(apptId)}/time`, {
-      method: "PATCH",
-      headers: h,
-      body: JSON.stringify({ start_time: startIso }),
-    });
-    if (!res.ok) {
-      const err = (await res.json().catch(() => ({}))) as { detail?: string };
-      throw new Error(err.detail || "Failed to update appointment time");
-    }
+    await patchAppointmentDetails(apptId, { start_time: startIso });
     await loadData();
   }
+
+  const handleEditAppt = useCallback((appt: CalendarAppointment) => {
+    setEditAppt(appt);
+  }, []);
 
   const closeAppointmentPopup = useCallback(() => {
     setPopupAppt(null);
@@ -1085,7 +1120,7 @@ export default function CalendarView({
       if (!ymd || !clinicianId || Number.isNaN(slotIndex)) return;
       if (clinicianId !== appt.clinician.id) return;
       const newStart = slotStartToUtcIso(ymd, slotIndex);
-      const dur = appt.treatment_type.duration_minutes || 30;
+      const dur = durationMinutesFromAppt(appt);
       const newEndIso = new Date(new Date(newStart).getTime() + dur * 60 * 1000).toISOString();
       const other = findOverlappingAppt(
         filteredAppointments,
@@ -1464,6 +1499,8 @@ export default function CalendarView({
           activeDrag={activeDrag}
           onSlotClick={setSlotAction}
           onApptClick={handleApptCardClick}
+          onEditAppt={handleEditAppt}
+          readOnly={isBiller}
           onGroupSessionClick={handleGroupSessionClick}
         />
       ) : view === "week" ? (
@@ -1478,6 +1515,8 @@ export default function CalendarView({
             setView("day");
           }}
           onCardClick={handleApptCardClick}
+          onEditAppt={handleEditAppt}
+          readOnly={isBiller}
           onGroupSessionClick={handleGroupSessionClick}
           onSlotClick={(ctx) => {
             if (isBiller) return;
@@ -1602,6 +1641,21 @@ export default function CalendarView({
         onClose={closeGroupSessionDetail}
         onUpdated={() => void loadData()}
       />
+
+      {editAppt && clinicId ? (
+        <EditAppointmentModal
+          key={editAppt.id}
+          appt={editAppt}
+          clinicId={clinicId}
+          onClose={() => setEditAppt(null)}
+          onSaved={async () => {
+            setEditAppt(null);
+            await loadData();
+            setToast({ kind: "success", message: "Appointment updated" });
+          }}
+          onError={(message) => setToast({ kind: "error", message })}
+        />
+      ) : null}
 
       {bookModalOpen && clinicId ? (
         <BookPatientModal
@@ -2109,6 +2163,8 @@ function DayGrid({
   activeDrag,
   onSlotClick,
   onApptClick,
+  onEditAppt,
+  readOnly = false,
   onGroupSessionClick,
 }: {
   dayYmd: string;
@@ -2124,6 +2180,8 @@ function DayGrid({
   activeDrag: CalendarAppointment | null;
   onSlotClick: (ctx: SlotClickContext) => void;
   onApptClick: (appt: CalendarAppointment, anchorRect: DOMRect) => void;
+  onEditAppt: (appt: CalendarAppointment) => void;
+  readOnly?: boolean;
   onGroupSessionClick: (session: CalendarGroupSession) => void;
 }) {
   const gridHeight = NUM_SLOTS * ROW_H;
@@ -2226,6 +2284,8 @@ function DayGrid({
                           column={layout?.column ?? 0}
                           totalColumns={layout?.totalColumns ?? 1}
                           onApptClick={onApptClick}
+                          onEditAppt={onEditAppt}
+                          readOnly={readOnly}
                         />
                       );
                     });
@@ -2297,18 +2357,36 @@ function DraggableApptCard({
   column = 0,
   totalColumns = 1,
   onApptClick,
+  onEditAppt,
+  readOnly = false,
 }: {
   appt: CalendarAppointment;
   dayYmd: string;
   column?: number;
   totalColumns?: number;
   onApptClick?: (appt: CalendarAppointment, anchorRect: DOMRect) => void;
+  onEditAppt?: (appt: CalendarAppointment) => void;
+  readOnly?: boolean;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `appt-${appt.id}`,
     data: { appt },
   });
-  const dur = appt.treatment_type.duration_minutes || 30;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    function close(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false);
+      }
+    }
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [menuOpen]);
+
+  const dur = durationMinutesFromAppt(appt);
   const top = (minutesFromGridStart(appt.start_time) / SLOT_MINUTES) * ROW_H;
   const h = (dur / SLOT_MINUTES) * ROW_H;
   const color = appt.clinician.color || "#0EA5A4";
@@ -2319,7 +2397,7 @@ function DraggableApptCard({
     width: `${columnWidth}%`,
     left: `${columnWidth * column}%`,
     transform: transform ? `translate3d(${transform.x}px,${transform.y}px,0)` : undefined,
-    zIndex: isDragging ? 50 : 10,
+    zIndex: isDragging ? 50 : menuOpen ? 40 : 10,
   };
 
   if (easternYmdOfIso(appt.start_time) !== dayYmd) return null;
@@ -2327,20 +2405,7 @@ function DraggableApptCard({
   return (
     <div
       ref={setNodeRef}
-      {...listeners}
-      {...attributes}
-      role="button"
-      tabIndex={0}
-      onClick={(e) => {
-        e.stopPropagation();
-        onApptClick?.(appt, (e.currentTarget as HTMLElement).getBoundingClientRect());
-      }}
-      onKeyDown={(e) => {
-        if (e.key === "Enter") {
-          onApptClick?.(appt, (e.currentTarget as HTMLElement).getBoundingClientRect());
-        }
-      }}
-      className={`absolute cursor-grab overflow-hidden rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] active:cursor-grabbing ${
+      className={`group absolute overflow-visible rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] ${
         isDragging ? "scale-[1.03] opacity-90 shadow-lg" : ""
       }`}
       style={{
@@ -2349,7 +2414,67 @@ function DraggableApptCard({
         background: appt.is_new_patient ? "rgba(245, 158, 11, 0.12)" : `rgba(${hexToRgb(color)}, 0.15)`,
       }}
     >
-      <ApptCardContent appt={appt} compact={false} />
+      <div
+        {...listeners}
+        {...attributes}
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          e.stopPropagation();
+          onApptClick?.(appt, (e.currentTarget as HTMLElement).getBoundingClientRect());
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            onApptClick?.(appt, (e.currentTarget as HTMLElement).getBoundingClientRect());
+          }
+        }}
+        className="h-full cursor-grab overflow-hidden rounded-lg active:cursor-grabbing"
+      >
+        <ApptCardContent appt={appt} compact={false} />
+      </div>
+      {!readOnly ? (
+        <div ref={menuRef} className="absolute right-0.5 top-0.5 z-20">
+          <button
+            type="button"
+            aria-label="Appointment actions"
+            onPointerDown={(e) => e.stopPropagation()}
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuOpen((open) => !open);
+            }}
+            className="rounded-md bg-white/90 p-0.5 text-slate-500 opacity-0 shadow-sm transition-opacity hover:bg-white hover:text-slate-700 group-hover:opacity-100"
+          >
+            <MoreHorizontal className="h-3.5 w-3.5" />
+          </button>
+          {menuOpen ? (
+            <div className="absolute right-0 top-full mt-0.5 min-w-[120px] rounded-lg border border-gray-200 bg-white py-1 shadow-lg">
+              <button
+                type="button"
+                className="block w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  const rect = (e.currentTarget.closest(".group") as HTMLElement | null)?.getBoundingClientRect();
+                  if (rect) onApptClick?.(appt, rect);
+                }}
+              >
+                View
+              </button>
+              <button
+                type="button"
+                className="block w-full px-3 py-1.5 text-left text-xs text-gray-700 hover:bg-gray-50"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMenuOpen(false);
+                  onEditAppt?.(appt);
+                }}
+              >
+                Edit
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -2656,6 +2781,208 @@ function BlockTimeModal({
     </div>
   );
 }
+
+const EditAppointmentModal = memo(function EditAppointmentModal({
+  appt,
+  clinicId,
+  onClose,
+  onSaved,
+  onError,
+}: {
+  appt: CalendarAppointment;
+  clinicId: string;
+  onClose: () => void;
+  onSaved: () => void | Promise<void>;
+  onError: (message: string) => void;
+}) {
+  const [selectedDate, setSelectedDate] = useState(() => easternYmdOfIso(appt.start_time));
+  const [selectedTime, setSelectedTime] = useState(() => easternHmOfIso(appt.start_time));
+  const [treatmentTypes, setTreatmentTypes] = useState<TreatmentTypeOption[]>([]);
+  const [loadingTreatmentTypes, setLoadingTreatmentTypes] = useState(false);
+  const [treatmentTypeId, setTreatmentTypeId] = useState(() => appt.treatment_type.id ?? "");
+  const [durationMinutes, setDurationMinutes] = useState(() => durationMinutesFromAppt(appt));
+  const [durationTouched, setDurationTouched] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    if (!clinicId) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingTreatmentTypes(true);
+      try {
+        const h = await authHeaders();
+        const res = await fetch(
+          `${API_BASE}/treatment-types?clinic_id=${encodeURIComponent(clinicId)}`,
+          { headers: h },
+        );
+        const data = res.ok ? await res.json() : [];
+        if (!cancelled) setTreatmentTypes(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setTreatmentTypes([]);
+      } finally {
+        if (!cancelled) setLoadingTreatmentTypes(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [clinicId]);
+
+  useEffect(() => {
+    if (treatmentTypes.length === 0) return;
+    if (treatmentTypeId && treatmentTypes.some((t) => t.id === treatmentTypeId)) return;
+    const matchByName = appt.treatment_type.name
+      ? treatmentTypes.find((t) => t.name === appt.treatment_type.name)
+      : undefined;
+    setTreatmentTypeId(matchByName?.id ?? treatmentTypes[0]?.id ?? "");
+  }, [treatmentTypes, treatmentTypeId, appt.treatment_type.name]);
+
+  useEffect(() => {
+    if (durationTouched || !treatmentTypeId) return;
+    const selected = treatmentTypes.find((t) => t.id === treatmentTypeId);
+    if (selected?.duration_minutes != null) {
+      setDurationMinutes(snapBookingDuration(Number(selected.duration_minutes)));
+    }
+  }, [treatmentTypeId, treatmentTypes, durationTouched]);
+
+  async function save() {
+    if (!treatmentTypeId) {
+      onError("Select a treatment type");
+      return;
+    }
+    setSaving(true);
+    try {
+      const startIso = easternLocalToUtcIso(selectedDate, selectedTime);
+      await patchAppointmentDetails(appt.id, {
+        start_time: startIso,
+        treatment_type_id: treatmentTypeId,
+        duration_minutes: durationMinutes,
+      });
+      await onSaved();
+    } catch (e) {
+      onError(e instanceof Error ? e.message : "Failed to update appointment");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+      <div className="max-h-[90vh] w-full max-w-md overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">Edit appointment</h2>
+            <p className="mt-1 text-sm text-slate-600">{patientFull(appt)}</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg px-2 py-1 text-sm text-slate-500 hover:bg-slate-100"
+          >
+            Close
+          </button>
+        </div>
+        <div className="mt-5 space-y-4">
+          <div>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+              Date
+            </label>
+            <input
+              type="date"
+              className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                Time
+              </label>
+              <select
+                className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                value={selectedTime}
+                onChange={(e) => setSelectedTime(e.target.value)}
+              >
+                {Array.from({ length: 24 }, (_, i) => i).flatMap((h) =>
+                  [0, 30].map((m) => `${pad2(h)}:${pad2(m)}`),
+                )
+                  .filter((s) => s >= "07:00" && s <= "19:00")
+                  .map((s) => (
+                    <option key={s} value={s}>
+                      {(() => {
+                        try {
+                          const optionDate = toDate(`${selectedDate}T${s}:00`, { timeZone: NY });
+                          if (Number.isNaN(optionDate.getTime())) return s;
+                          return formatInTimeZone(optionDate, NY, "h:mm a");
+                        } catch {
+                          return s;
+                        }
+                      })()}
+                    </option>
+                  ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                Duration
+              </label>
+              <select
+                className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                value={durationMinutes}
+                onChange={(e) => {
+                  setDurationTouched(true);
+                  setDurationMinutes(Number(e.target.value));
+                }}
+              >
+                {BOOKING_DURATION_OPTIONS.map((m) => (
+                  <option key={m} value={m}>
+                    {m} min
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+              Treatment Type
+            </label>
+            <select
+              className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+              value={treatmentTypeId}
+              onChange={(e) => setTreatmentTypeId(e.target.value)}
+              disabled={loadingTreatmentTypes}
+            >
+              {treatmentTypes.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name || t.id}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            className="rounded-lg border border-black/10 px-4 py-2 text-sm"
+            onClick={onClose}
+            disabled={saving}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            className="rounded-lg bg-[#16A34A] px-4 py-2 text-sm font-medium text-white disabled:opacity-60"
+            onClick={() => void save()}
+            disabled={saving}
+          >
+            {saving ? "Saving…" : "Save changes"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
 
 const BookPatientModal = memo(function BookPatientModal({
   clinicId,
@@ -3270,6 +3597,8 @@ function WeekGrid({
   defaultClinicianId,
   onDayHeaderClick,
   onCardClick,
+  onEditAppt,
+  readOnly = false,
   onGroupSessionClick,
   onSlotClick,
   onDragStart,
@@ -3284,6 +3613,8 @@ function WeekGrid({
   defaultClinicianId: string;
   onDayHeaderClick: (ymd: string) => void;
   onCardClick: (a: CalendarAppointment, anchorRect: DOMRect) => void;
+  onEditAppt: (appt: CalendarAppointment) => void;
+  readOnly?: boolean;
   onGroupSessionClick: (session: CalendarGroupSession) => void;
   onSlotClick: (ctx: SlotClickContext) => void;
   onDragStart: (e: DragStartEvent) => void;
@@ -3338,6 +3669,8 @@ function WeekGrid({
                 groupSessions={dayGroupSessions}
                 onHeaderClick={() => onDayHeaderClick(ymd)}
                 onApptClick={onCardClick}
+                onEditAppt={onEditAppt}
+                readOnly={readOnly}
                 onGroupSessionClick={onGroupSessionClick}
                 onSlotClick={onSlotClick}
               />
@@ -3364,6 +3697,8 @@ function WeekDayColumn({
   groupSessions,
   onHeaderClick,
   onApptClick,
+  onEditAppt,
+  readOnly = false,
   onGroupSessionClick,
   onSlotClick,
 }: {
@@ -3376,6 +3711,8 @@ function WeekDayColumn({
   groupSessions: CalendarGroupSession[];
   onHeaderClick: () => void;
   onApptClick: (a: CalendarAppointment, anchorRect: DOMRect) => void;
+  onEditAppt: (appt: CalendarAppointment) => void;
+  readOnly?: boolean;
   onGroupSessionClick: (session: CalendarGroupSession) => void;
   onSlotClick: (ctx: SlotClickContext) => void;
 }) {
@@ -3437,6 +3774,8 @@ function WeekDayColumn({
               column={layout?.column ?? 0}
               totalColumns={layout?.totalColumns ?? 1}
               onApptClick={onApptClick}
+              onEditAppt={onEditAppt}
+              readOnly={readOnly}
             />
           );
         })}

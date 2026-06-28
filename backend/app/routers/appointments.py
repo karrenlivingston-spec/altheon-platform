@@ -58,6 +58,8 @@ class AppointmentStatusPatchBody(BaseModel):
 
 class AppointmentTimePatchBody(BaseModel):
     start_time: str = Field(...)
+    treatment_type_id: Optional[str] = None
+    duration_minutes: Optional[int] = None
 
 
 class AppointmentSwapBody(BaseModel):
@@ -133,7 +135,7 @@ def get_patient_flow(
                 "start_time,end_time,status,source,"
                 "patients(id,first_name,last_name,phone,created_at),"
                 "clinicians(id,first_name,last_name,color,title),"
-                "treatment_types(name,duration_minutes)"
+                "treatment_types(id,name,duration_minutes)"
             )
             .eq("clinic_id", clinic_id)
             .gte("start_time", day_start_utc.isoformat())
@@ -309,6 +311,7 @@ def _format_calendar_appt_row(
             "color": clinician.get("color") or "#0EA5A4",
         },
         "treatment_type": {
+            "id": str(treatment.get("id") or r.get("treatment_type_id") or ""),
             "name": treatment.get("name"),
             "duration_minutes": int(treatment.get("duration_minutes") or 0),
         },
@@ -348,7 +351,7 @@ def get_appointments_calendar(
                 "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,is_virtual,"
                 "patients(id,first_name,last_name,phone),"
                 "clinicians(id,first_name,last_name,color,title),"
-                "treatment_types(name,duration_minutes)"
+                "treatment_types(id,name,duration_minutes)"
             )
             .eq("clinic_id", clinic_id)
             .neq("status", "cancelled")
@@ -465,9 +468,9 @@ def get_appointment(
             lambda: (
                 supabase.table("appointments")
                 .select(
-                    "id, clinic_id, patient_id, clinician_id, start_time, end_time, status, notes, "
+                    "id, clinic_id, patient_id, clinician_id, treatment_type_id, start_time, end_time, status, notes, "
                     "patients(first_name, last_name, phone, insurance_carrier), "
-                    "treatment_types(name), clinicians(first_name, last_name)"
+                    "treatment_types(id, name, duration_minutes), clinicians(first_name, last_name)"
                 )
                 .eq("id", appointment_id)
                 .eq("clinic_id", clinic_id)
@@ -498,6 +501,7 @@ def get_appointment(
         "patient_phone": patient.get("phone"),
         "clinician_name": f"{c_fn} {c_ln}".strip(),
         "appointment_type": treatment.get("name"),
+        "treatment_type_id": row.get("treatment_type_id") or treatment.get("id"),
         "start_time": row.get("start_time"),
         "end_time": row.get("end_time"),
         "status": row.get("status"),
@@ -561,20 +565,41 @@ def update_appointment_time(
     old_clinician_id = str(row.get("clinician_id") or "").strip()
     old_status = str(row.get("status") or "").strip().lower()
 
-    dur = _duration_minutes_from_appt_row(row)
+    if body.duration_minutes is not None:
+        dur = max(1, int(body.duration_minutes))
+    elif body.treatment_type_id and str(body.treatment_type_id).strip():
+        try:
+            tt = (
+                supabase.table("treatment_types")
+                .select("duration_minutes")
+                .eq("id", str(body.treatment_type_id).strip())
+                .limit(1)
+                .execute()
+            )
+            _handle_supabase_error(tt)
+            trows = tt.data or []
+            dur = int((trows[0] or {}).get("duration_minutes") or 60) if trows else 60
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+    else:
+        dur = _duration_minutes_from_appt_row(row)
     new_start = _parse_iso_utc(body.start_time)
     new_end = new_start + timedelta(minutes=dur)
+
+    update_payload: dict[str, Any] = {
+        "start_time": new_start.isoformat(),
+        "end_time": new_end.isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if body.treatment_type_id and str(body.treatment_type_id).strip():
+        update_payload["treatment_type_id"] = str(body.treatment_type_id).strip()
 
     try:
         upd = (
             supabase.table("appointments")
-            .update(
-                {
-                    "start_time": new_start.isoformat(),
-                    "end_time": new_end.isoformat(),
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }
-            )
+            .update(update_payload)
             .eq("id", appointment_id)
             .execute()
         )
@@ -606,7 +631,7 @@ def update_appointment_time(
                 "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,is_virtual,"
                 "patients(id,first_name,last_name,phone),"
                 "clinicians(id,first_name,last_name,color,title),"
-                "treatment_types(name,duration_minutes)"
+                "treatment_types(id,name,duration_minutes)"
             )
             .eq("id", appointment_id)
             .limit(1)
@@ -730,7 +755,7 @@ def swap_appointment_times(
                     "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,is_virtual,"
                     "patients(id,first_name,last_name,phone),"
                     "clinicians(id,first_name,last_name,color,title),"
-                    "treatment_types(name,duration_minutes)"
+                    "treatment_types(id,name,duration_minutes)"
                 )
                 .eq("id", aid)
                 .limit(1)
