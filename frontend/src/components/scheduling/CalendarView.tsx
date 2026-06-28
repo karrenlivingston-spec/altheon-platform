@@ -1521,7 +1521,7 @@ export default function CalendarView({
         onUpdated={() => void loadData()}
       />
 
-      {bookModalOpen ? (
+      {bookModalOpen && clinicId ? (
         <BookPatientModal
           clinicId={clinicId}
           clinicians={clinicians}
