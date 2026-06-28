@@ -56,19 +56,19 @@ def _clinic_row(appt: dict[str, Any]) -> Optional[dict[str, Any]]:
 
 
 def _appointments_in_hours_window(hours_lo: float, hours_hi: float) -> list[dict[str, Any]]:
-    now = datetime.now(timezone.utc)
-    start_utc = now + timedelta(hours=hours_lo)
-    end_utc = now + timedelta(hours=hours_hi)
+    now_utc = datetime.now(timezone.utc)
+    window_start = now_utc + timedelta(hours=hours_lo)
+    window_end = now_utc + timedelta(hours=hours_hi)
     try:
         resp = (
             supabase.table("appointments")
             .select(
-                "id, patient_id, clinic_id, start_time, status, "
+                "id, patient_id, clinician_id, clinic_id, start_time, status, "
                 "patients(first_name, phone), clinics(name, brand_name)"
             )
-            .eq("status", "scheduled")
-            .gte("start_time", start_utc.isoformat())
-            .lt("start_time", end_utc.isoformat())
+            .gte("start_time", window_start.isoformat())
+            .lte("start_time", window_end.isoformat())
+            .not_.in_("status", ["cancelled", "no_show"])
             .execute()
         )
         rows = resp.data or []
