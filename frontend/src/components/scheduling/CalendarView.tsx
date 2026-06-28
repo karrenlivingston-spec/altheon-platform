@@ -147,6 +147,17 @@ type TreatmentTypeOption = {
   name?: string | null;
   duration_minutes?: number | null;
 };
+
+const BOOKING_DURATION_OPTIONS = [15, 30, 45, 60, 90, 120] as const;
+
+function snapBookingDuration(minutes: number): number {
+  if (BOOKING_DURATION_OPTIONS.includes(minutes as (typeof BOOKING_DURATION_OPTIONS)[number])) {
+    return minutes;
+  }
+  return BOOKING_DURATION_OPTIONS.reduce((best, option) =>
+    Math.abs(option - minutes) < Math.abs(best - minutes) ? option : best,
+  );
+}
 type IntakeSummary = {
   id: string;
   appointment_id: string;
@@ -415,6 +426,75 @@ function overlapsRange(
   endB: Date,
 ): boolean {
   return startA < endB && endA > startB;
+}
+
+function apptOverlaps(a: CalendarAppointment, b: CalendarAppointment): boolean {
+  return a.start_time < b.end_time && b.start_time < a.end_time;
+}
+
+type ApptOverlapLayout = { column: number; totalColumns: number };
+
+function computeOverlapLayout(
+  appointments: CalendarAppointment[],
+): Map<string, ApptOverlapLayout> {
+  const result = new Map<string, ApptOverlapLayout>();
+  if (appointments.length === 0) return result;
+
+  const sorted = [...appointments].sort((a, b) => {
+    const cmp = a.start_time.localeCompare(b.start_time);
+    if (cmp !== 0) return cmp;
+    return a.end_time.localeCompare(b.end_time);
+  });
+
+  const clusters: CalendarAppointment[][] = [];
+  let currentCluster: CalendarAppointment[] = [];
+  let clusterEnd = "";
+
+  for (const appt of sorted) {
+    if (currentCluster.length === 0) {
+      currentCluster = [appt];
+      clusterEnd = appt.end_time;
+      continue;
+    }
+    if (appt.start_time < clusterEnd) {
+      currentCluster.push(appt);
+      if (appt.end_time > clusterEnd) clusterEnd = appt.end_time;
+    } else {
+      clusters.push(currentCluster);
+      currentCluster = [appt];
+      clusterEnd = appt.end_time;
+    }
+  }
+  if (currentCluster.length > 0) clusters.push(currentCluster);
+
+  for (const cluster of clusters) {
+    const columns: CalendarAppointment[][] = [];
+    const clusterSorted = [...cluster].sort((a, b) =>
+      a.start_time.localeCompare(b.start_time),
+    );
+
+    for (const appt of clusterSorted) {
+      let placed = false;
+      for (let col = 0; col < columns.length; col++) {
+        const lastInCol = columns[col][columns[col].length - 1];
+        if (!apptOverlaps(appt, lastInCol)) {
+          columns[col].push(appt);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) columns.push([appt]);
+    }
+
+    const totalColumns = Math.max(columns.length, 1);
+    for (let col = 0; col < columns.length; col++) {
+      for (const appt of columns[col]) {
+        result.set(appt.id, { column: col, totalColumns });
+      }
+    }
+  }
+
+  return result;
 }
 
 type CalendarViewProps = {
@@ -2126,16 +2206,27 @@ function DayGrid({
                   {(blockedByClinician.get(clin.id) || []).map((b) => (
                     <BlockedOverlay key={b.id} block={b} dayYmd={dayYmd} onRemoved={onRefresh} />
                   ))}
-                  {appointments
-                    .filter((a) => a.clinician.id === clin.id && easternYmdOfIso(a.start_time) === dayYmd)
-                    .map((a) => (
-                      <DraggableApptCard
-                        key={a.id}
-                        appt={a}
-                        dayYmd={dayYmd}
-                        onApptClick={onApptClick}
-                      />
-                    ))}
+                  {(() => {
+                    const dayAppts = appointments.filter(
+                      (a) =>
+                        a.clinician.id === clin.id &&
+                        easternYmdOfIso(a.start_time) === dayYmd,
+                    );
+                    const overlapLayout = computeOverlapLayout(dayAppts);
+                    return dayAppts.map((a) => {
+                      const layout = overlapLayout.get(a.id);
+                      return (
+                        <DraggableApptCard
+                          key={a.id}
+                          appt={a}
+                          dayYmd={dayYmd}
+                          column={layout?.column ?? 0}
+                          totalColumns={layout?.totalColumns ?? 1}
+                          onApptClick={onApptClick}
+                        />
+                      );
+                    });
+                  })()}
                   {groupSessions
                     .filter(
                       (s) =>
@@ -2200,10 +2291,14 @@ function DroppableSlotCell({
 function DraggableApptCard({
   appt,
   dayYmd,
+  column = 0,
+  totalColumns = 1,
   onApptClick,
 }: {
   appt: CalendarAppointment;
   dayYmd: string;
+  column?: number;
+  totalColumns?: number;
   onApptClick?: (appt: CalendarAppointment, anchorRect: DOMRect) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
@@ -2214,9 +2309,12 @@ function DraggableApptCard({
   const top = (minutesFromGridStart(appt.start_time) / SLOT_MINUTES) * ROW_H;
   const h = (dur / SLOT_MINUTES) * ROW_H;
   const color = appt.clinician.color || "#0EA5A4";
+  const columnWidth = 100 / totalColumns;
   const style: React.CSSProperties = {
     top,
     height: Math.max(h, ROW_H / 2),
+    width: `${columnWidth}%`,
+    left: `${columnWidth * column}%`,
     transform: transform ? `translate3d(${transform.x}px,${transform.y}px,0)` : undefined,
     zIndex: isDragging ? 50 : 10,
   };
@@ -2239,7 +2337,7 @@ function DraggableApptCard({
           onApptClick?.(appt, (e.currentTarget as HTMLElement).getBoundingClientRect());
         }
       }}
-      className={`absolute right-1 left-1 cursor-grab overflow-hidden rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] active:cursor-grabbing ${
+      className={`absolute cursor-grab overflow-hidden rounded-lg bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] active:cursor-grabbing ${
         isDragging ? "scale-[1.03] opacity-90 shadow-lg" : ""
       }`}
       style={{
@@ -2602,6 +2700,7 @@ const BookPatientModal = memo(function BookPatientModal({
     () => initialDate || getEasternYMD(new Date()),
   );
   const [selectedTime, setSelectedTime] = useState(initialTime || "09:00");
+  const [durationMinutes, setDurationMinutes] = useState<number>(30);
   const [selectedClinicianId, setSelectedClinicianId] = useState(
     () => initialClinicianId || clinicians[0]?.id || "",
   );
@@ -2655,6 +2754,14 @@ const BookPatientModal = memo(function BookPatientModal({
       setTreatmentTypeId(treatmentTypes[0].id);
     }
   }, [treatmentTypes, treatmentTypeId]);
+
+  useEffect(() => {
+    if (!treatmentTypeId) return;
+    const selected = treatmentTypes.find((t) => t.id === treatmentTypeId);
+    if (selected?.duration_minutes != null) {
+      setDurationMinutes(snapBookingDuration(Number(selected.duration_minutes)));
+    }
+  }, [treatmentTypeId, treatmentTypes]);
 
   useEffect(() => {
     if (!clinicId) return;
@@ -2851,6 +2958,7 @@ const BookPatientModal = memo(function BookPatientModal({
           location_id: locationId,
           treatment_type_id: treatmentTypeId,
           start_time,
+          duration_minutes: durationMinutes,
           source: "manual",
           is_virtual: isVirtual,
         }),
@@ -3029,33 +3137,51 @@ const BookPatientModal = memo(function BookPatientModal({
                   onChange={(e) => setSelectedDate(e.target.value)}
                 />
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
-                  Time
-                </label>
-                <select
-                  className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
-                  value={selectedTime}
-                  onChange={(e) => setSelectedTime(e.target.value)}
-                >
-                  {Array.from({ length: 24 }, (_, i) => i).flatMap((h) =>
-                    [0, 30].map((m) => `${pad2(h)}:${pad2(m)}`),
-                  )
-                    .filter((s) => s >= "07:00" && s <= "19:00")
-                    .map((s) => (
-                      <option key={s} value={s}>
-                        {(() => {
-                          try {
-                            const optionDate = toDate(`${selectedDate}T${s}:00`, { timeZone: NY });
-                            if (Number.isNaN(optionDate.getTime())) return s;
-                            return formatInTimeZone(optionDate, NY, "h:mm a");
-                          } catch {
-                            return s;
-                          }
-                        })()}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                    Time
+                  </label>
+                  <select
+                    className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                    value={selectedTime}
+                    onChange={(e) => setSelectedTime(e.target.value)}
+                  >
+                    {Array.from({ length: 24 }, (_, i) => i).flatMap((h) =>
+                      [0, 30].map((m) => `${pad2(h)}:${pad2(m)}`),
+                    )
+                      .filter((s) => s >= "07:00" && s <= "19:00")
+                      .map((s) => (
+                        <option key={s} value={s}>
+                          {(() => {
+                            try {
+                              const optionDate = toDate(`${selectedDate}T${s}:00`, { timeZone: NY });
+                              if (Number.isNaN(optionDate.getTime())) return s;
+                              return formatInTimeZone(optionDate, NY, "h:mm a");
+                            } catch {
+                              return s;
+                            }
+                          })()}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                    Duration
+                  </label>
+                  <select
+                    className="h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                    value={durationMinutes}
+                    onChange={(e) => setDurationMinutes(Number(e.target.value))}
+                  >
+                    {BOOKING_DURATION_OPTIONS.map((m) => (
+                      <option key={m} value={m}>
+                        {m} min
                       </option>
                     ))}
-                </select>
+                  </select>
+                </div>
               </div>
               <div>
                 <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-slate-500">
@@ -3256,6 +3382,10 @@ function WeekDayColumn({
     if (mins < 0 || mins > NUM_SLOTS * SLOT_MINUTES) return null;
     return (mins / SLOT_MINUTES) * ROW_H;
   }, [ymd, todayYmd]);
+  const overlapLayout = useMemo(
+    () => computeOverlapLayout(appointments),
+    [appointments],
+  );
 
   return (
     <div
@@ -3291,14 +3421,19 @@ function WeekDayColumn({
             style={{ top: nowLinePx }}
           />
         ) : null}
-        {appointments.map((a) => (
-          <DraggableApptCard
-            key={a.id}
-            appt={a}
-            dayYmd={ymd}
-            onApptClick={onApptClick}
-          />
-        ))}
+        {appointments.map((a) => {
+          const layout = overlapLayout.get(a.id);
+          return (
+            <DraggableApptCard
+              key={a.id}
+              appt={a}
+              dayYmd={ymd}
+              column={layout?.column ?? 0}
+              totalColumns={layout?.totalColumns ?? 1}
+              onApptClick={onApptClick}
+            />
+          );
+        })}
         {groupSessions.map((s) => (
           <CalendarGroupSessionCard
             key={`gs-${s.id}`}

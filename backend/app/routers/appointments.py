@@ -950,6 +950,7 @@ class CreateAppointmentRequest(BaseModel):
     treatment_type_id: str
     start_time: str
     end_time: Optional[str] = None
+    duration_minutes: Optional[int] = None
     patient_id: Optional[str] = None
     patient_first_name: Optional[str] = None
     patient_last_name: Optional[str] = None
@@ -1706,21 +1707,24 @@ def create_appointment(
     if payload.end_time:
         end_iso = payload.end_time
     else:
-        try:
-            tt = (
-                supabase.table("treatment_types")
-                .select("duration_minutes")
-                .eq("id", payload.treatment_type_id)
-                .limit(1)
-                .execute()
-            )
-            _handle_supabase_error(tt)
-        except HTTPException:
-            raise
-        except Exception as exc:
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
-        trows = tt.data or []
-        duration_minutes = int((trows[0] or {}).get("duration_minutes") or 60) if trows else 60
+        if payload.duration_minutes is not None:
+            duration_minutes = max(1, int(payload.duration_minutes))
+        else:
+            try:
+                tt = (
+                    supabase.table("treatment_types")
+                    .select("duration_minutes")
+                    .eq("id", payload.treatment_type_id)
+                    .limit(1)
+                    .execute()
+                )
+                _handle_supabase_error(tt)
+            except HTTPException:
+                raise
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=str(exc)) from exc
+            trows = tt.data or []
+            duration_minutes = int((trows[0] or {}).get("duration_minutes") or 60) if trows else 60
         start_dt = _parse_iso_utc(start_iso)
         end_iso = (start_dt + timedelta(minutes=duration_minutes)).isoformat()
 
