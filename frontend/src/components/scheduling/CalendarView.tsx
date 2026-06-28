@@ -138,6 +138,8 @@ export type CalendarBookPrefill = {
 
 type ViewMode = "day" | "week" | "month" | "agenda";
 export type { ViewMode };
+
+const DEFAULT_CALENDAR_VIEW: ViewMode = "week";
 type PatientOption = {
   id: string;
   first_name?: string | null;
@@ -593,7 +595,7 @@ export default function CalendarView({
 }: CalendarViewProps) {
   const router = useRouter();
   const { isBiller } = usePermissions();
-  const [internalView, setInternalView] = useState<ViewMode>("week");
+  const [internalView, setInternalView] = useState<ViewMode>(DEFAULT_CALENDAR_VIEW);
   const [internalAnchorYmd, setInternalAnchorYmd] = useState(() => getEasternYMD(new Date()));
   const [internalProviderId, setInternalProviderId] = useState<string>("");
   const [internalLocationId, setInternalLocationId] = useState<string>("");
@@ -927,6 +929,19 @@ export default function CalendarView({
   const handleEditAppt = useCallback((appt: CalendarAppointment) => {
     setEditAppt(appt);
   }, []);
+
+  const openBookingFromSlot = useCallback(
+    (ctx: SlotClickContext) => {
+      if (isBiller) return;
+      setBookingPrefill({
+        date: ctx.ymd,
+        time: slotIndexToHm(ctx.slotIndex),
+        clinicianId: ctx.clinicianId,
+      });
+      setBookModalOpen(true);
+    },
+    [isBiller],
+  );
 
   const closeAppointmentPopup = useCallback(() => {
     setPopupAppt(null);
@@ -1518,15 +1533,7 @@ export default function CalendarView({
           onEditAppt={handleEditAppt}
           readOnly={isBiller}
           onGroupSessionClick={handleGroupSessionClick}
-          onSlotClick={(ctx) => {
-            if (isBiller) return;
-            setBookingPrefill({
-              date: ctx.ymd,
-              time: slotIndexToHm(ctx.slotIndex),
-              clinicianId: ctx.clinicianId,
-            });
-            setBookModalOpen(true);
-          }}
+          onSlotClick={openBookingFromSlot}
           onDragStart={handleDragStart}
           onDragEnd={handleDragEnd}
           sensors={sensors}
@@ -1589,14 +1596,8 @@ export default function CalendarView({
           context={slotAction}
           onClose={() => setSlotAction(null)}
           onNewAppointment={(ctx) => {
-            if (isBiller) return;
-            setBookingPrefill({
-              date: ctx.ymd,
-              time: slotIndexToHm(ctx.slotIndex),
-              clinicianId: ctx.clinicianId,
-            });
             setSlotAction(null);
-            setBookModalOpen(true);
+            openBookingFromSlot(ctx);
           }}
           onBlockTime={(ctx) => {
             if (isBiller) return;

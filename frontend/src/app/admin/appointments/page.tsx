@@ -89,7 +89,7 @@ function formatDayTitle(ymd: string): string {
 export default function AdminAppointmentsPage() {
   const { clinicId } = useClinic();
   const { isBiller } = usePermissions();
-  const [view, setView] = useState<ViewMode>("day");
+  const [view, setView] = useState<ViewMode>("week");
   const [anchorYmd, setAnchorYmd] = useState(() => getEasternYMD(new Date()));
   const [providerId, setProviderId] = useState("");
   const [locationId, setLocationId] = useState("");
