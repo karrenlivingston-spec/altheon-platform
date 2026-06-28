@@ -960,6 +960,7 @@ class CreateAppointmentRequest(BaseModel):
     source: Optional[str] = None
     preferred_language: Optional[str] = "en"
     is_virtual: Optional[bool] = False
+    is_follow_up: Optional[bool] = False
 
 
 class PatchAppointmentVirtualRequest(BaseModel):
@@ -1853,15 +1854,16 @@ def create_appointment(
         )
 
     try:
-        send_booking_intake_sms(
-            appointment_id=appointment_id,
-            patient_id=patient_id,
-            clinic_id=payload.clinic_id,
-            start_time_iso=start_iso,
-            patient_phone=phone_out,
-            patient_first_name=fname,
-            preferred_language=pref_lang,
-        )
+        if not payload.is_follow_up:
+            send_booking_intake_sms(
+                appointment_id=appointment_id,
+                patient_id=patient_id,
+                clinic_id=payload.clinic_id,
+                start_time_iso=start_iso,
+                patient_phone=phone_out,
+                patient_first_name=fname,
+                preferred_language=pref_lang,
+            )
     except Exception:
         logger.exception(
             "booking intake SMS failed appointment_id=%s patient_id=%s",

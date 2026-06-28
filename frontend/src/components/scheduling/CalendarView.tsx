@@ -124,6 +124,7 @@ type BookingPrefill = {
   time: string;
   clinicianId: string;
   patient?: PatientOption | null;
+  isFollowUp?: boolean;
 };
 
 export type CalendarBookPrefill = {
@@ -1016,6 +1017,7 @@ export default function CalendarView({
         date: getEasternYMD(new Date()),
         time: "09:00",
         clinicianId: calAppt?.clinician.id || clinicians[0]?.id || "",
+        isFollowUp: true,
         patient: calAppt
           ? {
               id: calAppt.patient.id,
@@ -1610,6 +1612,7 @@ export default function CalendarView({
           initialTime={bookingPrefill?.time}
           initialClinicianId={bookingPrefill?.clinicianId}
           initialPatient={bookingPrefill?.patient}
+          initialIsFollowUp={bookingPrefill?.isFollowUp ?? false}
           onClose={() => {
             setBookModalOpen(false);
             setBookingPrefill(null);
@@ -2662,6 +2665,7 @@ const BookPatientModal = memo(function BookPatientModal({
   initialTime,
   initialClinicianId,
   initialPatient,
+  initialIsFollowUp = false,
   onClose,
   onBooked,
   onError,
@@ -2673,6 +2677,7 @@ const BookPatientModal = memo(function BookPatientModal({
   initialTime?: string;
   initialClinicianId?: string;
   initialPatient?: PatientOption | null;
+  initialIsFollowUp?: boolean;
   onClose: () => void;
   onBooked: () => void | Promise<void>;
   onError: (message: string) => void;
@@ -2961,6 +2966,7 @@ const BookPatientModal = memo(function BookPatientModal({
           duration_minutes: durationMinutes,
           source: "manual",
           is_virtual: isVirtual,
+          is_follow_up: initialIsFollowUp,
         }),
       });
       if (!res.ok) {
