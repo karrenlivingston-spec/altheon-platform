@@ -70,12 +70,12 @@ export default function AppointmentsSidePanels({
             </li>
           ))}
         </ul>
-        <button
-          type="button"
-          className="mt-2 text-[11px] font-medium text-emerald-700 hover:underline"
+        <Link
+          href="/admin/tasks"
+          className="mt-2 inline-block text-[11px] font-medium text-emerald-700 hover:underline"
         >
           View All Tasks →
-        </button>
+        </Link>
       </div>
 
       <div className={SIDEBAR_CARD}>

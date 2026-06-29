@@ -22,10 +22,14 @@ import {
   Settings,
   Clock3,
   UserCog,
+  CheckSquare,
+  MessageCircle,
 } from "lucide-react";
 
 import { supabase } from "@/lib/supabase";
 import { usePermissions } from "@/hooks/usePermissions";
+import { useMessagingUnreadCount } from "@/hooks/useMessagingUnreadCount";
+import TaskNotificationsBell from "@/components/admin/tasks/TaskNotificationsBell";
 
 import { ClinicProvider, useClinic } from "./ClinicContext";
 import AskAltheon from "./components/AskAltheon";
@@ -112,6 +116,7 @@ function AdminAuthenticatedShellInner({
     clinic_id: clinicId,
     brand_name: brandName,
     role,
+    me,
     all_clinics: allClinics,
     loading: clinicLoading,
     error: clinicError,
@@ -125,6 +130,7 @@ function AdminAuthenticatedShellInner({
     canViewClinicalNotes,
     canManageStaff,
   } = usePermissions();
+  const messagingUnread = useMessagingUnreadCount(clinicId, me?.user_id);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [clinicMenuOpen, setClinicMenuOpen] = useState(false);
 
@@ -499,6 +505,34 @@ function AdminAuthenticatedShellInner({
               </span>
             </Link>
             <Link
+              href="/admin/tasks"
+              className={navLinkClass("/admin/tasks")}
+              onClick={() => setSidebarOpen(false)}
+            >
+              <span className="flex items-center gap-3">
+                <CheckSquare className={navIconClass("/admin/tasks")} aria-hidden />
+                Tasks
+              </span>
+            </Link>
+            <Link
+              href="/admin/messaging"
+              className={navLinkClass("/admin/messaging")}
+              onClick={() => setSidebarOpen(false)}
+            >
+              <span className="flex items-center gap-3">
+                <MessageCircle
+                  className={navIconClass("/admin/messaging")}
+                  aria-hidden
+                />
+                Messages
+                {messagingUnread > 0 ? (
+                  <span className="ml-auto rounded-full bg-red-600 px-2 py-0.5 text-[10px] font-bold text-white">
+                    {messagingUnread > 99 ? "99+" : messagingUnread}
+                  </span>
+                ) : null}
+              </span>
+            </Link>
+            <Link
               href="/admin/voice-agent"
               className={navLinkClass("/admin/voice-agent")}
               onClick={() => setSidebarOpen(false)}
@@ -590,6 +624,11 @@ function AdminAuthenticatedShellInner({
 
         <main className="flex min-h-screen flex-1 flex-col bg-transparent md:min-h-0">
           <div className="mx-auto w-full max-w-6xl flex-1 px-6 py-6 pt-16 text-slate-900 md:pt-6">
+            {!isBiller ? (
+              <div className="mb-4 flex justify-end">
+                <TaskNotificationsBell clinicId={clinicId} userId={me?.user_id} />
+              </div>
+            ) : null}
             {children}
           </div>
         </main>

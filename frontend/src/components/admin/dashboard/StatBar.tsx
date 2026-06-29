@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   AlertTriangle,
   Calendar,
@@ -26,19 +27,36 @@ function StatCard({
   label,
   sub,
   subClass,
+  href,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   value: string;
   label: string;
   sub: string;
   subClass: string;
+  href?: string;
 }) {
-  return (
-    <div className="relative rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+  const inner = (
+    <>
       <Icon className="absolute right-4 top-4 h-5 w-5 text-gray-300" aria-hidden />
       <p className="text-2xl font-bold text-gray-900">{value}</p>
       <p className="mt-1 text-sm font-medium text-gray-600">{label}</p>
       <p className={`mt-1 text-xs ${subClass}`}>{sub}</p>
+    </>
+  );
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="relative block rounded-xl border border-gray-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
+      >
+        {inner}
+      </Link>
+    );
+  }
+  return (
+    <div className="relative rounded-xl border border-gray-200 bg-white p-4 shadow-sm">
+      {inner}
     </div>
   );
 }
@@ -112,6 +130,7 @@ export default function StatBar({ data, loading }: StatBarProps) {
               openTasks > 0 ? `${openTasks} require attention` : "All clear"
             }
             subClass={openTasks > 0 ? "text-amber-600" : "text-gray-500"}
+            href="/admin/tasks"
           />
           <StatCard
             icon={DollarSign}
