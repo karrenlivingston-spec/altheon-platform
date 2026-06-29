@@ -37,23 +37,106 @@ def _handle_supabase_error(response: Any, *, table: str = "unknown") -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
-def _safe_auth_user_email(user_id: str) -> str:
+def _auth_user_email(user_id: str) -> Optional[str]:
     if not user_id:
-        return ""
+        return None
     try:
-        resp = supabase.auth.admin.get_user_by_id(user_id)
-        user_obj = getattr(resp, "user", None)
-        if user_obj is None and isinstance(resp, dict):
-            user_obj = resp.get("user")
-        email = ""
-        if user_obj is not None:
-            email = str(getattr(user_obj, "email", None) or "").strip()
-            if not email and isinstance(user_obj, dict):
-                email = str(user_obj.get("email") or "").strip()
-        return email.lower()
+        user_resp = supabase.auth.admin.get_user_by_id(user_id)
     except Exception:
         traceback.print_exc()
-        return ""
+        return None
+    user_obj = getattr(user_resp, "user", None)
+    if user_obj is None and isinstance(user_resp, dict):
+        user_obj = user_resp.get("user")
+    if not user_resp or not user_obj:
+        return None
+    email = getattr(user_obj, "email", None)
+    if not email and isinstance(user_obj, dict):
+        email = user_obj.get("email")
+    email_str = str(email or "").strip()
+    return email_str or None
+
+
+def load_clinic_staff_list(clinic_id: str) -> list[dict[str, Any]]:
+    """Resolve clinic staff via clinic_users → auth.users email → clinicians.email."""
+    cid = clinic_id.strip()
+    try:
+        clinic_users_resp = (
+            supabase.table("clinic_users")
+            .select("user_id, role")
+            .eq("clinic_id", cid)
+            .execute()
+        )
+        _handle_supabase_error(clinic_users_resp, table="clinic_users")
+    except HTTPException:
+        raise
+    except Exception:
+        traceback.print_exc()
+        return []
+
+    staff: list[dict[str, Any]] = []
+    for cu in clinic_users_resp.data or []:
+        if not isinstance(cu, dict):
+            continue
+        user_id = str(cu.get("user_id") or "").strip()
+        if not user_id:
+            continue
+        try:
+            user_resp = supabase.auth.admin.get_user_by_id(user_id)
+            user_obj = getattr(user_resp, "user", None)
+            if user_obj is None and isinstance(user_resp, dict):
+                user_obj = user_resp.get("user")
+            if not user_resp or not user_obj:
+                continue
+            email = getattr(user_obj, "email", None)
+            if not email and isinstance(user_obj, dict):
+                email = user_obj.get("email")
+            if not email:
+                continue
+            clinician_resp = (
+                supabase.table("clinicians")
+                .select("first_name, last_name, phone")
+                .eq("email", email)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
+            _handle_supabase_error(clinician_resp, table="clinicians")
+            rows = clinician_resp.data or []
+            if not rows:
+                continue
+            clinician_row = rows[0]
+            staff.append(
+                {
+                    "user_id": user_id,
+                    "role": cu.get("role"),
+                    "first_name": clinician_row.get("first_name"),
+                    "last_name": clinician_row.get("last_name"),
+                    "phone": clinician_row.get("phone"),
+                }
+            )
+        except HTTPException:
+            raise
+        except Exception:
+            traceback.print_exc()
+            continue
+    return staff
+
+
+def load_staff_profiles(clinic_id: str) -> dict[str, dict[str, Any]]:
+    """Map auth user_id -> staff profile (names from clinicians via auth email)."""
+    profiles: dict[str, dict[str, Any]] = {}
+    try:
+        for member in load_clinic_staff_list(clinic_id):
+            uid = str(member.get("user_id") or "").strip()
+            if uid:
+                profiles[uid] = member
+    except HTTPException:
+        raise
+    except Exception:
+        traceback.print_exc()
+        return {}
+    return profiles
 
 
 def _staff_display_name(profile: Optional[dict[str, Any]]) -> str:
@@ -72,67 +155,6 @@ def _patient_display_name(row: Optional[dict[str, Any]]) -> Optional[str]:
     ln = str(row.get("last_name") or "").strip()
     combined = f"{fn} {ln}".strip()
     return combined or None
-
-
-def load_staff_profiles(clinic_id: str) -> dict[str, dict[str, Any]]:
-    """Map auth user_id -> staff profile (names from clinicians table)."""
-    cid = clinic_id.strip()
-    try:
-        cu_resp = (
-            supabase.table("clinic_users")
-            .select("user_id, role, clinician_id")
-            .eq("clinic_id", cid)
-            .execute()
-        )
-        _handle_supabase_error(cu_resp, table="clinic_users")
-        clin_resp = (
-            supabase.table("clinicians")
-            .select("id, first_name, last_name, phone, email, is_active")
-            .eq("clinic_id", cid)
-            .execute()
-        )
-        _handle_supabase_error(clin_resp, table="clinicians")
-    except HTTPException:
-        raise
-    except Exception:
-        traceback.print_exc()
-        return {}
-
-    clinicians_by_id: dict[str, dict[str, Any]] = {}
-    email_to_clinician: dict[str, dict[str, Any]] = {}
-    for row in clin_resp.data or []:
-        if not isinstance(row, dict):
-            continue
-        if row.get("is_active") is False:
-            continue
-        cid_key = str(row.get("id") or "").strip()
-        if cid_key:
-            clinicians_by_id[cid_key] = row
-        email = str(row.get("email") or "").strip().lower()
-        if email:
-            email_to_clinician[email] = row
-
-    profiles: dict[str, dict[str, Any]] = {}
-    for cu in cu_resp.data or []:
-        if not isinstance(cu, dict):
-            continue
-        uid = str(cu.get("user_id") or "").strip()
-        if not uid:
-            continue
-        clinician_id = str(cu.get("clinician_id") or "").strip()
-        clin = clinicians_by_id.get(clinician_id) if clinician_id else None
-        if not clin:
-            email = _safe_auth_user_email(uid)
-            if email:
-                clin = email_to_clinician.get(email)
-        profiles[uid] = {
-            "user_id": uid,
-            "role": cu.get("role"),
-            "first_name": (clin or {}).get("first_name"),
-            "last_name": (clin or {}).get("last_name"),
-            "phone": (clin or {}).get("phone"),
-        }
-    return profiles
 
 
 def _clinic_admin_user_ids(clinic_id: str) -> list[str]:

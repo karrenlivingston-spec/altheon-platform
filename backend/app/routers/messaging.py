@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.db import supabase
 from app.dependencies.permissions import ALL_ROLES, require_role
-from app.routers.tasks import _staff_display_name, load_staff_profiles
+from app.routers.tasks import _staff_display_name, load_clinic_staff_list, load_staff_profiles
 from routers.fee_schedule import (
     _assert_user_has_clinic_access,
     _resolve_bearer_user_id,
@@ -313,17 +313,23 @@ def list_clinic_staff(
         traceback.print_exc()
         return []
 
-    profiles = load_staff_profiles(cid)
-    out: list[dict[str, Any]] = []
-    for uid, profile in profiles.items():
-        out.append(
-            {
-                "user_id": uid,
-                "first_name": profile.get("first_name"),
-                "last_name": profile.get("last_name"),
-                "role": profile.get("role"),
-            }
-        )
+    try:
+        staff = load_clinic_staff_list(cid)
+    except HTTPException:
+        raise
+    except Exception:
+        traceback.print_exc()
+        return []
+
+    out = [
+        {
+            "user_id": member["user_id"],
+            "first_name": member.get("first_name"),
+            "last_name": member.get("last_name"),
+            "role": member.get("role"),
+        }
+        for member in staff
+    ]
     out.sort(key=lambda r: (_staff_display_name(r), str(r.get("user_id") or "")))
     return out
 
