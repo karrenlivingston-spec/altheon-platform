@@ -52,6 +52,9 @@ from app.routers import (
     virtual_visits as virtual_visits_router,
     hep as hep_router,
     questionnaires as questionnaires_router,
+    tasks as tasks_router,
+    messaging as messaging_router,
+    aria_tasks as aria_tasks_router,
 )
 from app.routers.virtual_visit_transcription import router as vv_transcription_router
 from app.routers.appointments import _fetch_clinic_sms_context
@@ -205,6 +208,9 @@ app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
 app.include_router(
     payer_optimizer_router, prefix="/payer-optimizer", tags=["Payer Optimizer"]
 )
+app.include_router(tasks_router.router, prefix="/tasks", tags=["Tasks"])
+app.include_router(messaging_router.router, prefix="/messaging", tags=["Messaging"])
+app.include_router(aria_tasks_router.router, prefix="/aria", tags=["Aria Tasks"])
 
 
 @app.get("/")
