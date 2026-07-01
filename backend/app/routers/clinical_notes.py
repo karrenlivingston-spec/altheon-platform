@@ -19,6 +19,7 @@ from app.dependencies.permissions import (
     require_clinical_notes_read,
     require_role,
 )
+from routers.fee_schedule import _resolve_bearer_user_id
 
 router = APIRouter()
 
@@ -396,16 +397,14 @@ def _enrich_notes_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    clinic_user_ids = list({*author_ids, *supervising_ids})
-    clinic_users_by_id = _load_clinic_users_map(clinic_user_ids)
-    linked_clinician_ids = list(
-        {
-            str(cu.get("clinician_id") or "").strip()
-            for cu in clinic_users_by_id.values()
-            if str(cu.get("clinician_id") or "").strip()
-        }
-    )
-    clinicians_by_id = _load_clinicians_map(linked_clinician_ids)
+    clinician_ids_for_map = list({*author_ids, *supervising_ids})
+    clinicians_by_id = _load_clinicians_map(clinician_ids_for_map)
+    legacy_clinic_user_ids = [
+        aid
+        for aid in author_ids
+        if _clinician_display_name(clinicians_by_id.get(aid)) == "Unknown"
+    ]
+    clinic_users_by_id = _load_clinic_users_map(legacy_clinic_user_ids)
 
     out: list[dict[str, Any]] = []
     for r in rows:
@@ -415,13 +414,19 @@ def _enrich_notes_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         spid = str(r.get("supervising_pt_id") or "").strip()
         pt = patients_map.get(pid)
         item["patient_name"] = _patient_display_name(pt) if pt else "—"
-        item["author_name"] = _resolve_clinic_user_name(
-            clinic_users_by_id.get(aid), clinicians_by_id
-        )
-        if spid:
-            item["supervising_pt_name"] = _resolve_clinic_user_name(
-                clinic_users_by_id.get(spid), clinicians_by_id
+        author_name = _clinician_display_name(clinicians_by_id.get(aid))
+        if author_name == "Unknown":
+            author_name = _resolve_clinic_user_name(
+                clinic_users_by_id.get(aid), clinicians_by_id
             )
+        item["author_name"] = author_name
+        if spid:
+            sp_name = _clinician_display_name(clinicians_by_id.get(spid))
+            if sp_name == "Unknown":
+                sp_name = _resolve_clinic_user_name(
+                    clinic_users_by_id.get(spid), clinicians_by_id
+                )
+            item["supervising_pt_name"] = sp_name
         out.append(item)
     return out
 
@@ -994,6 +999,86 @@ def _resolve_clinic_users_pk(
     raise HTTPException(status_code=404, detail=not_found_detail)
 
 
+def _resolve_clinician_author_id(
+    raw_id: str,
+    clinic_id: str,
+    *,
+    not_found_detail: str = "Author not found in clinic users",
+) -> str:
+    """Resolve auth/clinic_users reference to clinicians.id via auth email bridge."""
+    key = raw_id.strip()
+    cid = clinic_id.strip()
+    if not key or not cid:
+        raise HTTPException(status_code=400, detail="Invalid author reference")
+
+    try:
+        auth_user_id = ""
+        by_uid = (
+            supabase.table("clinic_users")
+            .select("user_id")
+            .eq("user_id", key)
+            .eq("clinic_id", cid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(by_uid)
+        rows = by_uid.data or []
+        if rows:
+            auth_user_id = str(rows[0].get("user_id") or "").strip()
+        else:
+            by_pk = (
+                supabase.table("clinic_users")
+                .select("user_id")
+                .eq("id", key)
+                .eq("clinic_id", cid)
+                .limit(1)
+                .execute()
+            )
+            _handle_supabase_error(by_pk)
+            rows = by_pk.data or []
+            if rows:
+                auth_user_id = str(rows[0].get("user_id") or "").strip()
+
+        if not auth_user_id:
+            raise HTTPException(status_code=404, detail=not_found_detail)
+
+        user_resp = supabase.auth.admin.get_user_by_id(auth_user_id)
+        user_obj = getattr(user_resp, "user", None)
+        if user_obj is None and isinstance(user_resp, dict):
+            user_obj = user_resp.get("user")
+        if not user_resp or not user_obj:
+            raise HTTPException(status_code=404, detail=not_found_detail)
+
+        email = getattr(user_obj, "email", None)
+        if not email and isinstance(user_obj, dict):
+            email = user_obj.get("email")
+        email_str = str(email or "").strip()
+        if not email_str:
+            raise HTTPException(status_code=404, detail=not_found_detail)
+
+        clinician_resp = (
+            supabase.table("clinicians")
+            .select("id")
+            .eq("email", email_str)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(clinician_resp)
+        clinician_rows = clinician_resp.data or []
+        if not clinician_rows:
+            raise HTTPException(status_code=404, detail=not_found_detail)
+
+        clinician_id = str(clinician_rows[0].get("id") or "").strip()
+        if not clinician_id:
+            raise HTTPException(status_code=404, detail=not_found_detail)
+        return clinician_id
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @router.post("/clinical-notes", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 def create_clinical_note(
     body: CreateClinicalNoteBody,
@@ -1011,8 +1096,9 @@ def create_clinical_note(
 
     nt = _validate_note_type(body.note_type)
 
-    resolved_author = _resolve_clinic_users_pk(
-        author_id,
+    jwt_user_id = _resolve_bearer_user_id(authorization)
+    resolved_author = _resolve_clinician_author_id(
+        jwt_user_id,
         clinic_id,
         not_found_detail="Author not found in clinic users",
     )
@@ -1913,13 +1999,13 @@ def request_correction(note_id: str, body: RequestCorrectionBody):
 
 
 def _author_id_for_clinical_notes_filter(clinic_id: str, author_id: str) -> str:
-    """clinical_notes.author_id stores clinic_users.id; accept Supabase auth user_id too."""
+    """clinical_notes.author_id stores clinicians.id; accept auth user_id / clinic_users.id too."""
     key = author_id.strip()
     cid = clinic_id.strip()
     if not key or not cid:
         return key
     try:
-        return _resolve_clinic_users_pk(
+        return _resolve_clinician_author_id(
             key,
             cid,
             not_found_detail="Author not found in clinic users",

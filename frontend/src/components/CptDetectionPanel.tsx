@@ -24,6 +24,13 @@ async function authHeaders(): Promise<Record<string, string>> {
   return h;
 }
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function isValidNoteId(noteId: string): boolean {
+  return UUID_RE.test(noteId.trim());
+}
+
 function normalizeCodes(raw: unknown): CptCode[] {
   if (!Array.isArray(raw)) return [];
   return raw
@@ -66,6 +73,10 @@ export default function CptDetectionPanel({
   }, [noteId, initialCodes]);
 
   const detect = async () => {
+    if (!isValidNoteId(noteId)) {
+      setError("Save the note before running CPT detection.");
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -99,7 +110,7 @@ export default function CptDetectionPanel({
         <button
           type="button"
           onClick={() => void detect()}
-          disabled={loading}
+          disabled={loading || !isValidNoteId(noteId)}
           className="rounded-md bg-teal-600 px-3 py-1.5 text-xs font-medium text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {loading ? "Detecting..." : hasRun ? "Re-detect" : "Detect CPT Codes"}
