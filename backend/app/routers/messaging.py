@@ -237,6 +237,39 @@ def _last_message(conversation_id: str, profiles: dict[str, dict[str, Any]]) -> 
         return None
 
 
+def _conversation_participants(
+    conversation_id: str,
+    profiles: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    try:
+        resp = (
+            supabase.table("conversation_participants")
+            .select("user_id")
+            .eq("conversation_id", conversation_id)
+            .execute()
+        )
+        _handle_supabase_error(resp, table="conversation_participants")
+        out: list[dict[str, Any]] = []
+        for row in resp.data or []:
+            if not isinstance(row, dict):
+                continue
+            uid = str(row.get("user_id") or "").strip()
+            if not uid:
+                continue
+            profile = profiles.get(uid) or {}
+            out.append(
+                {
+                    "user_id": uid,
+                    "first_name": profile.get("first_name"),
+                    "last_name": profile.get("last_name"),
+                }
+            )
+        return out
+    except Exception:
+        traceback.print_exc()
+        return []
+
+
 def _shape_conversation(
     conv: dict[str, Any],
     user_id: str,
@@ -244,7 +277,7 @@ def _shape_conversation(
 ) -> dict[str, Any]:
     conv_id = str(conv.get("id") or "").strip()
     last_read = _participant_last_read(conv_id, user_id)
-    return {
+    shaped: dict[str, Any] = {
         "id": conv_id,
         "clinic_id": conv.get("clinic_id"),
         "type": conv.get("type"),
@@ -252,6 +285,9 @@ def _shape_conversation(
         "last_message": _last_message(conv_id, profiles),
         "unread_count": _unread_count(conv_id, user_id, last_read),
     }
+    if conv.get("type") == "direct":
+        shaped["participants"] = _conversation_participants(conv_id, profiles)
+    return shaped
 
 
 def _ensure_participant(conversation_id: str, user_id: str) -> None:

@@ -40,11 +40,18 @@ export type StaffMember = {
   role?: string | null;
 };
 
+export type ConversationParticipant = {
+  user_id: string;
+  first_name?: string | null;
+  last_name?: string | null;
+};
+
 export type ConversationSummary = {
   id: string;
   clinic_id: string;
   type: string;
   created_at?: string | null;
+  participants?: ConversationParticipant[];
   last_message?: {
     content?: string | null;
     sender_id?: string | null;

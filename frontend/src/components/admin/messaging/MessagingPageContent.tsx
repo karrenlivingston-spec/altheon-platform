@@ -24,14 +24,9 @@ import {
 } from "@/lib/tasksMessaging";
 import { supabase } from "@/lib/supabaseClient";
 
-function conversationLabel(
-  conv: ConversationSummary,
-  staff: StaffMember[],
-  dmParticipants: Record<string, string>,
-): string {
+function conversationLabel(conv: ConversationSummary, currentUserId: string): string {
   if (conv.type === "clinic_wide") return "# Staff Chat";
-  const otherId = dmParticipants[conv.id];
-  const other = staff.find((s) => s.user_id === otherId);
+  const other = conv.participants?.find((p) => p.user_id !== currentUserId);
   return other ? staffDisplayName(other) : "Direct Message";
 }
 
@@ -39,29 +34,45 @@ type NewDMModalProps = {
   open: boolean;
   clinicId: string;
   userId: string;
-  staff: StaffMember[];
   onClose: () => void;
   onCreated: (conversationId: string) => void;
 };
 
-function NewDMModal({
-  open,
-  clinicId,
-  userId,
-  staff,
-  onClose,
-  onCreated,
-}: NewDMModalProps) {
+function NewDMModal({ open, clinicId, userId, onClose, onCreated }: NewDMModalProps) {
+  const [staff, setStaff] = useState<StaffMember[]>([]);
+  const [loadingStaff, setLoadingStaff] = useState(false);
   const [selectedId, setSelectedId] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) {
-      setSelectedId("");
-      setError(null);
-    }
-  }, [open]);
+    if (!open) return;
+    setSelectedId("");
+    setError(null);
+    if (!clinicId) return;
+
+    let cancelled = false;
+    (async () => {
+      setLoadingStaff(true);
+      try {
+        const res = await fetch(`${API_BASE}/messaging/${encodeURIComponent(clinicId)}/staff`, {
+          headers: await authHeaders(),
+        });
+        const json = res.ok ? await res.json() : [];
+        if (!cancelled) {
+          setStaff(Array.isArray(json) ? (json as StaffMember[]) : []);
+        }
+      } catch {
+        if (!cancelled) setStaff([]);
+      } finally {
+        if (!cancelled) setLoadingStaff(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, clinicId]);
 
   if (!open) return null;
 
@@ -109,6 +120,11 @@ function NewDMModal({
           </button>
         </div>
         <ul className="mt-4 max-h-64 space-y-1 overflow-y-auto">
+          {loadingStaff ? (
+            <li className="px-3 py-4 text-center text-sm text-gray-500">Loading staff…</li>
+          ) : others.length === 0 ? (
+            <li className="px-3 py-4 text-center text-sm text-gray-500">No staff available</li>
+          ) : null}
           {others.map((s) => (
             <li key={s.user_id}>
               <button
@@ -163,9 +179,9 @@ export default function MessagingPageContent() {
   const [sending, setSending] = useState(false);
   const [dmOpen, setDmOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [dmParticipants, setDmParticipants] = useState<Record<string, string>>({});
   const feedRef = useRef<HTMLDivElement>(null);
   const channelRef = useRef<RealtimeChannel | null>(null);
+  const userDeselectedRef = useRef(false);
 
   const scrollToBottom = useCallback(() => {
     requestAnimationFrame(() => {
@@ -193,29 +209,13 @@ export default function MessagingPageContent() {
       const convs = Array.isArray(convJson) ? (convJson as ConversationSummary[]) : [];
       setConversations(convs);
       setStaff(Array.isArray(staffJson) ? staffJson : []);
-      setActiveId((prev) => prev ?? convs[0]?.id ?? null);
-
-      const dmIds = convs.filter((c) => c.type === "direct").map((c) => c.id);
-      if (dmIds.length > 0) {
-        const { data } = await supabase
-          .from("conversation_participants")
-          .select("conversation_id, user_id")
-          .in("conversation_id", dmIds);
-        const map: Record<string, string> = {};
-        for (const convId of dmIds) {
-          const users = (data ?? [])
-            .filter((row) => row.conversation_id === convId)
-            .map((row) => String(row.user_id));
-          const other = users.find((uid) => uid !== userId);
-          if (other) map[convId] = other;
-        }
-        setDmParticipants(map);
-      } else {
-        setDmParticipants({});
-      }
+      setActiveId((prev) => {
+        if (prev) return prev;
+        if (userDeselectedRef.current) return null;
+        return convs[0]?.id ?? null;
+      });
     } catch {
       setConversations([]);
-      setDmParticipants({});
     } finally {
       setLoadingConversations(false);
     }
@@ -360,14 +360,17 @@ export default function MessagingPageContent() {
             ) : (
               <ul>
                 {conversations.map((conv) => {
-                  const label = conversationLabel(conv, staff, dmParticipants);
+                  const label = conversationLabel(conv, userId);
                   const active = conv.id === activeId;
                   const unread = conv.unread_count > 0;
                   return (
                     <li key={conv.id}>
                       <button
                         type="button"
-                        onClick={() => setActiveId(conv.id)}
+                        onClick={() => {
+                          userDeselectedRef.current = false;
+                          setActiveId(conv.id);
+                        }}
                         className={`flex w-full flex-col gap-1 border-b border-gray-100 px-4 py-3 text-left transition-colors ${
                           active
                             ? "border-l-4 border-l-teal-600 bg-teal-50/80"
@@ -413,10 +416,21 @@ export default function MessagingPageContent() {
         <section className="flex min-h-[24rem] flex-1 flex-col md:w-2/3">
           {activeConversation ? (
             <>
-              <div className="border-b border-gray-100 px-6 py-4">
+              <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
                 <h2 className="font-semibold text-gray-900">
-                  {conversationLabel(activeConversation, staff, dmParticipants)}
+                  {conversationLabel(activeConversation, userId)}
                 </h2>
+                <button
+                  type="button"
+                  onClick={() => {
+                    userDeselectedRef.current = true;
+                    setActiveId(null);
+                  }}
+                  aria-label="Close conversation"
+                  className="rounded p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                >
+                  <X className="h-5 w-5" />
+                </button>
               </div>
               <div ref={feedRef} className="flex-1 space-y-3 overflow-y-auto px-6 py-4">
                 {loadingMessages ? (
@@ -497,9 +511,9 @@ export default function MessagingPageContent() {
         open={dmOpen}
         clinicId={clinicId}
         userId={userId}
-        staff={staff}
         onClose={() => setDmOpen(false)}
         onCreated={(id) => {
+          userDeselectedRef.current = false;
           setActiveId(id);
           void loadConversations();
         }}
