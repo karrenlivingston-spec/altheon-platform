@@ -26,7 +26,26 @@ def get_email_from_token(authorization: str) -> str:
         payload = pyjwt.decode(token, options={"verify_signature": False})
     except Exception:
         return ""
-    return str(payload.get("email") or "").strip()
+    email = str(payload.get("email") or "").strip()
+    if not email:
+        user_metadata = payload.get("user_metadata")
+        if isinstance(user_metadata, dict):
+            email = str(user_metadata.get("email") or "").strip()
+    return email
+
+
+def get_user_id_from_token(authorization: str) -> str:
+    """Extract auth user UUID from Supabase JWT sub claim (no HTTP call)."""
+    if not authorization:
+        return ""
+    token = _extract_bearer_token_from_header(authorization)
+    if not token:
+        return ""
+    try:
+        payload = pyjwt.decode(token, options={"verify_signature": False})
+    except Exception:
+        return ""
+    return str(payload.get("sub") or "").strip()
 
 
 def get_user_email_by_id(user_id: str) -> str:

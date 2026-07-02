@@ -80,6 +80,18 @@ async function authHeaders(): Promise<Record<string, string>> {
   return headers;
 }
 
+const CLINICIAN_UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/** Only accept clinicians/me response `id` — never clinicId or other fields. */
+function parseClinicianMeId(payload: unknown, clinicIdForGuard: string): string {
+  if (!payload || typeof payload !== "object") return "";
+  const id = String((payload as { id?: unknown }).id ?? "").trim();
+  if (!CLINICIAN_UUID_RE.test(id)) return "";
+  if (clinicIdForGuard && id === clinicIdForGuard) return "";
+  return id;
+}
+
 function normalizeAppointmentStatus(status: string | null | undefined): string {
   return String(status ?? "")
     .trim()
@@ -348,12 +360,12 @@ export default function AdminClinicalNotesPage() {
         setAuthorClinicianId("");
         return;
       }
-      const data = (await res.json()) as { id?: string };
-      setAuthorClinicianId(String(data.id ?? "").trim());
+      const data = (await res.json()) as unknown;
+      setAuthorClinicianId(parseClinicianMeId(data, clinicId));
     } catch {
       setAuthorClinicianId("");
     }
-  }, []);
+  }, [clinicId]);
 
   const applySoapPrefill = useCallback(
     (soap: {
@@ -903,13 +915,36 @@ export default function AdminClinicalNotesPage() {
       setError("Could not resolve your clinician profile. Try reloading the page.");
       return null;
     }
+    if (authorClinicianId === clinicId) {
+      setError("Invalid author profile (matches clinic id). Try reloading the page.");
+      return null;
+    }
     setEditorBusy(true);
     setError(null);
     try {
+      let resolvedAuthorId = authorClinicianId;
+      if (!editingId) {
+        const meRes = await fetch(`${API_BASE}/api/clinicians/me`, {
+          headers: await authHeaders(),
+        });
+        if (meRes.ok) {
+          const meData = (await meRes.json()) as unknown;
+          const freshId = parseClinicianMeId(meData, clinicId);
+          if (freshId) {
+            resolvedAuthorId = freshId;
+            setAuthorClinicianId(freshId);
+          }
+        }
+        if (!resolvedAuthorId || resolvedAuthorId === clinicId) {
+          setError("Could not resolve your clinician profile. Try reloading the page.");
+          return null;
+        }
+      }
+
       const body: Record<string, unknown> = {
         patient_id: draftPatientId.trim(),
         clinic_id: clinicId,
-        author_id: authorClinicianId,
+        author_id: resolvedAuthorId,
         note_type: draftNoteType,
         subjective: draftSubjective.trim() || null,
         objective: draftObjective.trim() || null,
@@ -953,6 +988,11 @@ export default function AdminClinicalNotesPage() {
         return editingId;
       }
 
+      console.log("[clinical-notes] create note payload", {
+        author_id: resolvedAuthorId,
+        clinic_id: clinicId,
+        body,
+      });
       const res = await fetch(`${API_BASE}/api/clinical-notes`, {
         method: "POST",
         headers: await authHeaders(),
