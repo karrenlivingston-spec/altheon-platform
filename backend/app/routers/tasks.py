@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from app.db import supabase
 from app.dependencies.permissions import ALL_ROLES, require_role
 from app.sms import send_sms
+from app.utils.auth_users import get_user_email_by_id
 from routers.fee_schedule import (
     _assert_user_has_clinic_access,
     _resolve_bearer_user_id,
@@ -35,26 +36,6 @@ def _handle_supabase_error(response: Any, *, table: str = "unknown") -> None:
         detail = getattr(error, "message", None) or str(error)
         print(f"[tasks] Supabase error table={table} detail={detail}")
         raise HTTPException(status_code=500, detail=detail)
-
-
-def _auth_user_email(user_id: str) -> Optional[str]:
-    if not user_id:
-        return None
-    try:
-        user_resp = supabase.auth.admin.get_user_by_id(user_id)
-    except Exception:
-        traceback.print_exc()
-        return None
-    user_obj = getattr(user_resp, "user", None)
-    if user_obj is None and isinstance(user_resp, dict):
-        user_obj = user_resp.get("user")
-    if not user_resp or not user_obj:
-        return None
-    email = getattr(user_obj, "email", None)
-    if not email and isinstance(user_obj, dict):
-        email = user_obj.get("email")
-    email_str = str(email or "").strip()
-    return email_str or None
 
 
 def load_clinic_staff_list(clinic_id: str) -> list[dict[str, Any]]:
@@ -82,15 +63,7 @@ def load_clinic_staff_list(clinic_id: str) -> list[dict[str, Any]]:
         if not user_id:
             continue
         try:
-            user_resp = supabase.auth.admin.get_user_by_id(user_id)
-            user_obj = getattr(user_resp, "user", None)
-            if user_obj is None and isinstance(user_resp, dict):
-                user_obj = user_resp.get("user")
-            if not user_resp or not user_obj:
-                continue
-            email = getattr(user_obj, "email", None)
-            if not email and isinstance(user_obj, dict):
-                email = user_obj.get("email")
+            email = get_user_email_by_id(user_id)
             if not email:
                 continue
             clinician_resp = (

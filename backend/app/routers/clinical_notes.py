@@ -19,6 +19,7 @@ from app.dependencies.permissions import (
     require_clinical_notes_read,
     require_role,
 )
+from app.utils.auth_users import get_email_from_token, get_user_email_by_id
 from routers.fee_schedule import _resolve_bearer_user_id
 
 router = APIRouter()
@@ -999,6 +1000,58 @@ def _resolve_clinic_users_pk(
     raise HTTPException(status_code=404, detail=not_found_detail)
 
 
+def _resolve_clinician_author_from_token(
+    authorization: Optional[str],
+    clinic_id: str,
+    *,
+    not_found_detail: str = "Author not found in clinic users",
+) -> str:
+    """Resolve the JWT caller to clinicians.id via clinic_users + token email."""
+    jwt_user_id = _resolve_bearer_user_id(authorization)
+    cid = clinic_id.strip()
+    if not jwt_user_id or not cid:
+        raise HTTPException(status_code=400, detail="Invalid author reference")
+
+    try:
+        cu_resp = (
+            supabase.table("clinic_users")
+            .select("user_id")
+            .eq("user_id", jwt_user_id)
+            .eq("clinic_id", cid)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(cu_resp)
+        if not (cu_resp.data or []):
+            raise HTTPException(status_code=404, detail=not_found_detail)
+
+        email_str = get_email_from_token(authorization or "")
+        if not email_str:
+            raise HTTPException(status_code=404, detail=not_found_detail)
+
+        clinician_resp = (
+            supabase.table("clinicians")
+            .select("id")
+            .eq("email", email_str)
+            .eq("is_active", True)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(clinician_resp)
+        clinician_rows = clinician_resp.data or []
+        if not clinician_rows:
+            raise HTTPException(status_code=404, detail=not_found_detail)
+
+        clinician_id = str(clinician_rows[0].get("id") or "").strip()
+        if not clinician_id:
+            raise HTTPException(status_code=404, detail=not_found_detail)
+        return clinician_id
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 def _resolve_clinician_author_id(
     raw_id: str,
     clinic_id: str,
@@ -1042,17 +1095,7 @@ def _resolve_clinician_author_id(
         if not auth_user_id:
             raise HTTPException(status_code=404, detail=not_found_detail)
 
-        user_resp = supabase.auth.admin.get_user_by_id(auth_user_id)
-        user_obj = getattr(user_resp, "user", None)
-        if user_obj is None and isinstance(user_resp, dict):
-            user_obj = user_resp.get("user")
-        if not user_resp or not user_obj:
-            raise HTTPException(status_code=404, detail=not_found_detail)
-
-        email = getattr(user_obj, "email", None)
-        if not email and isinstance(user_obj, dict):
-            email = user_obj.get("email")
-        email_str = str(email or "").strip()
+        email_str = get_user_email_by_id(auth_user_id)
         if not email_str:
             raise HTTPException(status_code=404, detail=not_found_detail)
 
@@ -1096,9 +1139,8 @@ def create_clinical_note(
 
     nt = _validate_note_type(body.note_type)
 
-    jwt_user_id = _resolve_bearer_user_id(authorization)
-    resolved_author = _resolve_clinician_author_id(
-        jwt_user_id,
+    resolved_author = _resolve_clinician_author_from_token(
+        authorization,
         clinic_id,
         not_found_detail="Author not found in clinic users",
     )

@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, EmailStr, Field
 
 from app.db import supabase
+from app.utils.auth_users import get_user_email_by_id
 from app.dependencies.permissions import (
     ADMIN_ROLES,
     STAFF_ASSIGNABLE_ROLES,
@@ -36,24 +37,6 @@ def _handle_supabase_error(response: Any) -> None:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
-
-
-def _auth_user_email(user_id: str) -> str:
-    try:
-        resp = supabase.auth.admin.get_user_by_id(user_id)
-    except Exception as exc:
-        logger.exception("auth.admin.get_user_by_id failed user_id=%s", user_id)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    user_obj = getattr(resp, "user", None)
-    if user_obj is None and isinstance(resp, dict):
-        user_obj = resp.get("user")
-    email = ""
-    if user_obj is not None:
-        email = str(getattr(user_obj, "email", None) or "").strip()
-        if not email and isinstance(user_obj, dict):
-            email = str(user_obj.get("email") or "").strip()
-    return email.lower()
 
 
 class StaffInviteBody(BaseModel):
@@ -93,9 +76,7 @@ def _safe_auth_user_email(user_id: str) -> str:
     if not user_id:
         return ""
     try:
-        return _auth_user_email(user_id)
-    except HTTPException:
-        return ""
+        return get_user_email_by_id(user_id).lower()
     except Exception:
         logger.exception("auth email lookup failed user_id=%s", user_id)
         return ""
