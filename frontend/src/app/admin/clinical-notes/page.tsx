@@ -257,9 +257,8 @@ export default function AdminClinicalNotesPage() {
   const { isBiller, isBillingOnly } = usePermissions();
   const noteReadOnly = isBiller;
   const supabaseUserId = (me?.user_id ?? "").trim();
-  /** clinical_notes.author_id is clinic_users.id; /me exposes clinic_user_id for list/save. */
-  const notesAuthorId = (me?.clinic_user_id ?? "").trim() || supabaseUserId;
   const signedByCandidate = supabaseUserId || clinicId;
+  const [authorClinicianId, setAuthorClinicianId] = useState("");
 
   const [scopeTab, setScopeTab] = useState<ScopeTab>("my");
   const [filterTab, setFilterTab] = useState<FilterTab>("all");
@@ -290,7 +289,6 @@ export default function AdminClinicalNotesPage() {
   const patientPickerRef = useRef<HTMLDivElement>(null);
   const [draftPatientId, setDraftPatientId] = useState("");
   const [draftNoteType, setDraftNoteType] = useState<string>("daily_note");
-  const [draftSupervisingPtId, setDraftSupervisingPtId] = useState("");
   const [draftSubjective, setDraftSubjective] = useState("");
   const [draftObjective, setDraftObjective] = useState("");
   const [draftAppointmentId, setDraftAppointmentId] = useState("");
@@ -340,6 +338,22 @@ export default function AdminClinicalNotesPage() {
   const [transcriptPanelOpen, setTranscriptPanelOpen] = useState(false);
 
   const SOAP_STORAGE_KEY = "altheon:soap-prefill";
+
+  const fetchMyClinicianId = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/clinicians/me`, {
+        headers: await authHeaders(),
+      });
+      if (!res.ok) {
+        setAuthorClinicianId("");
+        return;
+      }
+      const data = (await res.json()) as { id?: string };
+      setAuthorClinicianId(String(data.id ?? "").trim());
+    } catch {
+      setAuthorClinicianId("");
+    }
+  }, []);
 
   const applySoapPrefill = useCallback(
     (soap: {
@@ -494,8 +508,8 @@ export default function AdminClinicalNotesPage() {
         page: String(page),
         page_size: String(pageSize),
       });
-      if (scopeTab === "my" && notesAuthorId) {
-        params.set("author_id", notesAuthorId);
+      if (scopeTab === "my" && authorClinicianId) {
+        params.set("author_id", authorClinicianId);
       }
       if (scopeTab === "review") {
         params.set("status", "ready_for_review");
@@ -559,7 +573,7 @@ export default function AdminClinicalNotesPage() {
     filterTab,
     page,
     pageSize,
-    notesAuthorId,
+    authorClinicianId,
     sidebarFilters,
     debouncedSearch,
   ]);
@@ -589,6 +603,16 @@ export default function AdminClinicalNotesPage() {
   useEffect(() => {
     setPage(1);
   }, [scopeTab, filterTab, sidebarFilters, debouncedSearch, pageSize]);
+
+  useEffect(() => {
+    void fetchMyClinicianId();
+  }, [fetchMyClinicianId]);
+
+  useEffect(() => {
+    if (editorOpen) {
+      void fetchMyClinicianId();
+    }
+  }, [editorOpen, fetchMyClinicianId]);
 
   useEffect(() => {
     void loadPatients();
@@ -666,7 +690,6 @@ export default function AdminClinicalNotesPage() {
 
     setEditingId(null);
     setDraftNoteType("daily_note");
-    setDraftSupervisingPtId("");
     setDraftSubjective("");
     setDraftObjective("");
     setDraftAssessment("");
@@ -765,7 +788,6 @@ export default function AdminClinicalNotesPage() {
     setEditingId(null);
     setDraftPatientId("");
     setDraftNoteType("daily_note");
-    setDraftSupervisingPtId("");
     setDraftSubjective("");
     setDraftObjective("");
     setDraftAppointmentId("");
@@ -817,7 +839,6 @@ export default function AdminClinicalNotesPage() {
       setEditingId(row.id);
       setDraftPatientId(row.patient_id);
       setDraftNoteType((row.note_type ?? "daily_note").toLowerCase());
-      setDraftSupervisingPtId((row.supervising_pt_id ?? "").trim());
       setDraftSubjective(row.subjective ?? "");
       setDraftObjective(row.objective ?? "");
       setDraftAppointmentId((row.appointment_id ?? "").trim());
@@ -878,8 +899,8 @@ export default function AdminClinicalNotesPage() {
       setError("Select a patient.");
       return null;
     }
-    if (!notesAuthorId) {
-      setError("Missing user context (author).");
+    if (!authorClinicianId) {
+      setError("Could not resolve your clinician profile. Try reloading the page.");
       return null;
     }
     setEditorBusy(true);
@@ -888,7 +909,7 @@ export default function AdminClinicalNotesPage() {
       const body: Record<string, unknown> = {
         patient_id: draftPatientId.trim(),
         clinic_id: clinicId,
-        author_id: notesAuthorId,
+        author_id: authorClinicianId,
         note_type: draftNoteType,
         subjective: draftSubjective.trim() || null,
         objective: draftObjective.trim() || null,
@@ -897,9 +918,6 @@ export default function AdminClinicalNotesPage() {
       };
       if (draftBodyRegion.trim()) {
         body.body_region = draftBodyRegion.trim().toLowerCase();
-      }
-      if (draftSupervisingPtId.trim()) {
-        body.supervising_pt_id = draftSupervisingPtId.trim();
       }
       if (draftAppointmentId.trim()) {
         body.appointment_id = draftAppointmentId.trim();
@@ -916,7 +934,6 @@ export default function AdminClinicalNotesPage() {
               objective: body.objective,
               assessment: body.assessment,
               plan: body.plan,
-              supervising_pt_id: body.supervising_pt_id ?? null,
               note_type: draftNoteType,
               body_region: draftBodyRegion.trim()
                 ? draftBodyRegion.trim().toLowerCase()
@@ -1353,9 +1370,9 @@ export default function AdminClinicalNotesPage() {
             ) : null}
           </div>
 
-          {scopeTab === "my" && !notesAuthorId ? (
+          {scopeTab === "my" && !authorClinicianId ? (
             <p className="mb-4 rounded-xl border border-amber-100 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              Could not resolve your user id. Try reloading the page.
+              Could not resolve your clinician profile. Try reloading the page.
             </p>
           ) : null}
 
@@ -1614,16 +1631,6 @@ export default function AdminClinicalNotesPage() {
                     value={draftBodyRegion}
                     onChange={setDraftBodyRegion}
                   />
-                  <label className="block text-sm font-medium text-gray-700">
-                    Supervising PT (UUID)
-                    <input
-                      type="text"
-                      value={draftSupervisingPtId}
-                      onChange={(e) => setDraftSupervisingPtId(e.target.value)}
-                      placeholder="Optional — clinician id"
-                      className={`mt-1 ${DS_INPUT}`}
-                    />
-                  </label>
                   <label className="block text-sm font-medium text-gray-700">
                     Appointment ID
                     <input
