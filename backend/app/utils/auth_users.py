@@ -8,18 +8,25 @@ import jwt as pyjwt
 import requests
 
 
+def _extract_bearer_token_from_header(authorization: str) -> str:
+    parts = authorization.strip().split(" ", 1)
+    if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1].strip():
+        return ""
+    return parts[1].strip()
+
+
 def get_email_from_token(authorization: str) -> str:
+    """Extract email from Supabase JWT payload (no HTTP call)."""
     if not authorization:
         return ""
-    token = authorization.replace("Bearer ", "").strip()
+    token = _extract_bearer_token_from_header(authorization)
     if not token:
         return ""
     try:
         payload = pyjwt.decode(token, options={"verify_signature": False})
     except Exception:
         return ""
-    email = payload.get("email", "")
-    return str(email or "").strip()
+    return str(payload.get("email") or "").strip()
 
 
 def get_user_email_by_id(user_id: str) -> str:

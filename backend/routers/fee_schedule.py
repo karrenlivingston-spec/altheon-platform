@@ -6,6 +6,7 @@ import traceback
 from datetime import datetime, timezone
 from typing import Annotated, Any, Optional
 
+import jwt as pyjwt
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -51,22 +52,18 @@ def _extract_bearer_token(authorization: Optional[str]) -> str:
 
 def _resolve_bearer_user_id(authorization: Optional[str]) -> str:
     token = _extract_bearer_token(authorization)
-    try:
-        auth_response = supabase.auth.get_user(token)
-    except Exception as exc:
-        traceback.print_exc()
-        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
-
-    user_obj = getattr(auth_response, "user", None)
-    if user_obj is None and isinstance(auth_response, dict):
-        user_obj = auth_response.get("user")
-
-    user_id = str(getattr(user_obj, "id", None) or "").strip()
-    if not user_id and isinstance(user_obj, dict):
-        user_id = str(user_obj.get("id") or "").strip()
-    if not user_id:
+    if not token:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
-    return user_id
+    try:
+        payload = pyjwt.decode(token, options={"verify_signature": False})
+        user_id = str(payload.get("sub") or "").strip()
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Invalid or expired token")
+        return user_id
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
 
 
 def _assert_user_has_clinic_access(user_id: str, clinic_id: str) -> None:
