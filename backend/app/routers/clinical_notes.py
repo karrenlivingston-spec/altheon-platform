@@ -1122,34 +1122,6 @@ def _resolve_clinician_author_id(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@router.get("/clinicians/me", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
-def get_my_clinician(
-    authorization: Optional[str] = Header(default=None, alias="Authorization"),
-):
-    email_str = get_email_from_token(authorization or "")
-    if not email_str:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-
-    try:
-        resp = (
-            supabase.table("clinicians")
-            .select("id,first_name,last_name,email")
-            .eq("email", email_str)
-            .eq("is_active", True)
-            .limit(1)
-            .execute()
-        )
-        _handle_supabase_error(resp)
-        rows = resp.data or []
-        if not rows:
-            raise HTTPException(status_code=404, detail="Clinician not found")
-        return rows[0]
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-
 @router.post("/clinical-notes", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 def create_clinical_note(
     body: CreateClinicalNoteBody,

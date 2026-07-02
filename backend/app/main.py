@@ -55,6 +55,7 @@ from app.routers import (
     tasks as tasks_router,
     messaging as messaging_router,
     aria_tasks as aria_tasks_router,
+    clinicians as clinicians_router,
 )
 from app.routers.virtual_visit_transcription import router as vv_transcription_router
 from app.routers.appointments import _fetch_clinic_sms_context
@@ -166,6 +167,9 @@ app.include_router(
 app.include_router(pi_cases_api_router.router, prefix="/api", tags=["PI Cases"])
 app.include_router(
     clinical_notes_api_router.router, prefix="/api", tags=["Clinical Notes"]
+)
+app.include_router(
+    clinicians_router.router, prefix="/api/clinicians", tags=["Clinicians"]
 )
 app.include_router(
     note_pdf_router.router, prefix="/api", tags=["Clinical Note PDF"]
