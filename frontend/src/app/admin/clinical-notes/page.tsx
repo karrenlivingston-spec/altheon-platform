@@ -278,8 +278,6 @@ export default function AdminClinicalNotesPage() {
   const { clinic_id: clinicId, me } = useClinic();
   const { isBiller, isBillingOnly } = usePermissions();
   const noteReadOnly = isBiller;
-  const supabaseUserId = (me?.user_id ?? "").trim();
-  const signedByCandidate = supabaseUserId || clinicId;
   const [authorClinicianId, setAuthorClinicianId] = useState("");
 
   const [scopeTab, setScopeTab] = useState<ScopeTab>("my");
@@ -1115,6 +1113,10 @@ export default function AdminClinicalNotesPage() {
 
   async function signReviewNote() {
     if (!reviewNote) return;
+    if (!authorClinicianId) {
+      setError("Could not resolve your clinician profile. Try reloading the page.");
+      return;
+    }
     setReviewBusy(true);
     setError(null);
     try {
@@ -1123,7 +1125,7 @@ export default function AdminClinicalNotesPage() {
         {
           method: "POST",
           headers: await authHeaders(),
-          body: JSON.stringify({ signed_by: signedByCandidate }),
+          body: JSON.stringify({ signed_by: authorClinicianId }),
         },
       );
       if (!res.ok) {
@@ -1142,6 +1144,10 @@ export default function AdminClinicalNotesPage() {
 
   async function signAnywayFromEditor() {
     if (!editingId) return;
+    if (!authorClinicianId) {
+      setError("Could not resolve your clinician profile. Try reloading the page.");
+      return;
+    }
     const confirmed = window.confirm(
       "This note was flagged by AI review. Sign anyway? This will be recorded on the note for audit purposes.",
     );
@@ -1155,7 +1161,7 @@ export default function AdminClinicalNotesPage() {
         {
           method: "POST",
           headers: await authHeaders(),
-          body: JSON.stringify({ signed_by: signedByCandidate }),
+          body: JSON.stringify({ signed_by: authorClinicianId }),
         },
       );
       if (!res.ok) {
@@ -1174,6 +1180,10 @@ export default function AdminClinicalNotesPage() {
   }
 
   async function signAnyway(note: ClinicalNote) {
+    if (!authorClinicianId) {
+      setError("Could not resolve your clinician profile. Try reloading the page.");
+      return;
+    }
     const confirmed = window.confirm(
       "This note was flagged by AI review. Sign anyway? This will be recorded on the note for audit purposes.",
     );
@@ -1187,7 +1197,7 @@ export default function AdminClinicalNotesPage() {
         {
           method: "POST",
           headers: await authHeaders(),
-          body: JSON.stringify({ signed_by: signedByCandidate }),
+          body: JSON.stringify({ signed_by: authorClinicianId }),
         },
       );
       if (!res.ok) {
