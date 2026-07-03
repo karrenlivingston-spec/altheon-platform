@@ -1156,7 +1156,7 @@ def create_clinical_note(
     if body.supervising_pt_id is not None:
         s = body.supervising_pt_id.strip()
         if s:
-            row["supervising_pt_id"] = _resolve_clinic_users_pk(
+            row["supervising_pt_id"] = _resolve_clinician_author_id(
                 s,
                 clinic_id,
                 not_found_detail="Supervising PT not found in clinic users",
@@ -1923,7 +1923,11 @@ def submit_clinical_note(note_id: str):
 
 
 @router.post("/clinical-notes/{note_id}/sign", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
-def sign_clinical_note(note_id: str, body: SignNoteBody):
+def sign_clinical_note(
+    note_id: str,
+    body: SignNoteBody,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
     nid = note_id.strip()
     signed_by = body.signed_by.strip()
     if not nid or not signed_by:
@@ -1959,8 +1963,8 @@ def sign_clinical_note(note_id: str, body: SignNoteBody):
     if not clinic_id_note:
         raise HTTPException(status_code=500, detail="Clinical note missing clinic_id")
 
-    resolved_signed_by = _resolve_clinic_users_pk(
-        signed_by,
+    resolved_signed_by = _resolve_clinician_author_from_token(
+        authorization,
         clinic_id_note,
         not_found_detail="Signing user not found in clinic users",
     )
