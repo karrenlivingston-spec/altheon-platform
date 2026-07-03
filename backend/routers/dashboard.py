@@ -448,59 +448,40 @@ def dashboard_summary(clinic: ClinicUserDep):
         except Exception:
             traceback.print_exc()
 
-        # --- Tasks ---
-        incomplete_intakes = 0
-        try:
-            token_resp = supabase_execute(
-                lambda: supabase.table("intake_tokens")
-                .select("id")
-                .eq("clinic_id", cid)
-                .eq("used", False)
-                .gte("expires_at", now_utc.isoformat())
-                .execute()
-            )
-            _handle_supabase_error(token_resp)
-            incomplete_intakes = len(token_resp.data or [])
-        except Exception:
-            traceback.print_exc()
+        # --- Tasks (unified system tasks table) ---
+        _SYSTEM_ALERT_TASK_TYPES = {
+            "incomplete_intake": "incomplete_intakes",
+            "note_review": "notes_review",
+            "legal_request": "legal_in_progress",
+            "unconfirmed_appointment": "unconfirmed_appointments",
+        }
+        system_task_counts = {key: 0 for key in _SYSTEM_ALERT_TASK_TYPES.values()}
 
-        notes_review = 0
-        try:
-            notes_resp = supabase_execute(
-                lambda: supabase.table("clinical_notes")
+        def _count_open_system_task(task_type: str) -> int:
+            resp = supabase_execute(
+                lambda tt=task_type: supabase.table("tasks")
                 .select("id", count="exact")
                 .eq("clinic_id", cid)
-                .in_("status", ["draft", "ai_flagged", "needs_correction", "ready_for_review"])
+                .eq("task_type", tt)
+                .in_("status", ["open", "acknowledged"])
                 .execute()
             )
-            _handle_supabase_error(notes_resp)
-            notes_review = int(getattr(notes_resp, "count", None) or 0)
-            if not notes_review and notes_resp.data is not None:
-                notes_review = len(notes_resp.data)
-        except Exception:
-            traceback.print_exc()
+            _handle_supabase_error(resp)
+            count = int(getattr(resp, "count", None) or 0)
+            if not count and resp.data is not None:
+                count = len(resp.data)
+            return count
 
-        legal_in_progress = 0
-        try:
-            legal_resp = supabase_execute(
-                lambda: supabase.table("legal_requests")
-                .select("id", count="exact")
-                .eq("clinic_id", cid)
-                .not_.in_("status", ["delivered", "archived"])
-                .execute()
-            )
-            _handle_supabase_error(legal_resp)
-            legal_in_progress = int(getattr(legal_resp, "count", None) or 0)
-            if not legal_in_progress and legal_resp.data is not None:
-                legal_in_progress = len(legal_resp.data)
-        except Exception:
-            traceback.print_exc()
+        for task_type, count_key in _SYSTEM_ALERT_TASK_TYPES.items():
+            try:
+                system_task_counts[count_key] = _count_open_system_task(task_type)
+            except Exception:
+                traceback.print_exc()
 
-        appts_unconfirmed = sum(
-            1
-            for r in today_appts
-            if str(r.get("status") or "").strip().lower() == "scheduled"
-        )
+        incomplete_intakes = system_task_counts["incomplete_intakes"]
+        notes_review = system_task_counts["notes_review"]
+        legal_in_progress = system_task_counts["legal_in_progress"]
+        appts_unconfirmed = system_task_counts["unconfirmed_appointments"]
 
         open_clinic_task_rows: list[dict[str, Any]] = []
         eob_resubmission_count = 0

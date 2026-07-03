@@ -214,6 +214,7 @@ def shape_task(row: dict[str, Any], profiles: dict[str, dict[str, Any]], patient
         "description": row.get("description"),
         "priority": row.get("priority"),
         "source": row.get("source"),
+        "task_type": row.get("task_type"),
         "status": row.get("status"),
         "assigned_to": assigned_to,
         "assigned_to_name": _staff_display_name(profiles.get(assigned_to or "")),

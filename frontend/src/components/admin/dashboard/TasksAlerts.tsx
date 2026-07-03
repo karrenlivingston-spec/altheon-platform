@@ -63,7 +63,7 @@ export default function TasksAlerts({ data, onRefresh }: TasksAlertsProps) {
       icon: "👤",
       label: "patient intakes incomplete",
       count: data.tasks.incomplete_intakes,
-      href: "/admin/patients",
+      href: "/admin/tasks?type=incomplete_intake",
       badgeClass: "bg-amber-100 text-amber-800",
     },
     {
@@ -77,21 +77,21 @@ export default function TasksAlerts({ data, onRefresh }: TasksAlertsProps) {
       icon: "📝",
       label: "notes need review & signature",
       count: data.tasks.notes_review,
-      href: "/admin/clinical-notes",
+      href: "/admin/tasks?type=note_review",
       badgeClass: "bg-amber-100 text-amber-800",
     },
     {
       icon: "⚖️",
       label: "legal requests in progress",
       count: data.tasks.legal_in_progress,
-      href: "/admin/legal-requests",
+      href: "/admin/tasks?type=legal_request",
       badgeClass: "bg-blue-100 text-blue-800",
     },
     {
       icon: "📅",
       label: "appointments need confirmation",
       count: data.tasks.unconfirmed_appointments,
-      href: "/admin/appointments",
+      href: "/admin/tasks?type=unconfirmed_appointment",
       badgeClass: "bg-gray-100 text-gray-700",
     },
   ];

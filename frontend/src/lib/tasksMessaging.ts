@@ -10,6 +10,7 @@ export type StaffTask = {
   description?: string | null;
   priority: string;
   source: string;
+  task_type?: string | null;
   status: string;
   assigned_to?: string | null;
   assigned_to_name?: string | null;

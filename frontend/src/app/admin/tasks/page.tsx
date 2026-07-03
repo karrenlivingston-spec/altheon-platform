@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
 import { useClinic } from "@/app/admin/ClinicContext";
@@ -47,6 +48,53 @@ function statusLabel(status: string): string {
   return "Open";
 }
 
+const TASK_TYPE_FILTER_OPTIONS = [
+  { value: "all", label: "All types" },
+  { value: "incomplete_intake", label: "Incomplete Intake" },
+  { value: "note_review", label: "Note Review" },
+  { value: "legal_request", label: "Legal Request" },
+  { value: "unconfirmed_appointment", label: "Unconfirmed Appointment" },
+  { value: "manual", label: "Manual" },
+  { value: "aria", label: "Aria" },
+] as const;
+
+type TaskTypeFilter = (typeof TASK_TYPE_FILTER_OPTIONS)[number]["value"];
+
+const TASK_TYPE_LABELS: Record<string, string> = {
+  incomplete_intake: "Incomplete Intake",
+  note_review: "Note Review",
+  legal_request: "Legal Request",
+  unconfirmed_appointment: "Unconfirmed Appointment",
+};
+
+function taskTypeLabel(task: StaffTask): string {
+  const taskType = String(task.task_type ?? "").trim();
+  if (taskType && TASK_TYPE_LABELS[taskType]) {
+    return TASK_TYPE_LABELS[taskType];
+  }
+  const source = task.source.toLowerCase();
+  if (source === "aria") return "Aria";
+  if (source === "manual") return "Manual";
+  return "—";
+}
+
+function matchesTypeFilter(task: StaffTask, typeFilter: TaskTypeFilter): boolean {
+  if (typeFilter === "all") return true;
+  if (typeFilter === "aria") return task.source.toLowerCase() === "aria";
+  if (typeFilter === "manual") {
+    return !String(task.task_type ?? "").trim() && task.source.toLowerCase() === "manual";
+  }
+  return String(task.task_type ?? "").trim() === typeFilter;
+}
+
+function parseInitialTypeFilter(raw: string | null): TaskTypeFilter {
+  const value = String(raw ?? "").trim();
+  if (TASK_TYPE_FILTER_OPTIONS.some((opt) => opt.value === value)) {
+    return value as TaskTypeFilter;
+  }
+  return "all";
+}
+
 function sourceBadge(source: string): React.ReactNode {
   const s = source.toLowerCase();
   if (s === "aria") {
@@ -68,13 +116,21 @@ function sourceBadge(source: string): React.ReactNode {
 
 export default function AdminTasksPage() {
   const { clinicId } = useClinic();
+  const searchParams = useSearchParams();
   const [tasks, setTasks] = useState<StaffTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"active" | "resolved" | "all">("active");
   const [priorityFilter, setPriorityFilter] = useState<"all" | "normal" | "urgent">("all");
+  const [typeFilter, setTypeFilter] = useState<TaskTypeFilter>(() =>
+    parseInitialTypeFilter(searchParams.get("type")),
+  );
   const [modalOpen, setModalOpen] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setTypeFilter(parseInitialTypeFilter(searchParams.get("type")));
+  }, [searchParams]);
 
   const loadTasks = useCallback(async () => {
     if (!clinicId) return;
@@ -109,6 +165,11 @@ export default function AdminTasksPage() {
       setLoading(false);
     }
   }, [clinicId, statusFilter, priorityFilter]);
+
+  const visibleTasks = useMemo(
+    () => tasks.filter((task) => matchesTypeFilter(task, typeFilter)),
+    [tasks, typeFilter],
+  );
 
   useEffect(() => {
     void loadTasks();
@@ -173,6 +234,20 @@ export default function AdminTasksPage() {
             <option value="urgent">Urgent</option>
           </select>
         </label>
+        <label className="text-sm text-gray-700">
+          Type
+          <select
+            value={typeFilter}
+            onChange={(e) => setTypeFilter(e.target.value as TaskTypeFilter)}
+            className="ml-2 rounded-lg border border-gray-200 bg-white px-2 py-1.5 text-sm"
+          >
+            {TASK_TYPE_FILTER_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
+        </label>
       </div>
 
       {error ? (
@@ -187,6 +262,7 @@ export default function AdminTasksPage() {
             <thead className={DS_TABLE_HEAD}>
               <tr>
                 <th className={DS_TH}>Title</th>
+                <th className={DS_TH}>Type</th>
                 <th className={DS_TH}>Priority</th>
                 <th className={DS_TH}>Status</th>
                 <th className={DS_TH}>Assigned To</th>
@@ -199,18 +275,18 @@ export default function AdminTasksPage() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-10 text-center text-gray-500">
+                  <td colSpan={9} className="px-6 py-10 text-center text-gray-500">
                     Loading…
                   </td>
                 </tr>
-              ) : tasks.length === 0 ? (
+              ) : visibleTasks.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-6 py-10 text-center text-gray-500">
+                  <td colSpan={9} className="px-6 py-10 text-center text-gray-500">
                     No tasks match these filters.
                   </td>
                 </tr>
               ) : (
-                tasks.map((task) => (
+                visibleTasks.map((task) => (
                   <tr key={task.id} className={DS_TR}>
                     <td className={DS_TD_PRIMARY}>
                       <div className="font-medium text-gray-900">{task.title}</div>
@@ -220,6 +296,7 @@ export default function AdminTasksPage() {
                         </div>
                       ) : null}
                     </td>
+                    <td className={DS_TD_PRIMARY}>{taskTypeLabel(task)}</td>
                     <td className={DS_TD_PRIMARY}>
                       <span className={priorityBadgeClass(task.priority)}>{task.priority}</span>
                     </td>
