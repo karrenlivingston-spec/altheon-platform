@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import traceback
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -10,6 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.services.system_tasks import reconcile_system_tasks
 from app.dependencies.permissions import ALL_ROLES, require_role
 from app.sms import send_sms
 from app.utils.auth_users import get_user_email_by_id
@@ -19,6 +21,25 @@ from routers.fee_schedule import (
 )
 
 router = APIRouter(dependencies=[Depends(require_role(*ALL_ROLES))])
+cron_router = APIRouter()
+
+
+def _verify_intake_secret(x_intake_secret: Optional[str]) -> None:
+    expected = (os.environ.get("INTAKE_SECRET") or "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="INTAKE_SECRET is not configured")
+    provided = (x_intake_secret or "").strip()
+    if provided != expected:
+        raise HTTPException(status_code=401, detail="Invalid intake secret")
+
+
+@cron_router.post("/reconcile-system-tasks")
+def reconcile_system_tasks_endpoint(
+    clinic_id: Optional[str] = Query(default=None),
+    x_intake_secret: Optional[str] = Header(default=None, alias="X-Intake-Secret"),
+):
+    _verify_intake_secret(x_intake_secret)
+    return reconcile_system_tasks(clinic_id)
 
 _ADMIN_ROLES = frozenset({"super_admin", "clinic_admin"})
 _VALID_PRIORITIES = frozenset({"normal", "urgent"})

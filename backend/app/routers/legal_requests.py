@@ -9,6 +9,12 @@ from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.services.system_tasks import (
+    TASK_LEGAL_REQUEST,
+    LEGAL_TERMINAL_STATUSES,
+    ensure_legal_request_task,
+    resolve_system_task,
+)
 
 router = APIRouter()
 
@@ -218,7 +224,15 @@ def create_legal_request(body: LegalRequestCreate):
         rows = resp.data or []
         if not rows:
             raise HTTPException(status_code=500, detail="Failed to create legal request")
-        return _normalize_row(rows[0])
+        row = rows[0]
+        ensure_legal_request_task(
+            clinic_id=cid,
+            request_id=str(row.get("id") or "").strip(),
+            patient_id=str(row.get("patient_id") or "").strip() or None,
+            requesting_party_name=str(row.get("requesting_party_name") or ""),
+            status=str(row.get("status") or ""),
+        )
+        return _normalize_row(row)
     except HTTPException:
         raise
     except Exception as exc:
@@ -268,6 +282,21 @@ def update_legal_request(request_id: str, body: LegalRequestPatch):
             patient = (patient_resp.data or [{}])[0] if patient_resp.data else {}
             row["patient_dob"] = patient.get("date_of_birth")
             row["patient_phone"] = patient.get("phone")
+        new_status = str(row.get("status") or "").strip().lower()
+        if new_status in LEGAL_TERMINAL_STATUSES:
+            resolve_system_task(
+                str(row.get("clinic_id") or cid).strip() or cid,
+                TASK_LEGAL_REQUEST,
+                rid,
+            )
+        elif new_status:
+            ensure_legal_request_task(
+                clinic_id=str(row.get("clinic_id") or cid).strip() or cid,
+                request_id=rid,
+                patient_id=str(row.get("patient_id") or "").strip() or None,
+                requesting_party_name=str(row.get("requesting_party_name") or ""),
+                status=new_status,
+            )
         return _normalize_row(row)
     except HTTPException:
         raise
@@ -293,6 +322,11 @@ def archive_legal_request(request_id: str):
         _handle_supabase_error(resp)
         if not resp.data:
             raise HTTPException(status_code=404, detail="Legal request not found")
+        resolve_system_task(
+            str((resp.data[0] or {}).get("clinic_id") or "").strip(),
+            TASK_LEGAL_REQUEST,
+            rid,
+        )
         return {"success": True, "id": rid, "status": "archived"}
     except HTTPException:
         raise

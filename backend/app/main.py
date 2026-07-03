@@ -212,6 +212,7 @@ app.include_router(analytics_router, prefix="/analytics", tags=["Analytics"])
 app.include_router(
     payer_optimizer_router, prefix="/payer-optimizer", tags=["Payer Optimizer"]
 )
+app.include_router(tasks_router.cron_router, prefix="/tasks", tags=["Tasks"])
 app.include_router(tasks_router.router, prefix="/tasks", tags=["Tasks"])
 app.include_router(messaging_router.router, prefix="/messaging", tags=["Messaging"])
 app.include_router(aria_tasks_router.router, prefix="/aria", tags=["Aria Tasks"])

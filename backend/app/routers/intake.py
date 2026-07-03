@@ -50,6 +50,11 @@ from pydantic import BaseModel, Field, model_validator
 from zoneinfo import ZoneInfo
 
 from app.db import supabase
+from app.services.system_tasks import (
+    TASK_INCOMPLETE_INTAKE,
+    ensure_incomplete_intake_task,
+    resolve_system_task,
+)
 from app.routers.questionnaires import _questionnaire_for_body_region
 from app.sms import send_sms
 
@@ -578,6 +583,13 @@ def send_booking_intake_sms(
     preferred_language: Optional[str] = None,
 ) -> Optional[str]:
     """Create intake token if needed and send initial intake SMS at booking."""
+    ensure_incomplete_intake_task(
+        clinic_id=clinic_id,
+        appointment_id=appointment_id,
+        patient_id=patient_id,
+        start_time=start_time_iso,
+    )
+
     if _patient_has_prior_completed_appointment(
         patient_id, clinic_id, appointment_id
     ):
@@ -711,6 +723,7 @@ def submit_intake(
         "allergies": body.allergies,
         "other_conditions": body.other_conditions,
         "goals": body.goals,
+        "completed_at": now_iso,
     }
 
     ins = supabase.table("intake_forms").insert(insert_row).execute()
@@ -741,6 +754,8 @@ def submit_intake(
             f"POST /intake: could not set appointment {appointment_id} to checked_in: {exc}",
             flush=True,
         )
+
+    resolve_system_task(clinic_id, TASK_INCOMPLETE_INTAKE, appointment_id)
 
     return {
         "success": True,
@@ -1078,6 +1093,8 @@ def submit_intake_token_form(body: IntakeTokenSubmitBody):
         if body.symptom_location is not None and str(body.symptom_location).strip():
             intake_row["symptom_location"] = str(body.symptom_location).strip()
 
+        intake_row["completed_at"] = datetime.now(timezone.utc).isoformat()
+
         ins = supabase.table("intake_forms").insert(intake_row).execute()
         _handle_supabase_error(ins)
         if not ins.data:
@@ -1100,6 +1117,8 @@ def submit_intake_token_form(body: IntakeTokenSubmitBody):
             )
         except Exception:
             pass
+
+        resolve_system_task(cid, TASK_INCOMPLETE_INTAKE, aid)
 
         return {"status": "success", "message": "Intake submitted successfully"}
     except HTTPException:

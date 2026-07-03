@@ -18,6 +18,12 @@ from app.google_calendar import (
 )
 from app.routers.intake import send_booking_intake_sms
 from app.retry_utils import supabase_execute
+from app.services.system_tasks import (
+    TASK_INCOMPLETE_INTAKE,
+    TASK_UNCONFIRMED_APPOINTMENT,
+    ensure_unconfirmed_appointment_task,
+    resolve_system_task,
+)
 from app.services.waitlist import run_waitlist_notify_for_freed_slot
 from app.sms import send_sms
 
@@ -956,6 +962,15 @@ def update_appointment_status(
                     patient_id,
                     clinic_id,
                 )
+        if status != prior_status:
+            if status != "scheduled":
+                resolve_system_task(
+                    clinic_id, TASK_UNCONFIRMED_APPOINTMENT, appointment_id
+                )
+            if status in {"cancelled", "completed", "no_show", "checked_in"}:
+                resolve_system_task(
+                    clinic_id, TASK_INCOMPLETE_INTAKE, appointment_id
+                )
         return result.data[0]
     except HTTPException:
         raise
@@ -1474,6 +1489,15 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
     new_appointment_id = str(ins_rows[0]["id"])
     print(f"New appointment booked: {new_appointment_id}")
 
+    ensure_unconfirmed_appointment_task(
+        clinic_id=clinic_id,
+        appointment_id=new_appointment_id,
+        patient_id=str(patient_id),
+        start_time=start_iso,
+    )
+    resolve_system_task(clinic_id, TASK_UNCONFIRMED_APPOINTMENT, old_appointment_id)
+    resolve_system_task(clinic_id, TASK_INCOMPLETE_INTAKE, old_appointment_id)
+
     try:
         new_appt = (
             supabase.table("appointments")
@@ -1796,6 +1820,13 @@ def create_appointment(
         raise HTTPException(status_code=500, detail="Failed to create appointment")
 
     appointment_id = str(appointment_rows[0]["id"])
+
+    ensure_unconfirmed_appointment_task(
+        clinic_id=payload.clinic_id,
+        appointment_id=appointment_id,
+        patient_id=str(patient_id),
+        start_time=start_iso,
+    )
 
     try:
         appt_with_details = (

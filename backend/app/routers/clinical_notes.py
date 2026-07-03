@@ -12,6 +12,11 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.services.system_tasks import (
+    TASK_NOTE_REVIEW,
+    ensure_note_review_task,
+    resolve_system_task,
+)
 from app.dependencies.permissions import (
     CLINICAL_ROLES,
     enforce_clinical_notes_read_from_auth_header,
@@ -1874,6 +1879,12 @@ def submit_clinical_note(note_id: str):
             supabase.table("clinical_notes").update(fail_update).eq("id", nid).execute()
         except Exception:
             pass
+        ensure_note_review_task(
+            clinic_id=str(note.get("clinic_id") or "").strip(),
+            note_id=nid,
+            patient_id=str(note.get("patient_id") or "").strip() or None,
+            status="ai_flagged",
+        )
         raise
     except Exception as exc:
         fail_update = {
@@ -1886,6 +1897,12 @@ def submit_clinical_note(note_id: str):
             supabase.table("clinical_notes").update(fail_update).eq("id", nid).execute()
         except Exception:
             pass
+        ensure_note_review_task(
+            clinic_id=str(note.get("clinic_id") or "").strip(),
+            note_id=nid,
+            patient_id=str(note.get("patient_id") or "").strip() or None,
+            status="ai_flagged",
+        )
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     if passed:
@@ -1919,7 +1936,15 @@ def submit_clinical_note(note_id: str):
     out_rows = upd_f.data or []
     if not out_rows:
         raise HTTPException(status_code=404, detail="Clinical note not found")
-    return out_rows[0]
+    saved = out_rows[0]
+    ensure_note_review_task(
+        clinic_id=str(saved.get("clinic_id") or note.get("clinic_id") or "").strip(),
+        note_id=nid,
+        patient_id=str(saved.get("patient_id") or note.get("patient_id") or "").strip()
+        or None,
+        status=str(saved.get("status") or ""),
+    )
+    return saved
 
 
 @router.post("/clinical-notes/{note_id}/sign", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
@@ -1987,6 +2012,7 @@ def sign_clinical_note(
     urows = upd.data or []
     if not urows:
         raise HTTPException(status_code=404, detail="Clinical note not found")
+    resolve_system_task(clinic_id_note, TASK_NOTE_REVIEW, nid)
     return urows[0]
 
 
@@ -2041,10 +2067,14 @@ def request_correction(note_id: str, body: RequestCorrectionBody):
     urows = upd.data or []
     if not urows:
         raise HTTPException(status_code=404, detail="Clinical note not found")
-    return urows[0]
-
-
-def _author_id_for_clinical_notes_filter(clinic_id: str, author_id: str) -> str:
+    saved = urows[0]
+    ensure_note_review_task(
+        clinic_id=str(saved.get("clinic_id") or "").strip(),
+        note_id=nid,
+        patient_id=str(saved.get("patient_id") or "").strip() or None,
+        status=str(saved.get("status") or ""),
+    )
+    return saved
     """clinical_notes.author_id stores clinicians.id; accept auth user_id / clinic_users.id too."""
     key = author_id.strip()
     cid = clinic_id.strip()
