@@ -24,8 +24,19 @@
 #   Schedule: 0 8,14,20 * * *
 #   (08:00, 14:00, and 20:00 UTC daily — three passes to hit 47–49h and 23–25h windows.)
 
+# --- Cron job: unified system tasks reconcile ---
+#
+#   Service:  reconcile-system-tasks
+#   Command:  curl -f -X POST -H "X-Intake-Secret: $INTAKE_SECRET" https://altheon-platform.onrender.com/tasks/reconcile-system-tasks
+#   Schedule: */20 * * * *
+#   (Every 20 minutes UTC — all clinics; set INTAKE_SECRET on this cron job, same value as web service.)
+
 services:
   - type: cron
     name: altheon-appointment-reminders-cron
     schedule: "0 8,14,20 * * *"
     startCommand: curl -f -X POST https://altheon-platform.onrender.com/appointment-reminders/send-reminders
+  - type: cron
+    name: reconcile-system-tasks
+    schedule: "*/20 * * * *"
+    startCommand: curl -f -X POST -H "X-Intake-Secret: $INTAKE_SECRET" https://altheon-platform.onrender.com/tasks/reconcile-system-tasks
