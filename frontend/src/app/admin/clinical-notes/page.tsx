@@ -85,10 +85,20 @@ const CLINICIAN_UUID_RE =
 
 /** Only accept clinicians/me response `id` — never clinicId or other fields. */
 function parseClinicianMeId(payload: unknown, clinicIdForGuard: string): string {
-  if (!payload || typeof payload !== "object") return "";
+  if (!payload || typeof payload !== "object") {
+    console.log("[parseClinicianMeId] raw input:", payload, "clinicIdForGuard:", clinicIdForGuard, "returning:", "");
+    return "";
+  }
   const id = String((payload as { id?: unknown }).id ?? "").trim();
-  if (!CLINICIAN_UUID_RE.test(id)) return "";
-  if (clinicIdForGuard && id === clinicIdForGuard) return "";
+  if (!CLINICIAN_UUID_RE.test(id)) {
+    console.log("[parseClinicianMeId] raw input:", payload, "clinicIdForGuard:", clinicIdForGuard, "returning:", "");
+    return "";
+  }
+  if (clinicIdForGuard && id === clinicIdForGuard) {
+    console.log("[parseClinicianMeId] raw input:", payload, "clinicIdForGuard:", clinicIdForGuard, "returning:", "");
+    return "";
+  }
+  console.log("[parseClinicianMeId] raw input:", payload, "clinicIdForGuard:", clinicIdForGuard, "returning:", id);
   return id;
 }
 
@@ -923,13 +933,17 @@ export default function AdminClinicalNotesPage() {
     setError(null);
     try {
       let resolvedAuthorId = authorClinicianId;
+      let clinicianMeId = "";
+      let clinicianMeResponse: unknown = null;
       if (!editingId) {
         const meRes = await fetch(`${API_BASE}/api/clinicians/me`, {
           headers: await authHeaders(),
         });
         if (meRes.ok) {
           const meData = (await meRes.json()) as unknown;
+          clinicianMeResponse = meData;
           const freshId = parseClinicianMeId(meData, clinicId);
+          clinicianMeId = freshId;
           if (freshId) {
             resolvedAuthorId = freshId;
             setAuthorClinicianId(freshId);
@@ -988,15 +1002,17 @@ export default function AdminClinicalNotesPage() {
         return editingId;
       }
 
-      console.log("[clinical-notes] create note payload", {
-        author_id: resolvedAuthorId,
-        clinic_id: clinicId,
-        body,
-      });
+      const payload = body;
+      console.log("=== CLINICAL NOTE CREATE PAYLOAD DEBUG ===");
+      console.log("Full payload:", JSON.stringify(payload, null, 2));
+      console.log("author_id value:", payload.author_id);
+      console.log("clinic_id value:", payload.clinic_id);
+      console.log("clinicianMeId (from parseClinicianMeId):", clinicianMeId);
+      console.log("Raw /api/clinicians/me response:", clinicianMeResponse);
       const res = await fetch(`${API_BASE}/api/clinical-notes`, {
         method: "POST",
         headers: await authHeaders(),
-        body: JSON.stringify(body),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         setError(await res.text().catch(() => res.statusText));
