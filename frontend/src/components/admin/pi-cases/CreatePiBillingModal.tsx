@@ -210,6 +210,10 @@ export default function CreatePiBillingModal({
     e.preventDefault();
     setSubmitAttempted(true);
     setSubmitError(null);
+    if (!context) {
+      setSubmitError("Missing case context — please close and reopen this modal.");
+      return;
+    }
     const errs = validate();
     setFieldErrors(errs);
     if (Object.keys(errs).length > 0) return;

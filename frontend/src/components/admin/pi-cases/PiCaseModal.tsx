@@ -150,6 +150,7 @@ export default function PiCaseModal({
   mode,
   initial,
   defaultStatus = "intake_open",
+  clinicId,
   saving,
   onClose,
   onSubmit,
