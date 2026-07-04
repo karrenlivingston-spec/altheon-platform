@@ -30,6 +30,7 @@ import { DmeSection } from "@/components/dme/DmeSection";
 import { DiagnosticRedFlagBanner } from "@/components/admin/DiagnosticRedFlagBanner";
 import { DiagnosticsTab } from "@/components/admin/DiagnosticsTab";
 import { PatientDocumentsTab } from "@/components/admin/PatientDocumentsTab";
+import { PatientPerformanceTab } from "@/components/admin/performance/PatientPerformanceTab";
 import PatientHeader from "@/components/admin/patients/PatientHeader";
 import PatientQuickStats from "@/components/admin/patients/PatientQuickStats";
 import PatientOverviewTab from "@/components/admin/patients/PatientOverviewTab";
@@ -50,6 +51,7 @@ export type PageTab =
   | "clinical"
   | "billing"
   | "documents"
+  | "performance"
   | "notes"
   | "legal"
   | "memberships"
@@ -724,6 +726,7 @@ export function PatientDetailView({
     { id: "clinical", label: "Clinical" },
     { id: "billing", label: "Billing" },
     { id: "documents", label: "Documents" },
+    { id: "performance", label: "Performance" },
     { id: "notes", label: "Notes" },
     { id: "legal", label: "Legal" },
     { id: "memberships", label: "Memberships" },
@@ -1894,6 +1897,14 @@ export function PatientDetailView({
             setEobHighlightDocId(documentId);
             setPageTab("clinical");
           }}
+        />
+      ) : null}
+
+      {pageTab === "performance" ? (
+        <PatientPerformanceTab
+          patientId={patientId}
+          clinicId={clinicId}
+          patientName={patientDisplayName(patient)}
         />
       ) : null}
 
