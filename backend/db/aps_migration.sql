@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS public.aps_findings (
   metric_name text NOT NULL,
   left_value numeric,
   right_value numeric,
+  combined_value numeric,
   unit text,
   asymmetry_pct numeric,
   is_notable boolean NOT NULL DEFAULT false,

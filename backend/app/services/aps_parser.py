@@ -1,7 +1,9 @@
-"""Kinvent Smart Mode (K-Deltas) force-plate PDF text parser for APS v1."""
+"""Kinvent Smart Mode (K-Deltas) force-plate PDF parser — Claude Haiku vision extraction."""
 
 from __future__ import annotations
 
+import base64
+import json
 import logging
 import re
 from datetime import date, datetime
@@ -11,48 +13,95 @@ import fitz  # PyMuPDF
 
 logger = logging.getLogger(__name__)
 
-# Test card title keywords -> normalized test_type
-TEST_CARD_PATTERNS: list[tuple[re.Pattern[str], str]] = [
-    (re.compile(r"SLCMJ\s*-\s*Single\s+Leg\s+Counter\s+Movement\s+Jump", re.I), "SLCMJ"),
-    (re.compile(r"SLDJ\s*-\s*Single\s+Leg\s+Drop\s+Jump", re.I), "SLDJ"),
-    (re.compile(r"CMJ\s*-\s*Counter\s+Movement\s+Jump", re.I), "CMJ"),
-    (re.compile(r"SJ\s*-\s*Squat\s+Jump", re.I), "SJ"),
-    (re.compile(r"DJ\s*-\s*Drop\s+Jump", re.I), "DJ"),
-    (re.compile(r"RJT\s*-\s*10/5\s+Repetitive\s+Jumps\s+Test", re.I), "RJT"),
-    (re.compile(r"Multiple\s+Jumps", re.I), "MULTIPLE_JUMPS"),
-]
+_CLAUDE_MODEL = "claude-haiku-4-5-20251001"
+_PDF_ZOOM = 2.0
+_MAX_TOKENS = 8192
+_CLAUDE_TIMEOUT_SEC = 120.0
 
-# Bilateral metric label patterns -> (metric_name, default_unit)
-BILATERAL_METRIC_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
-    (re.compile(r"Jump\s+height(?:\s*\([^)]*\))?", re.I), "jump_height", "cm"),
-    (re.compile(r"Peak\s+Force\s*-\s*Relative", re.I), "peak_force_relative", "kg/kg"),
-    (re.compile(r"Peak\s+Power\s*-\s*Relative", re.I), "peak_power_relative", "W/kg"),
-    (
-        re.compile(r"Braking\s*-\s*Deceleration\s+RFD", re.I),
+ALLOWED_TEST_TYPES = frozenset(
+    {"CMJ", "SJ", "SLCMJ", "DJ", "SLDJ", "RJT", "MULTIPLE_JUMPS"}
+)
+ALLOWED_METRIC_NAMES = frozenset(
+    {
+        "jump_height",
+        "peak_force_relative",
+        "peak_power_relative",
         "braking_rfd",
-        "kg/s",
-    ),
-    (re.compile(r"Propulsive\s+RFD", re.I), "propulsive_rfd", "kg/s"),
-    (re.compile(r"\bRSI\b", re.I), "rsi", ""),
-    (re.compile(r"Peak\s+RFD", re.I), "peak_rfd", "kg/s"),
-]
+        "propulsive_rfd",
+        "rsi",
+        "peak_rfd",
+        "number_of_jumps",
+        "height_average",
+        "duration",
+        "fatigue_index",
+        "pace",
+        "average_power",
+    }
+)
 
-AGGREGATE_METRIC_PATTERNS: list[tuple[re.Pattern[str], str, str]] = [
-    (re.compile(r"Number\s+of\s+Jumps", re.I), "number_of_jumps", "count"),
-    (re.compile(r"Height\s+Average", re.I), "height_average", "cm"),
-    (re.compile(r"\bDuration\b", re.I), "duration", "s"),
-    (re.compile(r"Fatigue\s+Index", re.I), "fatigue_index", "%"),
-    (re.compile(r"\bPace\b", re.I), "pace", ""),
-    (re.compile(r"Average\s+Power", re.I), "average_power", "W"),
-]
+_EXTRACTION_SYSTEM = """You extract structured jump-test data from Kinvent Smart Mode (K-Deltas) \
+force-plate report images for a physical therapy clinic APS module.
 
-_NUM = r"([\d.]+)"
-_UNIT_GROUP = r"(cm|kg/kg|W/kg|kg/s|m/s|W|%|s)?"
+Return ONLY valid JSON — no markdown fences, no preamble, no commentary.
+
+Read numeric values exactly as printed. Do not round, estimate, or infer missing values.
+Distinguish Left-labeled values from Right-labeled values from combined/total values.
+Include asymmetry_pct ONLY when the card explicitly shows a percentage labeled as asymmetry \
+(e.g. "82.4% Asymmetry"). If uncertain about any value, omit that metric entirely rather than guessing."""
+
+_USER_EXTRACTION_PROMPT = """Extract all test cards from these Kinvent report page images.
+
+Return JSON with exactly this shape:
+{
+  "patient_name": string,
+  "patient_dob": string,
+  "session_date": string,
+  "tests": [
+    {
+      "test_type": string,
+      "metrics": [
+        {
+          "metric_name": string,
+          "left_value": number or null,
+          "right_value": number or null,
+          "combined_value": number or null,
+          "unit": string or null,
+          "asymmetry_pct": number or null
+        }
+      ]
+    }
+  ],
+  "unparsed_sections": []
+}
+
+test_type must be one of: CMJ, SJ, SLCMJ, DJ, SLDJ, RJT, MULTIPLE_JUMPS
+metric_name must be one of: jump_height, peak_force_relative, peak_power_relative, braking_rfd, \
+propulsive_rfd, rsi, peak_rfd, number_of_jumps, height_average, duration, fatigue_index, pace, average_power
+
+Use combined_value only for aggregate metrics without Left/Right split (e.g. Multiple Jumps, RJT).
+Put any content you cannot confidently map into unparsed_sections as short text descriptions."""
 
 
-def _parse_float(raw: Optional[str]) -> Optional[float]:
+class ApsParseError(Exception):
+    """Structured Kinvent PDF extraction failure."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        raw_response: str = "",
+        parse_error: str = "",
+    ) -> None:
+        super().__init__(message)
+        self.raw_response = raw_response
+        self.parse_error = parse_error or message
+
+
+def _parse_float(raw: Any) -> Optional[float]:
     if raw is None:
         return None
+    if isinstance(raw, (int, float)):
+        return float(raw)
     s = str(raw).strip().replace(",", "")
     if not s:
         return None
@@ -62,211 +111,180 @@ def _parse_float(raw: Optional[str]) -> Optional[float]:
         return None
 
 
-def _normalize_text(text: str) -> str:
-    text = text.replace("\r\n", "\n").replace("\r", "\n")
-    text = re.sub(r"[ \t]+", " ", text)
-    return text.strip()
+def _extract_json_object(text: str) -> dict[str, Any]:
+    text = (text or "").strip()
+    fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", text, re.IGNORECASE)
+    if fence:
+        text = fence.group(1).strip()
+    brace = re.search(r"\{[\s\S]*\}", text)
+    if brace:
+        text = brace.group(0)
+    data = json.loads(text)
+    if not isinstance(data, dict):
+        raise ValueError("expected JSON object")
+    return data
 
 
-def _extract_header_fields(text: str) -> tuple[str, str, str]:
-    patient_name = ""
-    patient_dob = ""
-    session_date = ""
-
-    dob_m = re.search(r"\b(\d{1,2}/\d{1,2}/\d{4})\b", text[:800])
-    if dob_m:
-        patient_dob = dob_m.group(1)
-
-    session_m = re.search(
-        r"Session\s+\w+\s+(\d{1,2}/\d{1,2}/\d{4})(?:\s+\d{1,2}:\d{2})?",
-        text,
-        re.I,
-    )
-    if session_m:
-        session_date = session_m.group(1)
-
-    lines = [ln.strip() for ln in text.split("\n") if ln.strip()]
-    for i, line in enumerate(lines[:12]):
-        if re.match(r"Session\s+", line, re.I):
-            break
-        if re.match(r"\d{1,2}/\d{1,2}/\d{4}", line):
-            continue
-        if not patient_name and len(line) > 1:
-            patient_name = line
-            if i + 1 < len(lines) and re.match(r"\d{1,2}/\d{1,2}/\d{4}", lines[i + 1]):
-                patient_dob = lines[i + 1]
-            break
-
-    return patient_name, patient_dob, session_date
+def _rasterize_pdf_pages(pdf_bytes: bytes) -> list[str]:
+    """Rasterize each PDF page to base64 PNG (Kinvent reports are flattened images)."""
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    images: list[str] = []
+    try:
+        matrix = fitz.Matrix(_PDF_ZOOM, _PDF_ZOOM)
+        for page in doc:
+            pix = page.get_pixmap(matrix=matrix)
+            images.append(base64.standard_b64encode(pix.tobytes("png")).decode("ascii"))
+    finally:
+        doc.close()
+    return images
 
 
-def _split_test_sections(text: str) -> tuple[list[dict[str, Any]], list[str]]:
-    """Return recognized test sections and unrecognized text blocks."""
-    matches: list[tuple[int, int, str]] = []
-    for pattern, test_type in TEST_CARD_PATTERNS:
-        for m in pattern.finditer(text):
-            matches.append((m.start(), m.end(), test_type))
+def _call_claude_kinvent_extraction(page_images_b64: list[str]) -> str:
+    """Send rasterized report pages to Claude Haiku (same SDK pattern as diagnostic_ocr)."""
+    import os
 
-    if not matches:
-        return [], [text]
+    api_key = (os.environ.get("ANTHROPIC_API_KEY") or "").strip()
+    if not api_key:
+        raise ApsParseError("ANTHROPIC_API_KEY is not configured")
 
-    matches.sort(key=lambda x: x[0])
-    deduped: list[tuple[int, int, str]] = []
-    last_start = -1
-    for start, end, test_type in matches:
-        if start <= last_start:
-            continue
-        deduped.append((start, end, test_type))
-        last_start = start
+    try:
+        import anthropic
+    except ImportError as exc:
+        raise ApsParseError("anthropic package is not installed") from exc
 
-    sections: list[dict[str, Any]] = []
-    unparsed: list[str] = []
-
-    for idx, (start, end, test_type) in enumerate(deduped):
-        next_start = deduped[idx + 1][0] if idx + 1 < len(deduped) else len(text)
-        body = text[end:next_start].strip()
-        sections.append({"test_type": test_type, "body": body})
-
-    prefix = text[: deduped[0][0]].strip()
-    if prefix:
-        unparsed.append(prefix)
-
-    return sections, unparsed
-
-
-def _chunk_before_next_metric(chunk: str, current_pattern: re.Pattern[str]) -> str:
-    earliest = len(chunk)
-    all_patterns = [p for p, _, _ in BILATERAL_METRIC_PATTERNS] + [
-        p for p, _, _ in AGGREGATE_METRIC_PATTERNS
-    ]
-    for pat in all_patterns:
-        if pat.pattern == current_pattern.pattern:
-            continue
-        m = pat.search(chunk)
-        if m and m.start() < earliest:
-            earliest = m.start()
-    return chunk[:earliest]
-
-
-def _parse_lr_values(chunk: str) -> tuple[Optional[float], Optional[float], Optional[str]]:
-    left_m = re.search(
-        rf"Left\s*\n?\s*{_NUM}\s*{_UNIT_GROUP}",
-        chunk,
-        re.I,
-    )
-    right_m = re.search(
-        rf"Right\s*\n?\s*{_NUM}\s*{_UNIT_GROUP}",
-        chunk,
-        re.I,
-    )
-    left_val = _parse_float(left_m.group(1) if left_m else None)
-    right_val = _parse_float(right_m.group(1) if right_m else None)
-    unit = ""
-    for m in (left_m, right_m):
-        if m and m.group(2):
-            unit = m.group(2).strip()
-    return left_val, right_val, unit
-
-
-def _parse_bilateral_metrics(body: str) -> list[dict[str, Any]]:
-    metrics: list[dict[str, Any]] = []
-    for pattern, metric_name, default_unit in BILATERAL_METRIC_PATTERNS:
-        m = pattern.search(body)
-        if not m:
-            continue
-        chunk = _chunk_before_next_metric(body[m.end() :], pattern)
-        left_val, right_val, unit = _parse_lr_values(chunk)
-        asym_m = re.search(rf"{_NUM}\s*%\s*Asymmetry", chunk, re.I)
-        asym = _parse_float(asym_m.group(1) if asym_m else None)
-        if left_val is None and right_val is None and asym is None:
-            logger.warning("APS parser: metric label %s found but no values parsed", metric_name)
-            continue
-        metrics.append(
+    content: list[dict[str, Any]] = []
+    total = len(page_images_b64)
+    for idx, b64 in enumerate(page_images_b64):
+        content.append(
             {
-                "metric_name": metric_name,
-                "left_value": left_val,
-                "right_value": right_val,
-                "unit": unit or default_unit or None,
-                "asymmetry_pct": asym,
+                "type": "text",
+                "text": f"Kinvent report page {idx + 1} of {total}:",
             }
         )
-    return metrics
-
-
-def _parse_aggregate_metrics(body: str) -> list[dict[str, Any]]:
-    metrics: list[dict[str, Any]] = []
-    for pattern, metric_name, default_unit in AGGREGATE_METRIC_PATTERNS:
-        m = pattern.search(body)
-        if not m:
-            continue
-        chunk = _chunk_before_next_metric(body[m.end() :], pattern)
-        val_m = re.search(rf"{_NUM}", chunk)
-        val = _parse_float(val_m.group(1) if val_m else None)
-        if val is None:
-            continue
-        metrics.append(
+        content.append(
             {
-                "metric_name": metric_name,
-                "left_value": None,
-                "right_value": val,
-                "unit": default_unit or None,
-                "asymmetry_pct": None,
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": b64,
+                },
             }
         )
-    return metrics
+    content.append({"type": "text", "text": _USER_EXTRACTION_PROMPT})
+
+    client = anthropic.Anthropic(api_key=api_key, timeout=_CLAUDE_TIMEOUT_SEC)
+    message = client.messages.create(
+        model=_CLAUDE_MODEL,
+        max_tokens=_MAX_TOKENS,
+        system=_EXTRACTION_SYSTEM,
+        messages=[{"role": "user", "content": content}],
+    )
+
+    blocks = getattr(message, "content", None) or []
+    parts: list[str] = []
+    for block in blocks:
+        if hasattr(block, "text"):
+            parts.append(str(block.text))
+        elif isinstance(block, dict) and block.get("text"):
+            parts.append(str(block["text"]))
+    raw = "".join(parts).strip()
+    if not raw:
+        raise ApsParseError("Claude returned an empty extraction response")
+    return raw
 
 
-def _parse_test_section(test_type: str, body: str) -> dict[str, Any]:
-    if test_type in {"MULTIPLE_JUMPS", "RJT"}:
-        metrics = _parse_aggregate_metrics(body)
-        if not metrics:
-            metrics = _parse_bilateral_metrics(body)
-    else:
-        metrics = _parse_bilateral_metrics(body)
-        if not metrics:
-            metrics = _parse_aggregate_metrics(body)
-    return {"test_type": test_type, "metrics": metrics}
+def normalize_kinvent_payload(data: dict[str, Any]) -> dict[str, Any]:
+    """Validate and normalize Haiku JSON into the APS parser output shape."""
+    tests_out: list[dict[str, Any]] = []
+    for test in data.get("tests") or []:
+        if not isinstance(test, dict):
+            continue
+        test_type = str(test.get("test_type") or "").strip().upper()
+        if test_type not in ALLOWED_TEST_TYPES:
+            logger.warning("APS parser: skipping unknown test_type %s", test_type)
+            continue
 
+        metrics_out: list[dict[str, Any]] = []
+        for metric in test.get("metrics") or []:
+            if not isinstance(metric, dict):
+                continue
+            metric_name = str(metric.get("metric_name") or "").strip().lower()
+            if metric_name not in ALLOWED_METRIC_NAMES:
+                logger.warning(
+                    "APS parser: skipping unknown metric_name %s in %s",
+                    metric_name,
+                    test_type,
+                )
+                continue
 
-def parse_kinvent_text(text: str) -> dict[str, Any]:
-    """Parse normalized Kinvent report text into structured APS data."""
-    normalized = _normalize_text(text)
-    patient_name, patient_dob, session_date = _extract_header_fields(normalized)
-    sections, unparsed_prefix = _split_test_sections(normalized)
+            left_val = _parse_float(metric.get("left_value"))
+            right_val = _parse_float(metric.get("right_value"))
+            combined_val = _parse_float(metric.get("combined_value"))
 
-    tests: list[dict[str, Any]] = []
-    unparsed_sections: list[str] = list(unparsed_prefix)
+            if left_val is None and right_val is None and combined_val is None:
+                continue
 
-    for section in sections:
-        test_type = str(section["test_type"])
-        body = str(section["body"])
-        parsed = _parse_test_section(test_type, body)
-        if parsed["metrics"]:
-            tests.append(parsed)
-        else:
-            unparsed_sections.append(f"{test_type}: {body[:500]}")
-            logger.warning("APS parser: unrecognized or empty test card: %s", test_type)
+            metrics_out.append(
+                {
+                    "metric_name": metric_name,
+                    "left_value": left_val,
+                    "right_value": right_val,
+                    "combined_value": combined_val,
+                    "unit": (str(metric.get("unit")).strip() if metric.get("unit") else None),
+                    "asymmetry_pct": _parse_float(metric.get("asymmetry_pct")),
+                }
+            )
+
+        if metrics_out:
+            tests_out.append({"test_type": test_type, "metrics": metrics_out})
+
+    unparsed = data.get("unparsed_sections") or []
+    if not isinstance(unparsed, list):
+        unparsed = [str(unparsed)]
+    unparsed_out = [str(x).strip() for x in unparsed if str(x).strip()]
 
     return {
-        "patient_name": patient_name,
-        "patient_dob": patient_dob,
-        "session_date": session_date,
-        "tests": tests,
-        "unparsed_sections": unparsed_sections,
+        "patient_name": str(data.get("patient_name") or "").strip(),
+        "patient_dob": str(data.get("patient_dob") or "").strip(),
+        "session_date": str(data.get("session_date") or "").strip(),
+        "tests": tests_out,
+        "unparsed_sections": unparsed_out,
     }
 
 
 def parse_kinvent_pdf(pdf_bytes: bytes) -> dict[str, Any]:
-    """Extract text from a Kinvent PDF and parse structured jump-test data."""
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    """
+    Extract structured APS data from a Kinvent PDF via Claude Haiku vision.
+    Raises ApsParseError on extraction/JSON failures (caller should not persist empty sessions).
+    """
+    page_images = _rasterize_pdf_pages(pdf_bytes)
+    if not page_images:
+        raise ApsParseError("PDF contains no pages")
+
     try:
-        pages = [page.get_text() for page in doc]
-    finally:
-        doc.close()
-    full_text = "\n".join(pages)
-    result = parse_kinvent_text(full_text)
-    result["raw_text"] = full_text
-    return result
+        raw_response = _call_claude_kinvent_extraction(page_images)
+    except ApsParseError:
+        raise
+    except Exception as exc:
+        logger.exception("APS Claude vision extraction failed")
+        raise ApsParseError(f"Claude extraction failed: {exc}") from exc
+
+    try:
+        payload = _extract_json_object(raw_response)
+        normalized = normalize_kinvent_payload(payload)
+    except Exception as exc:
+        logger.warning("APS JSON parse failed: %s", exc)
+        raise ApsParseError(
+            "Failed to parse structured JSON from Claude response",
+            raw_response=raw_response,
+            parse_error=str(exc),
+        ) from exc
+
+    normalized["extraction_method"] = "claude_vision"
+    normalized["page_count"] = len(page_images)
+    normalized["llm_raw_response"] = raw_response
+    return normalized
 
 
 def parse_session_date(raw: str) -> date:
@@ -294,6 +312,7 @@ def flatten_findings(parsed: dict[str, Any]) -> list[dict[str, Any]]:
                     "metric_name": metric.get("metric_name"),
                     "left_value": metric.get("left_value"),
                     "right_value": metric.get("right_value"),
+                    "combined_value": metric.get("combined_value"),
                     "unit": metric.get("unit"),
                     "asymmetry_pct": metric.get("asymmetry_pct"),
                 }

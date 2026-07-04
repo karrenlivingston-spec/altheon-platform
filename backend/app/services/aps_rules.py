@@ -9,6 +9,7 @@ from typing import Any, Optional
 # ---------------------------------------------------------------------------
 ASYMMETRY_NOTABLE_THRESHOLD_PCT = 15  # flag as notable above this
 ASYMMETRY_HIGH_CONFIDENCE_MIN_METRICS = 2  # concordant metrics needed for "high"
+HIGH_CONFIDENCE_MAJORITY_FRACTION = 0.60  # dominant cluster must be >= 60% of notable findings
 
 # DRAFT — built from Dr. West's clinical notes, pending his review before relied
 # upon. Edit freely; do not treat as validated protocol.
@@ -39,6 +40,11 @@ LOW_CONFIDENCE_PREFIX = (
     "Findings are inconsistent across tests — repeat testing before proceeding. "
 )
 
+_DOMINANT_SIDE_K_PUSH: dict[str, str] = {
+    "left": "left hip extensors/knee extensors",
+    "right": "right hip extensors/knee extensors",
+}
+
 
 def _safe_float(value: Any) -> Optional[float]:
     if value is None:
@@ -47,6 +53,16 @@ def _safe_float(value: Any) -> Optional[float]:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def is_combined_only_metric(row: dict[str, Any]) -> bool:
+    """True when the metric is an aggregate with no left/right split."""
+    left = _safe_float(row.get("left_value"))
+    right = _safe_float(row.get("right_value"))
+    combined = _safe_float(row.get("combined_value"))
+    if left is not None or right is not None:
+        return False
+    return combined is not None
 
 
 def deficient_side(left_value: Any, right_value: Any) -> Optional[str]:
@@ -62,33 +78,111 @@ def deficient_side(left_value: Any, right_value: Any) -> Optional[str]:
     return None
 
 
-def _session_confidence_tier(notable: list[dict[str, Any]]) -> Optional[str]:
-    """Derive session-level tier from cross-metric agreement among notable findings."""
-    if not notable:
-        return None
-    if len(notable) == 1:
-        return "moderate"
+def _finding_key(row: dict[str, Any]) -> tuple[str, str, str]:
+    return (
+        str(row.get("test_type") or ""),
+        str(row.get("metric_name") or ""),
+        str(row.get("left_value")),
+    )
 
-    sides: list[str] = []
+
+def _cluster_notable_by_side(
+    notable: list[dict[str, Any]],
+) -> tuple[dict[str, list[dict[str, Any]]], list[dict[str, Any]]]:
+    """Group notable split metrics by deficient side; return sideless rows separately."""
+    clusters: dict[str, list[dict[str, Any]]] = {"left": [], "right": []}
+    sideless: list[dict[str, Any]] = []
     for row in notable:
         side = deficient_side(row.get("left_value"), row.get("right_value"))
         if side:
-            sides.append(side)
-
-    if len(sides) < ASYMMETRY_HIGH_CONFIDENCE_MIN_METRICS:
-        return "moderate"
-
-    if len(set(sides)) == 1:
-        return "high"
-    return "low"
+            clusters[side].append(row)
+        else:
+            sideless.append(row)
+    return clusters, sideless
 
 
-def _recommendation_for_metric(metric_name: str, confidence_tier: Optional[str]) -> Optional[str]:
+def _session_confidence_tier(
+    notable: list[dict[str, Any]],
+) -> tuple[Optional[str], Optional[str]]:
+    """
+    Derive session-level tier from the largest same-side cluster among notable findings.
+    Returns (tier, dominant_side).
+    """
+    if not notable:
+        return None, None
+    if len(notable) == 1:
+        side = deficient_side(notable[0].get("left_value"), notable[0].get("right_value"))
+        return "moderate", side
+
+    clusters, _sideless = _cluster_notable_by_side(notable)
+    left_count = len(clusters["left"])
+    right_count = len(clusters["right"])
+    sided_total = left_count + right_count
+
+    if sided_total == 0:
+        return "moderate", None
+
+    if len(notable) == 2 and left_count == 1 and right_count == 1:
+        return "low", None
+
+    if left_count >= right_count:
+        dominant_side = "left"
+        dominant_count = left_count
+    else:
+        dominant_side = "right"
+        dominant_count = right_count
+
+    minority_count = sided_total - dominant_count
+
+    if dominant_count >= ASYMMETRY_HIGH_CONFIDENCE_MIN_METRICS:
+        if dominant_count / len(notable) >= HIGH_CONFIDENCE_MAJORITY_FRACTION:
+            return "high", dominant_side
+
+    if left_count > 0 and right_count > 0 and dominant_count <= minority_count:
+        return "low", None
+
+    if left_count > 0 and right_count > 0:
+        if dominant_count / len(notable) < HIGH_CONFIDENCE_MAJORITY_FRACTION:
+            return "low", None
+
+    return "moderate", dominant_side
+
+
+def _dominant_cluster_prefix(dominant_side: str, dominant_count: int, total_notable: int) -> str:
+    muscles = _DOMINANT_SIDE_K_PUSH.get(dominant_side, f"{dominant_side}-side musculature")
+    return (
+        f"{dominant_count} of {total_notable} tested metrics point to a {dominant_side}-side "
+        f"deficit — recommend K-Push testing on the {muscles} to confirm. "
+    )
+
+
+def _outlier_note(row: dict[str, Any]) -> str:
+    return (
+        f"Note: {row.get('test_type')} {row.get('metric_name')} showed the opposite pattern "
+        "and should be reviewed alongside the dominant finding, not discarded. "
+    )
+
+
+def _recommendation_for_metric(
+    metric_name: str,
+    confidence_tier: Optional[str],
+    *,
+    row: dict[str, Any],
+    dominant_side: Optional[str],
+    is_outlier: bool,
+    dominant_count: int,
+    total_notable: int,
+) -> Optional[str]:
     base = NEXT_TEST_BY_METRIC.get(metric_name)
     if not base:
         return None
     if confidence_tier == "low":
         return LOW_CONFIDENCE_PREFIX + base
+    if confidence_tier == "high" and dominant_side:
+        prefix = _dominant_cluster_prefix(dominant_side, dominant_count, total_notable)
+        if is_outlier:
+            return prefix + _outlier_note(row) + base
+        return prefix + base
     return base
 
 
@@ -100,14 +194,29 @@ def apply_aps_rules(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in findings:
         item = dict(row)
-        asym = _safe_float(item.get("asymmetry_pct"))
-        item["is_notable"] = asym is not None and asym >= ASYMMETRY_NOTABLE_THRESHOLD_PCT
+        if is_combined_only_metric(item):
+            item["is_notable"] = False
+        else:
+            asym = _safe_float(item.get("asymmetry_pct"))
+            item["is_notable"] = asym is not None and asym >= ASYMMETRY_NOTABLE_THRESHOLD_PCT
         item["confidence_tier"] = None
         item["recommended_next_test"] = None
         out.append(item)
 
     notable = [r for r in out if r.get("is_notable")]
-    session_tier = _session_confidence_tier(notable)
+    session_tier, dominant_side = _session_confidence_tier(notable)
+
+    outlier_keys: set[tuple[str, str, str]] = set()
+    dominant_count = 0
+    if session_tier == "high" and dominant_side:
+        for row in notable:
+            side = deficient_side(row.get("left_value"), row.get("right_value"))
+            if side == dominant_side:
+                dominant_count += 1
+            elif side:
+                outlier_keys.add(_finding_key(row))
+
+    total_notable = len(notable)
 
     for row in out:
         if not row.get("is_notable"):
@@ -116,6 +225,11 @@ def apply_aps_rules(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
         row["recommended_next_test"] = _recommendation_for_metric(
             str(row.get("metric_name") or ""),
             session_tier,
+            row=row,
+            dominant_side=dominant_side,
+            is_outlier=_finding_key(row) in outlier_keys,
+            dominant_count=dominant_count,
+            total_notable=total_notable,
         )
 
     return out

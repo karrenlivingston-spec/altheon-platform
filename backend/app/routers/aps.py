@@ -10,6 +10,7 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadF
 from app.db import supabase
 from app.dependencies.permissions import CLINICAL_ROLES, enforce_clinic_role_from_auth_header
 from app.services.aps_parser import (
+    ApsParseError,
     flatten_findings,
     parse_kinvent_pdf,
     parse_session_date,
@@ -91,6 +92,7 @@ def _shape_finding(row: dict[str, Any]) -> dict[str, Any]:
         "metric_name": row.get("metric_name"),
         "left_value": row.get("left_value"),
         "right_value": row.get("right_value"),
+        "combined_value": row.get("combined_value"),
         "unit": row.get("unit"),
         "asymmetry_pct": row.get("asymmetry_pct"),
         "is_notable": row.get("is_notable"),
@@ -172,9 +174,21 @@ async def upload_aps_session(
 
     try:
         parsed = parse_kinvent_pdf(raw)
+    except ApsParseError as exc:
+        logger.warning("APS parse failed patient_id=%s: %s", pid, exc)
+        detail = str(exc)
+        if exc.parse_error:
+            detail = f"{detail} ({exc.parse_error})"
+        raise HTTPException(status_code=422, detail=detail) from exc
     except Exception as exc:
         logger.exception("APS PDF parse failed patient_id=%s", pid)
         raise HTTPException(status_code=422, detail=f"Could not parse Kinvent PDF: {exc}") from exc
+
+    if not parsed.get("tests"):
+        raise HTTPException(
+            status_code=422,
+            detail="No jump test data could be extracted from this PDF",
+        )
 
     finding_rows = flatten_findings(parsed)
     scored = apply_aps_rules(finding_rows)
@@ -183,10 +197,10 @@ async def upload_aps_session(
     clinician_id = _resolve_clinician_id_optional(authorization, cid)
 
     raw_json = {
-        k: v for k, v in parsed.items() if k != "raw_text"
+        k: v
+        for k, v in parsed.items()
+        if k not in ("llm_raw_response",)
     }
-    if parsed.get("unparsed_sections"):
-        raw_json["unparsed_sections"] = parsed["unparsed_sections"]
 
     session_row: dict[str, Any] = {
         "clinic_id": cid,
@@ -220,6 +234,7 @@ async def upload_aps_session(
             "metric_name": row.get("metric_name"),
             "left_value": row.get("left_value"),
             "right_value": row.get("right_value"),
+            "combined_value": row.get("combined_value"),
             "unit": row.get("unit"),
             "asymmetry_pct": row.get("asymmetry_pct"),
             "is_notable": bool(row.get("is_notable")),
