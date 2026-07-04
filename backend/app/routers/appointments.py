@@ -593,10 +593,44 @@ def update_appointment_time(
         dur = _duration_minutes_from_appt_row(row)
     new_start = _parse_iso_utc(body.start_time)
     new_end = new_start + timedelta(minutes=dur)
+    new_start_iso = new_start.isoformat()
+    new_end_iso = new_end.isoformat()
+
+    if not old_clinician_id:
+        raise HTTPException(status_code=500, detail="Appointment has no clinician_id")
+
+    try:
+        if _is_blocked_time(old_clinician_id, new_start_iso, new_end_iso):
+            raise HTTPException(
+                status_code=409,
+                detail="This time conflicts with a blocked period for this provider.",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    try:
+        overlap = _find_clinician_appointment_overlap(
+            old_clinician_id,
+            new_start_iso,
+            new_end_iso,
+            appointment_id,
+        )
+        if overlap:
+            other_start = _format_conflict_appointment_time(overlap.get("start_time"))
+            raise HTTPException(
+                status_code=409,
+                detail=f"This time conflicts with an existing appointment at {other_start}.",
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     update_payload: dict[str, Any] = {
-        "start_time": new_start.isoformat(),
-        "end_time": new_end.isoformat(),
+        "start_time": new_start_iso,
+        "end_time": new_end_iso,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     if body.treatment_type_id and str(body.treatment_type_id).strip():
@@ -615,7 +649,6 @@ def update_appointment_time(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
-    new_start_iso = new_start.isoformat()
     if (
         old_status in {"scheduled", "confirmed"}
         and old_start_time
@@ -1257,6 +1290,43 @@ def _is_blocked_time(clinician_id: str, start_time: str, end_time: str) -> bool:
     )
     _handle_supabase_error(query)
     return bool(query.data)
+
+
+def _format_conflict_appointment_time(start_time: Any) -> str:
+    try:
+        dt = _parse_iso_utc(str(start_time))
+        local = dt.astimezone(ZoneInfo("America/New_York"))
+        hour = local.strftime("%I").lstrip("0") or "12"
+        return f"{hour}:{local.strftime('%M %p')} on {local.strftime('%B %d, %Y')}"
+    except Exception:
+        return str(start_time or "").strip() or "another time"
+
+
+def _find_clinician_appointment_overlap(
+    clinician_id: str,
+    start_time: str,
+    end_time: str,
+    exclude_appointment_id: str,
+) -> Optional[dict[str, Any]]:
+    """Return another appointment overlapping [start_time, end_time), if any."""
+    cid = str(clinician_id or "").strip()
+    exclude_id = str(exclude_appointment_id or "").strip()
+    if not cid or not exclude_id:
+        return None
+    query = (
+        supabase.table("appointments")
+        .select("id,start_time,end_time,status")
+        .eq("clinician_id", cid)
+        .neq("id", exclude_id)
+        .neq("status", "cancelled")
+        .lt("start_time", end_time)
+        .gt("end_time", start_time)
+        .limit(1)
+        .execute()
+    )
+    _handle_supabase_error(query)
+    rows = query.data or []
+    return rows[0] if rows else None
 
 
 def _duration_minutes_from_reschedule_row(row: dict[str, Any]) -> int:
