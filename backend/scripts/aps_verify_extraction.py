@@ -28,7 +28,11 @@ def _run(path: str, label: str) -> None:
         data = f.read()
     parsed = parse_kinvent_pdf(data)
     print(json.dumps(parsed, indent=2, default=str))
-    findings = apply_aps_rules(flatten_findings(parsed))
+    result = apply_aps_rules(flatten_findings(parsed))
+    findings = result["findings"]
+    summary = result["session_summary"]
+    print("\nSession summary:")
+    print(json.dumps(summary, indent=2))
     notable = [f for f in findings if f.get("is_notable")]
     print(f"\nNotable findings ({len(notable)}):")
     for f in notable:

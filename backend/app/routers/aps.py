@@ -15,7 +15,7 @@ from app.services.aps_parser import (
     parse_kinvent_pdf,
     parse_session_date,
 )
-from app.services.aps_rules import apply_aps_rules
+from app.services.aps_rules import apply_aps_rules, build_session_summary_from_findings
 from app.utils.auth_users import get_email_from_token, get_user_id_from_token
 
 router = APIRouter()
@@ -137,6 +137,7 @@ def _load_session_with_findings(session_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     session["findings"] = [_shape_finding(r) for r in (fresp.data or [])]
+    session["session_summary"] = build_session_summary_from_findings(session["findings"])
     return session
 
 
@@ -191,7 +192,9 @@ async def upload_aps_session(
         )
 
     finding_rows = flatten_findings(parsed)
-    scored = apply_aps_rules(finding_rows)
+    rules_result = apply_aps_rules(finding_rows)
+    scored = rules_result["findings"]
+    session_summary = rules_result["session_summary"]
 
     session_date = parse_session_date(str(parsed.get("session_date") or ""))
     clinician_id = _resolve_clinician_id_optional(authorization, cid)
@@ -253,6 +256,7 @@ async def upload_aps_session(
             db_findings.append(_shape_finding(frows[0]))
 
     session["findings"] = db_findings
+    session["session_summary"] = session_summary
     return session
 
 
@@ -324,5 +328,6 @@ def list_patient_aps_sessions(
     for session in sessions:
         sid = str(session.get("id") or "")
         session["findings"] = findings_by_session.get(sid, [])
+        session["session_summary"] = build_session_summary_from_findings(session["findings"])
 
     return sessions

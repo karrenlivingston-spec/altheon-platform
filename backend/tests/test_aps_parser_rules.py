@@ -16,7 +16,11 @@ from app.services.aps_parser import (
     normalize_kinvent_payload,
     parse_kinvent_pdf,
 )
-from app.services.aps_rules import apply_aps_rules, deficient_side
+from app.services.aps_rules import (
+    apply_aps_rules,
+    build_session_summary_from_findings,
+    deficient_side,
+)
 from tests.fixtures.aps_sharpe_structured import (
     ISOLATED_SINGLE_NOTABLE,
     SHARPE_STRUCTURED,
@@ -28,7 +32,9 @@ class TestApsRulesSharpe(unittest.TestCase):
     def test_sharpe_full_report_disagreeing_findings_tier_low(self):
         """Full Sharpe PDF: CMJ braking_rfd (left weaker) + SJ propulsive_rfd (right weaker) -> LOW."""
         parsed = normalize_kinvent_payload(SHARPE_STRUCTURED)
-        findings = apply_aps_rules(flatten_findings(parsed))
+        result = apply_aps_rules(flatten_findings(parsed))
+        findings = result["findings"]
+        summary = result["session_summary"]
         notable = [f for f in findings if f["is_notable"]]
         self.assertEqual(len(notable), 2)
 
@@ -45,22 +51,42 @@ class TestApsRulesSharpe(unittest.TestCase):
 
         # Two disagreeing notable findings -> LOW (not MODERATE from the old partial fixture).
         self.assertTrue(all(f["confidence_tier"] == "low" for f in notable))
+        self.assertEqual(summary["overall_tier"], "low")
+        self.assertEqual(summary["total_notable_findings"], 2)
+        self.assertIsNone(summary["dominant_side"])
+        self.assertEqual(summary["dominant_cluster_size"], 0)
+        self.assertEqual(summary["outlier_count"], 2)
+        outlier_keys = {
+            (o["test_type"], o["metric_name"]) for o in summary["outlier_findings"]
+        }
+        self.assertEqual(
+            outlier_keys,
+            {("CMJ", "braking_rfd"), ("SJ", "propulsive_rfd")},
+        )
 
     def test_isolated_single_notable_finding_produces_moderate(self):
         """One notable finding in an otherwise normal session still tiers as MODERATE."""
         parsed = normalize_kinvent_payload(ISOLATED_SINGLE_NOTABLE)
-        findings = apply_aps_rules(flatten_findings(parsed))
+        result = apply_aps_rules(flatten_findings(parsed))
+        findings = result["findings"]
+        summary = result["session_summary"]
         notable = [f for f in findings if f["is_notable"]]
         self.assertEqual(len(notable), 1)
         self.assertEqual(notable[0]["confidence_tier"], "moderate")
         self.assertNotEqual(notable[0]["confidence_tier"], "high")
         self.assertNotEqual(notable[0]["confidence_tier"], "low")
+        self.assertEqual(summary["overall_tier"], "moderate")
+        self.assertEqual(summary["total_notable_findings"], 1)
+        self.assertIsNone(summary["dominant_side"])
+        self.assertEqual(summary["outlier_count"], 0)
 
 
 class TestApsRulesWest(unittest.TestCase):
     def test_west_right_side_cluster_is_high_with_outliers_flagged(self):
         parsed = normalize_kinvent_payload(WEST_STRUCTURED)
-        findings = apply_aps_rules(flatten_findings(parsed))
+        result = apply_aps_rules(flatten_findings(parsed))
+        findings = result["findings"]
+        summary = result["session_summary"]
         notable = [f for f in findings if f["is_notable"]]
         self.assertEqual(len(notable), 8)
         self.assertTrue(all(f["confidence_tier"] == "high" for f in notable))
@@ -85,6 +111,26 @@ class TestApsRulesWest(unittest.TestCase):
 
         for f in left_outliers:
             self.assertIn("opposite pattern", f["recommended_next_test"])
+
+        self.assertEqual(summary["overall_tier"], "high")
+        self.assertEqual(summary["total_notable_findings"], 8)
+        self.assertEqual(summary["dominant_side"], "right")
+        self.assertEqual(summary["dominant_cluster_size"], 6)
+        self.assertEqual(summary["outlier_count"], 2)
+        outlier_keys = {
+            (o["test_type"], o["metric_name"]) for o in summary["outlier_findings"]
+        }
+        self.assertEqual(
+            outlier_keys,
+            {("SLCMJ", "braking_rfd"), ("SLDJ", "jump_height")},
+        )
+
+    def test_session_summary_from_persisted_findings(self):
+        parsed = normalize_kinvent_payload(WEST_STRUCTURED)
+        result = apply_aps_rules(flatten_findings(parsed))
+        summary = build_session_summary_from_findings(result["findings"])
+        self.assertEqual(summary["overall_tier"], "high")
+        self.assertEqual(summary["dominant_cluster_size"], 6)
 
 
 class TestCombinedOnlyMetrics(unittest.TestCase):
@@ -116,8 +162,8 @@ class TestCombinedOnlyMetrics(unittest.TestCase):
         self.assertIsNone(metric["right_value"])
         self.assertAlmostEqual(metric["combined_value"], 10.4)
 
-        findings = apply_aps_rules(flatten_findings(parsed))
-        jump = findings[0]
+        result = apply_aps_rules(flatten_findings(parsed))
+        jump = result["findings"][0]
         self.assertFalse(jump["is_notable"])
         self.assertIsNone(jump["confidence_tier"])
 
@@ -197,10 +243,12 @@ class TestApsIntegrationRealPdfs(unittest.TestCase):
             self.assertIsNone(jump_height.get("left_value"))
             self.assertIsNone(jump_height.get("right_value"))
 
-        findings = apply_aps_rules(flatten_findings(parsed))
+        result = apply_aps_rules(flatten_findings(parsed))
+        findings = result["findings"]
         notable = [f for f in findings if f["is_notable"]]
         self.assertGreaterEqual(len(notable), 2)
         self.assertTrue(all(f["confidence_tier"] == "low" for f in notable))
+        self.assertEqual(result["session_summary"]["overall_tier"], "low")
 
     def test_west_real_pdf_extraction(self):
         pdf = self._load_pdf("APS_WEST_PDF")
@@ -220,9 +268,10 @@ class TestApsIntegrationRealPdfs(unittest.TestCase):
             self.assertAlmostEqual(peak_rfd["right_value"], 1440, delta=50)
             self.assertAlmostEqual(peak_rfd["asymmetry_pct"], 69.3, delta=2.0)
 
-        findings = apply_aps_rules(flatten_findings(parsed))
-        notable = [f for f in findings if f["is_notable"]]
+        result = apply_aps_rules(flatten_findings(parsed))
+        notable = [f for f in result["findings"] if f["is_notable"]]
         self.assertTrue(all(f["confidence_tier"] == "high" for f in notable))
+        self.assertEqual(result["session_summary"]["overall_tier"], "high")
 
 
 if __name__ == "__main__":

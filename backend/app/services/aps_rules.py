@@ -148,6 +148,71 @@ def _session_confidence_tier(
     return "moderate", dominant_side
 
 
+def _outlier_rows_for_summary(
+    notable: list[dict[str, Any]],
+    tier: Optional[str],
+    dominant_side: Optional[str],
+) -> list[dict[str, Any]]:
+    if not notable or not tier:
+        return []
+    if tier == "high" and dominant_side:
+        return [
+            row
+            for row in notable
+            if deficient_side(row.get("left_value"), row.get("right_value"))
+            not in (None, dominant_side)
+        ]
+    if tier == "low":
+        clusters, _sideless = _cluster_notable_by_side(notable)
+        if len(notable) == 2 and len(clusters["left"]) == 1 and len(clusters["right"]) == 1:
+            return list(notable)
+        if dominant_side:
+            minority_side = "right" if dominant_side == "left" else "left"
+            return list(clusters[minority_side])
+        left_count = len(clusters["left"])
+        right_count = len(clusters["right"])
+        if left_count > 0 and right_count > 0:
+            if left_count <= right_count:
+                return list(clusters["left"])
+            return list(clusters["right"])
+    return []
+
+
+def build_session_summary(notable: list[dict[str, Any]]) -> dict[str, Any]:
+    """Structured session summary from notable findings (shared by rules + GET assembly)."""
+    tier, dominant_side = _session_confidence_tier(notable)
+    clusters, _sideless = _cluster_notable_by_side(notable)
+
+    dominant_cluster_size = 0
+    summary_dominant_side: Optional[str] = None
+    if tier == "high" and dominant_side:
+        summary_dominant_side = dominant_side
+        dominant_cluster_size = len(clusters[dominant_side])
+
+    outlier_rows = _outlier_rows_for_summary(notable, tier, dominant_side)
+
+    return {
+        "overall_tier": tier,
+        "total_notable_findings": len(notable),
+        "dominant_side": summary_dominant_side,
+        "dominant_cluster_size": dominant_cluster_size,
+        "outlier_count": len(outlier_rows),
+        "outlier_findings": [
+            {
+                "test_type": str(row.get("test_type") or ""),
+                "metric_name": str(row.get("metric_name") or ""),
+            }
+            for row in outlier_rows
+        ],
+    }
+
+
+def build_session_summary_from_findings(findings: list[dict[str, Any]]) -> dict[str, Any]:
+    """Rebuild session_summary from persisted scored findings."""
+    notable = [row for row in findings if row.get("is_notable")]
+    return build_session_summary(notable)
+
+
 def _dominant_cluster_prefix(dominant_side: str, dominant_count: int, total_notable: int) -> str:
     muscles = _DOMINANT_SIDE_K_PUSH.get(dominant_side, f"{dominant_side}-side musculature")
     return (
@@ -186,10 +251,9 @@ def _recommendation_for_metric(
     return base
 
 
-def apply_aps_rules(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def apply_aps_rules(findings: list[dict[str, Any]]) -> dict[str, Any]:
     """
-    Mutate and return finding dicts with is_notable, confidence_tier,
-    recommended_next_test populated.
+    Score findings and return findings plus structured session_summary.
     """
     out: list[dict[str, Any]] = []
     for row in findings:
@@ -205,17 +269,18 @@ def apply_aps_rules(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     notable = [r for r in out if r.get("is_notable")]
     session_tier, dominant_side = _session_confidence_tier(notable)
+    session_summary = build_session_summary(notable)
 
     outlier_keys: set[tuple[str, str, str]] = set()
-    dominant_count = 0
-    if session_tier == "high" and dominant_side:
+    for item in session_summary.get("outlier_findings") or []:
         for row in notable:
-            side = deficient_side(row.get("left_value"), row.get("right_value"))
-            if side == dominant_side:
-                dominant_count += 1
-            elif side:
+            if (
+                str(row.get("test_type") or "") == item.get("test_type")
+                and str(row.get("metric_name") or "") == item.get("metric_name")
+            ):
                 outlier_keys.add(_finding_key(row))
 
+    dominant_count = int(session_summary.get("dominant_cluster_size") or 0)
     total_notable = len(notable)
 
     for row in out:
@@ -226,10 +291,10 @@ def apply_aps_rules(findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
             str(row.get("metric_name") or ""),
             session_tier,
             row=row,
-            dominant_side=dominant_side,
+            dominant_side=dominant_side if session_tier == "high" else None,
             is_outlier=_finding_key(row) in outlier_keys,
             dominant_count=dominant_count,
             total_notable=total_notable,
         )
 
-    return out
+    return {"findings": out, "session_summary": session_summary}
