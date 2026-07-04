@@ -106,6 +106,10 @@ function formatCancelWhen(startIso: string): string {
   }
 }
 
+function isValidDurationMinutes(value: number): boolean {
+  return Number.isInteger(value) && value >= 1;
+}
+
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -313,6 +317,7 @@ export default function AppointmentPopup({
     appointment.appointment_type,
   );
   const cancelWhen = formatCancelWhen(appointment.start_time);
+  const durationMinutesValid = isValidDurationMinutes(durationMinutes);
 
   async function handleRescheduleSubmit() {
     if (!rescheduleDate || !rescheduleTime) return;
@@ -328,6 +333,7 @@ export default function AppointmentPopup({
   }
 
   async function handleDurationSubmit() {
+    if (!durationMinutesValid) return;
     setDurationBusy(true);
     setDurationError(null);
     try {
@@ -402,20 +408,50 @@ export default function AppointmentPopup({
               <InfoRow label="Patient" value={appointment.patient_name} />
               <InfoRow label="Date & time" value={formatCancelWhen(appointment.start_time)} />
               <label className="block text-xs font-medium text-gray-500">
-                Duration
-                <select
-                  className="mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
-                  value={durationMinutes}
-                  onChange={(e) => setDurationMinutes(Number(e.target.value))}
+                Duration (minutes)
+                <input
+                  type="number"
+                  min={1}
+                  step={1}
+                  inputMode="numeric"
+                  value={Number.isFinite(durationMinutes) ? durationMinutes : ""}
+                  onChange={(e) => {
+                    const raw = e.target.value;
+                    if (raw === "") {
+                      setDurationMinutes(Number.NaN);
+                      return;
+                    }
+                    const parsed = Number(raw);
+                    if (Number.isFinite(parsed)) {
+                      setDurationMinutes(parsed);
+                    }
+                  }}
                   disabled={durationBusy}
-                >
-                  {durationOptions.map((m) => (
-                    <option key={m} value={m}>
-                      {m} min
-                    </option>
-                  ))}
-                </select>
+                  className="mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                />
               </label>
+              <div className="flex flex-wrap gap-1.5 pt-1">
+                {durationOptions.map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    disabled={durationBusy}
+                    onClick={() => setDurationMinutes(m)}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors disabled:opacity-50 ${
+                      durationMinutes === m
+                        ? "border-teal-600 bg-teal-50 text-teal-800"
+                        : "border-gray-200 bg-white text-gray-700 hover:bg-gray-50"
+                    }`}
+                  >
+                    {m} min
+                  </button>
+                ))}
+              </div>
+              {!durationMinutesValid ? (
+                <p className="text-xs text-red-600">
+                  Enter a whole number of minutes (1 or greater).
+                </p>
+              ) : null}
             </div>
             {durationError ? (
               <p className="mt-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800">
@@ -438,7 +474,7 @@ export default function AppointmentPopup({
                 type="button"
                 className="flex-1 rounded-lg bg-[#16A34A] px-3 py-2 text-sm font-medium text-white hover:bg-[#15803D] disabled:opacity-50"
                 onClick={() => void handleDurationSubmit()}
-                disabled={durationBusy}
+                disabled={durationBusy || !durationMinutesValid}
               >
                 {durationBusy ? "Saving…" : "Confirm"}
               </button>
