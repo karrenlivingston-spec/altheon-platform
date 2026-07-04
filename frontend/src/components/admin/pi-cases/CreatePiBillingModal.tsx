@@ -1,0 +1,451 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import { X } from "lucide-react";
+
+import {
+  DS_CARD,
+  DS_INPUT,
+  DS_PRIMARY_BTN,
+  DS_SECONDARY_BTN,
+} from "@/app/admin/designSystem";
+import { supabase } from "@/lib/supabase";
+
+const API_BASE =
+  process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
+
+export type PiBillingContext = {
+  piCaseId: string;
+  patientId: string;
+  patientName: string;
+  insuranceCarrier: string | null;
+  claimNumber: string | null;
+  clinicId: string;
+};
+
+type ClinicianOption = {
+  id: string;
+  first_name?: string;
+  last_name?: string;
+  title?: string;
+};
+
+type AppointmentOption = {
+  id: string;
+  patient_id: string;
+  start_time: string;
+  status?: string;
+};
+
+type CreatePiBillingModalProps = {
+  open: boolean;
+  onClose: () => void;
+  onSuccess: (message: string) => void;
+  context: PiBillingContext | null;
+};
+
+type FieldErrors = {
+  dateOfService?: string;
+  cptCode?: string;
+  rate?: string;
+  units?: string;
+};
+
+async function authHeaders(): Promise<Record<string, string>> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token ?? "";
+  const h: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) h.Authorization = `Bearer ${token}`;
+  return h;
+}
+
+function clinicianLabel(c: ClinicianOption): string {
+  const n = `${c.first_name ?? ""} ${c.last_name ?? ""}`.trim();
+  return c.title ? `${n}, ${c.title}` : n || "Provider";
+}
+
+function formatApptLabel(a: AppointmentOption): string {
+  const d = a.start_time.slice(0, 10);
+  const t = a.start_time.length > 11 ? a.start_time.slice(11, 16) : "";
+  const status = a.status ? ` (${a.status})` : "";
+  return `${d}${t ? ` ${t}` : ""}${status}`;
+}
+
+function parseApiError(json: unknown, fallback: string): string {
+  if (
+    json &&
+    typeof json === "object" &&
+    "detail" in json &&
+    typeof (json as { detail: unknown }).detail === "string"
+  ) {
+    return (json as { detail: string }).detail;
+  }
+  return fallback;
+}
+
+export default function CreatePiBillingModal({
+  open,
+  onClose,
+  onSuccess,
+  context,
+}: CreatePiBillingModalProps) {
+  const [dateOfService, setDateOfService] = useState("");
+  const [appointmentId, setAppointmentId] = useState("");
+  const [providerId, setProviderId] = useState("");
+  const [notes, setNotes] = useState("");
+  const [cptCode, setCptCode] = useState("");
+  const [rate, setRate] = useState("");
+  const [units, setUnits] = useState("1");
+  const [clinicians, setClinicians] = useState<ClinicianOption[]>([]);
+  const [appointments, setAppointments] = useState<AppointmentOption[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [submitAttempted, setSubmitAttempted] = useState(false);
+  const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    setDateOfService("");
+    setAppointmentId("");
+    setProviderId("");
+    setNotes("");
+    setCptCode("");
+    setRate("");
+    setUnits("1");
+    setFieldErrors({});
+    setSubmitAttempted(false);
+    setSubmitError(null);
+    setBusy(false);
+  }, [open, context?.piCaseId]);
+
+  useEffect(() => {
+    if (!open || !context?.clinicId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const h = await authHeaders();
+        const res = await fetch(
+          `${API_BASE}/clinicians?clinic_id=${encodeURIComponent(context.clinicId)}`,
+          { headers: h },
+        );
+        const data = res.ok ? await res.json() : [];
+        if (!cancelled) setClinicians(Array.isArray(data) ? data : []);
+      } catch {
+        if (!cancelled) setClinicians([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, context?.clinicId]);
+
+  useEffect(() => {
+    if (!open || !context?.clinicId || !context.patientId) {
+      setAppointments([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const h = await authHeaders();
+        const res = await fetch(
+          `${API_BASE}/appointments?clinic_id=${encodeURIComponent(context.clinicId)}`,
+          { headers: h },
+        );
+        const data = res.ok ? await res.json() : [];
+        const rows = (Array.isArray(data) ? data : []) as AppointmentOption[];
+        const filtered = rows
+          .filter(
+            (a) =>
+              a.patient_id === context.patientId &&
+              String(a.status ?? "").toLowerCase() !== "cancelled",
+          )
+          .sort((a, b) => b.start_time.localeCompare(a.start_time))
+          .slice(0, 15);
+        if (!cancelled) setAppointments(filtered);
+      } catch {
+        if (!cancelled) setAppointments([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, context?.clinicId, context?.patientId]);
+
+  if (!open || !context) return null;
+
+  const rateNum = Number(rate);
+  const unitsNum = Number(units);
+
+  function validate(): FieldErrors {
+    const errs: FieldErrors = {};
+    if (!dateOfService.trim()) errs.dateOfService = "Required.";
+    if (!cptCode.trim()) errs.cptCode = "Required.";
+    if (!rate.trim() || Number.isNaN(rateNum) || rateNum <= 0) {
+      errs.rate = "Enter a valid amount greater than zero.";
+    }
+    if (
+      !units.trim() ||
+      Number.isNaN(unitsNum) ||
+      unitsNum <= 0 ||
+      !Number.isInteger(unitsNum)
+    ) {
+      errs.units = "Enter a whole number greater than zero.";
+    }
+    return errs;
+  }
+
+  function showErr(key: keyof FieldErrors) {
+    return submitAttempted && fieldErrors[key] ? (
+      <p className="mt-1 text-xs text-red-600">{fieldErrors[key]}</p>
+    ) : null;
+  }
+
+  function handleClose() {
+    if (busy) return;
+    onClose();
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitAttempted(true);
+    setSubmitError(null);
+    const errs = validate();
+    setFieldErrors(errs);
+    if (Object.keys(errs).length > 0) return;
+
+    setBusy(true);
+    try {
+      const h = await authHeaders();
+      const recordBody: Record<string, unknown> = {
+        clinic_id: context.clinicId,
+        patient_id: context.patientId,
+        pi_case_id: context.piCaseId,
+        date_of_service: dateOfService.trim(),
+        billing_type: "pi",
+      };
+      const carrier = (context.insuranceCarrier ?? "").trim();
+      if (carrier) recordBody.insurance_carrier = carrier;
+      const claim = (context.claimNumber ?? "").trim();
+      if (claim) recordBody.claim_number = claim;
+      if (appointmentId.trim()) recordBody.appointment_id = appointmentId.trim();
+      if (providerId.trim()) recordBody.provider_id = providerId.trim();
+      if (notes.trim()) recordBody.notes = notes.trim();
+
+      const recordRes = await fetch(`${API_BASE}/billing-records`, {
+        method: "POST",
+        headers: h,
+        body: JSON.stringify(recordBody),
+      });
+
+      if (!recordRes.ok) {
+        const json: unknown = await recordRes.json().catch(() => ({}));
+        setSubmitError(parseApiError(json, `Could not create billing record (${recordRes.status}).`));
+        return;
+      }
+
+      const recordJson = (await recordRes.json()) as { id?: string };
+      const recordId = String(recordJson.id ?? "").trim();
+      if (!recordId) {
+        setSubmitError("Billing record was created but no record id was returned.");
+        return;
+      }
+
+      const lineItemRes = await fetch(
+        `${API_BASE}/billing-records/${encodeURIComponent(recordId)}/line-items`,
+        {
+          method: "POST",
+          headers: h,
+          body: JSON.stringify({
+            cpt_code: cptCode.trim(),
+            rate_cents: Math.round(rateNum * 100),
+            units: unitsNum,
+          }),
+        },
+      );
+
+      if (!lineItemRes.ok) {
+        const json: unknown = await lineItemRes.json().catch(() => ({}));
+        setSubmitError(
+          `Billing record was created (ID: ${recordId}) but the line item failed to save: ${parseApiError(
+            json,
+            `Error ${lineItemRes.status}`,
+          )}. Add the line item manually using this record id.`,
+        );
+        return;
+      }
+
+      onSuccess("Billing record created — view it on the patient's Billing tab.");
+      onClose();
+    } catch {
+      setSubmitError("Could not create billing record.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+      <div className={`max-h-[92vh] w-full max-w-lg overflow-y-auto ${DS_CARD}`}>
+        <div className="flex items-start justify-between border-b border-gray-100 pb-4">
+          <h2 className="text-lg font-semibold text-gray-900">Create Billing</h2>
+          <button
+            type="button"
+            onClick={handleClose}
+            disabled={busy}
+            className="rounded-lg p-1 text-gray-500 hover:bg-gray-100 disabled:opacity-50"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        <form className="mt-4 space-y-4" onSubmit={(e) => void handleSubmit(e)}>
+          <div className="rounded-lg border border-gray-100 bg-gray-50 p-3 text-sm">
+            <dl className="space-y-2">
+              <div>
+                <dt className="text-xs font-semibold uppercase text-gray-500">Patient</dt>
+                <dd className="font-medium text-gray-900">{context.patientName || "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold uppercase text-gray-500">Insurance Carrier</dt>
+                <dd className="text-gray-900">{context.insuranceCarrier?.trim() || "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-semibold uppercase text-gray-500">Claim Number</dt>
+                <dd className="text-gray-900">{context.claimNumber?.trim() || "—"}</dd>
+              </div>
+            </dl>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
+              Date of Service
+            </label>
+            <input
+              type="date"
+              value={dateOfService}
+              onChange={(e) => setDateOfService(e.target.value)}
+              className={DS_INPUT}
+              required
+            />
+            {showErr("dateOfService")}
+          </div>
+
+          {appointments.length > 0 ? (
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
+                Link Appointment
+              </label>
+              <select
+                value={appointmentId}
+                onChange={(e) => setAppointmentId(e.target.value)}
+                className={DS_INPUT}
+              >
+                <option value="">None</option>
+                {appointments.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {formatApptLabel(a)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+
+          {clinicians.length > 0 ? (
+            <div>
+              <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
+                Provider
+              </label>
+              <select
+                value={providerId}
+                onChange={(e) => setProviderId(e.target.value)}
+                className={DS_INPUT}
+              >
+                <option value="">None</option>
+                {clinicians.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {clinicianLabel(c)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : null}
+
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">Notes</label>
+            <textarea
+              rows={2}
+              value={notes}
+              onChange={(e) => setNotes(e.target.value)}
+              className={DS_INPUT}
+              placeholder="Optional"
+            />
+          </div>
+
+          <div className="rounded-lg border border-gray-200 p-3">
+            <p className="text-xs font-semibold uppercase text-gray-500">Line Item</p>
+            <p className="mt-1 text-xs text-gray-500">
+              You can add more line items after creating this billing record.
+            </p>
+            <div className="mt-3 grid gap-3 sm:grid-cols-3">
+              <div className="sm:col-span-1">
+                <label className="mb-1 block text-xs font-medium text-gray-700">CPT Code</label>
+                <input
+                  type="text"
+                  value={cptCode}
+                  onChange={(e) => setCptCode(e.target.value)}
+                  className={DS_INPUT}
+                  placeholder="e.g. 97110"
+                  required
+                />
+                {showErr("cptCode")}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700">Rate ($)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={rate}
+                  onChange={(e) => setRate(e.target.value)}
+                  className={DS_INPUT}
+                  placeholder="0.00"
+                  required
+                />
+                {showErr("rate")}
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-gray-700">Units</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={units}
+                  onChange={(e) => setUnits(e.target.value)}
+                  className={DS_INPUT}
+                  required
+                />
+                {showErr("units")}
+              </div>
+            </div>
+          </div>
+
+          {submitError ? (
+            <p className="rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800">
+              {submitError}
+            </p>
+          ) : null}
+
+          <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
+            <button type="button" onClick={handleClose} disabled={busy} className={DS_SECONDARY_BTN}>
+              Cancel
+            </button>
+            <button type="submit" disabled={busy} className={DS_PRIMARY_BTN}>
+              {busy ? "Creating…" : "Create Billing Record"}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

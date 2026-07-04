@@ -9,6 +9,9 @@ import {
   DS_PRIMARY_BTN,
   DS_SECONDARY_BTN,
 } from "@/app/admin/designSystem";
+import CreatePiBillingModal, {
+  type PiBillingContext,
+} from "@/components/admin/pi-cases/CreatePiBillingModal";
 import {
   PiCaseBoardItem,
   PiCaseStatus,
@@ -156,6 +159,8 @@ export default function PiCaseModal({
   const [patientQuery, setPatientQuery] = useState("");
   const [patientResults, setPatientResults] = useState<PatientOption[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [billingModalOpen, setBillingModalOpen] = useState(false);
+  const [billingToast, setBillingToast] = useState<string | null>(null);
   const pickerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -194,7 +199,25 @@ export default function PiCaseModal({
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, [pickerOpen]);
 
+  useEffect(() => {
+    if (!billingToast) return;
+    const t = window.setTimeout(() => setBillingToast(null), 5000);
+    return () => window.clearTimeout(t);
+  }, [billingToast]);
+
   if (!open) return null;
+
+  const billingContext: PiBillingContext | null =
+    mode === "edit" && initial?.id && initial.patient_id
+      ? {
+          piCaseId: initial.id,
+          patientId: initial.patient_id,
+          patientName: initial.patient_name,
+          insuranceCarrier: initial.insurance_carrier ?? null,
+          claimNumber: initial.claim_number ?? null,
+          clinicId,
+        }
+      : null;
 
   function update<K extends keyof PiCaseFormValues>(key: K, value: PiCaseFormValues[K]) {
     setForm((f) => ({ ...f, [key]: value }));
@@ -334,14 +357,46 @@ export default function PiCaseModal({
             <textarea rows={3} value={form.notes} onChange={(e) => update("notes", e.target.value)} className={DS_INPUT} />
           </div>
 
-          <div className="flex justify-end gap-2 border-t border-gray-100 pt-4">
-            <button type="button" onClick={onClose} className={DS_SECONDARY_BTN}>Cancel</button>
-            <button type="submit" disabled={saving} className={DS_PRIMARY_BTN}>
-              {saving ? "Saving…" : mode === "create" ? "Create Case" : "Save Changes"}
-            </button>
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-gray-100 pt-4">
+            {mode === "edit" ? (
+              <button
+                type="button"
+                onClick={() => setBillingModalOpen(true)}
+                disabled={saving || !billingContext}
+                className={DS_SECONDARY_BTN}
+              >
+                Create Billing
+              </button>
+            ) : (
+              <span />
+            )}
+            <div className="flex gap-2">
+              <button type="button" onClick={onClose} className={DS_SECONDARY_BTN}>
+                Cancel
+              </button>
+              <button type="submit" disabled={saving} className={DS_PRIMARY_BTN}>
+                {saving ? "Saving…" : mode === "create" ? "Create Case" : "Save Changes"}
+              </button>
+            </div>
           </div>
         </form>
       </div>
+
+      {billingToast ? (
+        <div
+          className="fixed bottom-6 left-1/2 z-[70] max-w-md -translate-x-1/2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 shadow-lg"
+          role="status"
+        >
+          {billingToast}
+        </div>
+      ) : null}
+
+      <CreatePiBillingModal
+        open={billingModalOpen}
+        onClose={() => setBillingModalOpen(false)}
+        onSuccess={(message) => setBillingToast(message)}
+        context={billingContext}
+      />
     </div>
   );
 }
