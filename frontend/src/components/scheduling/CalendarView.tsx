@@ -1038,6 +1038,27 @@ export default function CalendarView({
     [closeAppointmentPopup, loadData],
   );
 
+  const handlePopupDurationConfirm = useCallback(
+    async (id: string, durationMinutes: number) => {
+      const appt = popupAppt;
+      if (!appt || appt.id !== id) {
+        throw new Error("Appointment not found");
+      }
+      try {
+        await patchAppointmentDetails(id, {
+          start_time: appt.start_time,
+          duration_minutes: durationMinutes,
+        });
+        closeAppointmentPopup();
+        await loadData();
+        setToast({ kind: "success", message: "Appointment duration updated" });
+      } catch (e) {
+        throw e;
+      }
+    },
+    [closeAppointmentPopup, loadData, popupAppt],
+  );
+
   const handlePopupCancel = useCallback(
     async (id: string) => {
       try {
@@ -1630,6 +1651,9 @@ export default function CalendarView({
           onCheckIn={(id) => void handlePopupCheckIn(id)}
           onCheckOut={(id) => void handlePopupCheckOut(id)}
           onRescheduleConfirm={handlePopupRescheduleConfirm}
+          onDurationConfirm={handlePopupDurationConfirm}
+          initialDurationMinutes={durationMinutesFromAppt(popupAppt)}
+          durationOptions={BOOKING_DURATION_OPTIONS}
           onCancelAppointment={handlePopupCancel}
           onScheduleFollowUp={handlePopupScheduleFollowUp}
           onOpenChart={handlePopupOpenChart}

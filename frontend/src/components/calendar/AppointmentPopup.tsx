@@ -32,6 +32,9 @@ type Props = {
   onCheckIn: (id: string) => void;
   onCheckOut: (id: string) => void;
   onRescheduleConfirm: (id: string, startTimeIso: string) => Promise<void>;
+  onDurationConfirm: (id: string, durationMinutes: number) => Promise<void>;
+  initialDurationMinutes: number;
+  durationOptions: readonly number[];
   onCancelAppointment: (id: string) => Promise<void>;
   onScheduleFollowUp: (patient_id: string, patient_name: string) => void;
   onOpenChart: (patient_id: string) => void;
@@ -153,6 +156,9 @@ export default function AppointmentPopup({
   onCheckIn,
   onCheckOut,
   onRescheduleConfirm,
+  onDurationConfirm,
+  initialDurationMinutes,
+  durationOptions,
   onCancelAppointment,
   onScheduleFollowUp,
   onOpenChart,
@@ -177,6 +183,10 @@ export default function AppointmentPopup({
     easternHmOfIso(appointment.start_time),
   );
   const [rescheduleBusy, setRescheduleBusy] = useState(false);
+  const [durationEditMode, setDurationEditMode] = useState(false);
+  const [durationMinutes, setDurationMinutes] = useState(initialDurationMinutes);
+  const [durationBusy, setDurationBusy] = useState(false);
+  const [durationError, setDurationError] = useState<string | null>(null);
   const [cancelConfirmMode, setCancelConfirmMode] = useState(false);
   const [cancelBusy, setCancelBusy] = useState(false);
 
@@ -189,8 +199,11 @@ export default function AppointmentPopup({
     setRescheduleDate(easternYmdOfIso(appointment.start_time));
     setRescheduleTime(easternHmOfIso(appointment.start_time));
     setRescheduleMode(false);
+    setDurationEditMode(false);
+    setDurationMinutes(initialDurationMinutes);
+    setDurationError(null);
     setCancelConfirmMode(false);
-  }, [appointment.id, appointment.start_time]);
+  }, [appointment.id, appointment.start_time, initialDurationMinutes]);
 
   useEffect(() => {
     let cancelled = false;
@@ -251,11 +264,16 @@ export default function AppointmentPopup({
         setRescheduleMode(false);
         return;
       }
+      if (durationEditMode) {
+        setDurationEditMode(false);
+        setDurationError(null);
+        return;
+      }
       onClose();
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose, cancelConfirmMode, rescheduleMode]);
+  }, [onClose, cancelConfirmMode, rescheduleMode, durationEditMode]);
 
   const computePosition = useCallback(() => {
     const el = cardRef.current;
@@ -279,7 +297,7 @@ export default function AppointmentPopup({
 
   useLayoutEffect(() => {
     computePosition();
-  }, [computePosition, rescheduleMode, cancelConfirmMode]);
+  }, [computePosition, rescheduleMode, cancelConfirmMode, durationEditMode]);
 
   useEffect(() => {
     window.addEventListener("resize", computePosition);
@@ -306,6 +324,20 @@ export default function AppointmentPopup({
       /* parent shows error toast; keep popup open */
     } finally {
       setRescheduleBusy(false);
+    }
+  }
+
+  async function handleDurationSubmit() {
+    setDurationBusy(true);
+    setDurationError(null);
+    try {
+      await onDurationConfirm(appointment.id, durationMinutes);
+    } catch (e) {
+      setDurationError(
+        e instanceof Error ? e.message : "Failed to update appointment duration",
+      );
+    } finally {
+      setDurationBusy(false);
     }
   }
 
@@ -360,7 +392,59 @@ export default function AppointmentPopup({
           <InfoRow label="Diagnosis" value={diagnosis || "—"} />
         </div>
 
-        {rescheduleMode ? (
+        {durationEditMode ? (
+          <div className="border-t border-gray-100 px-4 py-3">
+            <p className="text-sm font-semibold text-gray-900">Edit duration</p>
+            <p className="mt-1 text-xs text-gray-500">
+              Change how long this visit blocks on the calendar. Start time stays the same.
+            </p>
+            <div className="mt-3 space-y-2">
+              <InfoRow label="Patient" value={appointment.patient_name} />
+              <InfoRow label="Date & time" value={formatCancelWhen(appointment.start_time)} />
+              <label className="block text-xs font-medium text-gray-500">
+                Duration
+                <select
+                  className="mt-1 h-10 w-full rounded-lg border border-gray-200 bg-white px-3 text-sm"
+                  value={durationMinutes}
+                  onChange={(e) => setDurationMinutes(Number(e.target.value))}
+                  disabled={durationBusy}
+                >
+                  {durationOptions.map((m) => (
+                    <option key={m} value={m}>
+                      {m} min
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {durationError ? (
+              <p className="mt-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-xs text-red-800">
+                {durationError}
+              </p>
+            ) : null}
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                className="flex-1 rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                onClick={() => {
+                  setDurationEditMode(false);
+                  setDurationError(null);
+                }}
+                disabled={durationBusy}
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                className="flex-1 rounded-lg bg-[#16A34A] px-3 py-2 text-sm font-medium text-white hover:bg-[#15803D] disabled:opacity-50"
+                onClick={() => void handleDurationSubmit()}
+                disabled={durationBusy}
+              >
+                {durationBusy ? "Saving…" : "Confirm"}
+              </button>
+            </div>
+          </div>
+        ) : rescheduleMode ? (
           <div className="border-t border-gray-100 px-4 py-3">
             <p className="text-sm font-semibold text-gray-900">
               Reschedule appointment
@@ -459,7 +543,21 @@ export default function AppointmentPopup({
             <ActionButton
               icon="📅"
               label="Reschedule"
-              onClick={() => setRescheduleMode(true)}
+              onClick={() => {
+                setDurationEditMode(false);
+                setDurationError(null);
+                setRescheduleMode(true);
+              }}
+            />
+            <ActionButton
+              icon="⏱"
+              label="Edit Duration"
+              onClick={() => {
+                setRescheduleMode(false);
+                setDurationMinutes(initialDurationMinutes);
+                setDurationError(null);
+                setDurationEditMode(true);
+              }}
             />
             {showCancel ? (
               <ActionButton
