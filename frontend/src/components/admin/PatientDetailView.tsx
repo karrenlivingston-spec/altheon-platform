@@ -37,6 +37,7 @@ import PatientOverviewTab from "@/components/admin/patients/PatientOverviewTab";
 import PatientHEPTab from "@/components/admin/patients/PatientHEPTab";
 import type { PatientHeaderStats } from "@/components/admin/patients/patientTypes";
 import { REFERRAL_SOURCE_OPTIONS } from "@/components/admin/patients/patientTypes";
+import BillingRecordDetailModal from "@/components/admin/billing/BillingRecordDetailModal";
 
 const API_BASE =
   process.env.NEXT_PUBLIC_API_URL ?? "https://altheon-platform.onrender.com";
@@ -112,6 +113,7 @@ type AppointmentListRow = {
 };
 
 type BillingRow = {
+  id?: string;
   date_of_service?: string;
   total_billed_cents?: number | null;
   status?: string;
@@ -337,6 +339,9 @@ export function PatientDetailView({
   const [appointmentsError, setAppointmentsError] = useState<string | null>(null);
   const [billingLoading, setBillingLoading] = useState(false);
   const [billingError, setBillingError] = useState<string | null>(null);
+  const [billingDetailRecordId, setBillingDetailRecordId] = useState<
+    string | null
+  >(null);
   const [piLoading, setPiLoading] = useState(false);
   const [piError, setPiError] = useState<string | null>(null);
   const [membershipLoading, setMembershipLoading] = useState(false);
@@ -1492,10 +1497,35 @@ export function PatientDetailView({
                   </tr>
                 ) : (
                   billingRows.map((row, idx) => {
-                    const id = `${row.date_of_service}-${idx}`;
+                    const rowKey = row.id ?? `${row.date_of_service}-${idx}`;
                     const st = (row.status ?? "").toLowerCase();
+                    const clickable = !!row.id;
                     return (
-                      <tr key={id} className={DS_TR}>
+                      <tr
+                        key={rowKey}
+                        className={
+                          clickable
+                            ? `${DS_TR} cursor-pointer`
+                            : DS_TR
+                        }
+                        onClick={
+                          clickable
+                            ? () => setBillingDetailRecordId(row.id!)
+                            : undefined
+                        }
+                        role={clickable ? "button" : undefined}
+                        tabIndex={clickable ? 0 : undefined}
+                        onKeyDown={
+                          clickable
+                            ? (e) => {
+                                if (e.key === "Enter" || e.key === " ") {
+                                  e.preventDefault();
+                                  setBillingDetailRecordId(row.id!);
+                                }
+                              }
+                            : undefined
+                        }
+                      >
                         <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
                           {row.date_of_service
                             ? formatDob(String(row.date_of_service))
@@ -1518,6 +1548,11 @@ export function PatientDetailView({
           </div>
         </div>
         <InsuranceBenefitsLedger patientId={patientId} clinicId={clinicId} />
+        <BillingRecordDetailModal
+          recordId={billingDetailRecordId}
+          isOpen={billingDetailRecordId != null}
+          onClose={() => setBillingDetailRecordId(null)}
+        />
         </div>
       ) : null}
 
