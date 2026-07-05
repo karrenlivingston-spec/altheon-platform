@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 
 import {
   DS_CARD,
@@ -44,12 +44,32 @@ type CreatePiBillingModalProps = {
   context: PiBillingContext | null;
 };
 
-type FieldErrors = {
-  dateOfService?: string;
+type LineItemDraft = {
+  id: string;
+  cptCode: string;
+  rate: string;
+  units: string;
+};
+
+type LineFieldErrors = {
   cptCode?: string;
   rate?: string;
   units?: string;
 };
+
+type FieldErrors = {
+  dateOfService?: string;
+  lines?: Record<number, LineFieldErrors>;
+};
+
+function emptyLine(): LineItemDraft {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    cptCode: "",
+    rate: "",
+    units: "1",
+  };
+}
 
 async function authHeaders(): Promise<Record<string, string>> {
   const { data } = await supabase.auth.getSession();
@@ -83,6 +103,141 @@ function parseApiError(json: unknown, fallback: string): string {
   return fallback;
 }
 
+function validateLine(line: LineItemDraft): LineFieldErrors {
+  const errs: LineFieldErrors = {};
+  const rateNum = Number(line.rate);
+  const unitsNum = Number(line.units);
+  if (!line.cptCode.trim()) errs.cptCode = "Required.";
+  if (!line.rate.trim() || Number.isNaN(rateNum) || rateNum <= 0) {
+    errs.rate = "Enter a valid amount greater than zero.";
+  }
+  if (
+    !line.units.trim() ||
+    Number.isNaN(unitsNum) ||
+    unitsNum <= 0 ||
+    !Number.isInteger(unitsNum)
+  ) {
+    errs.units = "Enter a whole number greater than zero.";
+  }
+  return errs;
+}
+
+function PiBillingLineItemsField({
+  lines,
+  onChange,
+  fieldErrors,
+  submitAttempted,
+  disabled,
+}: {
+  lines: LineItemDraft[];
+  onChange: (next: LineItemDraft[]) => void;
+  fieldErrors: Record<number, LineFieldErrors> | undefined;
+  submitAttempted: boolean;
+  disabled: boolean;
+}) {
+  function showLineErr(index: number, key: keyof LineFieldErrors) {
+    if (!submitAttempted) return null;
+    const msg = fieldErrors?.[index]?.[key];
+    return msg ? <p className="mt-1 text-xs text-red-600">{msg}</p> : null;
+  }
+
+  return (
+    <div>
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase text-gray-500">Line Items</span>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onChange([...lines, emptyLine()])}
+          className="inline-flex items-center gap-1 text-xs font-medium text-teal-700 hover:text-teal-800 disabled:opacity-50"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          Add line
+        </button>
+      </div>
+      <div className="mt-3 space-y-3">
+        {lines.map((line, i) => (
+          <div
+            key={line.id}
+            className="grid gap-2 rounded-lg border border-gray-100 bg-gray-50/50 p-3 sm:grid-cols-[1fr_1fr_1fr_auto]"
+          >
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-700">CPT Code</label>
+              <input
+                type="text"
+                value={line.cptCode}
+                disabled={disabled}
+                onChange={(e) =>
+                  onChange(
+                    lines.map((row) =>
+                      row.id === line.id ? { ...row, cptCode: e.target.value } : row,
+                    ),
+                  )
+                }
+                className={DS_INPUT}
+                placeholder="e.g. 97110"
+              />
+              {showLineErr(i, "cptCode")}
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-700">Rate ($)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={line.rate}
+                disabled={disabled}
+                onChange={(e) =>
+                  onChange(
+                    lines.map((row) =>
+                      row.id === line.id ? { ...row, rate: e.target.value } : row,
+                    ),
+                  )
+                }
+                className={DS_INPUT}
+                placeholder="0.00"
+              />
+              {showLineErr(i, "rate")}
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-gray-700">Units</label>
+              <input
+                type="number"
+                min="1"
+                step="1"
+                value={line.units}
+                disabled={disabled}
+                onChange={(e) =>
+                  onChange(
+                    lines.map((row) =>
+                      row.id === line.id ? { ...row, units: e.target.value } : row,
+                    ),
+                  )
+                }
+                className={DS_INPUT}
+              />
+              {showLineErr(i, "units")}
+            </div>
+            <div className="flex items-end pb-0.5 sm:pb-6">
+              {lines.length > 1 ? (
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={() => onChange(lines.filter((row) => row.id !== line.id))}
+                  className="rounded-lg border border-gray-200 px-2 py-2 text-gray-500 hover:bg-gray-50 disabled:opacity-50"
+                  aria-label={`Remove line ${i + 1}`}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function CreatePiBillingModal({
   open,
   onClose,
@@ -93,15 +248,15 @@ export default function CreatePiBillingModal({
   const [appointmentId, setAppointmentId] = useState("");
   const [providerId, setProviderId] = useState("");
   const [notes, setNotes] = useState("");
-  const [cptCode, setCptCode] = useState("");
-  const [rate, setRate] = useState("");
-  const [units, setUnits] = useState("1");
+  const [lines, setLines] = useState<LineItemDraft[]>([emptyLine()]);
   const [clinicians, setClinicians] = useState<ClinicianOption[]>([]);
   const [appointments, setAppointments] = useState<AppointmentOption[]>([]);
   const [busy, setBusy] = useState(false);
   const [submitAttempted, setSubmitAttempted] = useState(false);
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [createdRecordId, setCreatedRecordId] = useState<string | null>(null);
+  const [savedLineIds, setSavedLineIds] = useState<Set<string>>(() => new Set());
 
   useEffect(() => {
     if (!open) return;
@@ -109,13 +264,13 @@ export default function CreatePiBillingModal({
     setAppointmentId("");
     setProviderId("");
     setNotes("");
-    setCptCode("");
-    setRate("");
-    setUnits("1");
+    setLines([emptyLine()]);
     setFieldErrors({});
     setSubmitAttempted(false);
     setSubmitError(null);
     setBusy(false);
+    setCreatedRecordId(null);
+    setSavedLineIds(new Set());
   }, [open, context?.piCaseId]);
 
   useEffect(() => {
@@ -174,28 +329,19 @@ export default function CreatePiBillingModal({
 
   if (!open || !context) return null;
 
-  const rateNum = Number(rate);
-  const unitsNum = Number(units);
-
   function validate(): FieldErrors {
     const errs: FieldErrors = {};
     if (!dateOfService.trim()) errs.dateOfService = "Required.";
-    if (!cptCode.trim()) errs.cptCode = "Required.";
-    if (!rate.trim() || Number.isNaN(rateNum) || rateNum <= 0) {
-      errs.rate = "Enter a valid amount greater than zero.";
-    }
-    if (
-      !units.trim() ||
-      Number.isNaN(unitsNum) ||
-      unitsNum <= 0 ||
-      !Number.isInteger(unitsNum)
-    ) {
-      errs.units = "Enter a whole number greater than zero.";
-    }
+    const lineErrs: Record<number, LineFieldErrors> = {};
+    lines.forEach((line, i) => {
+      const rowErrs = validateLine(line);
+      if (Object.keys(rowErrs).length > 0) lineErrs[i] = rowErrs;
+    });
+    if (Object.keys(lineErrs).length > 0) errs.lines = lineErrs;
     return errs;
   }
 
-  function showErr(key: keyof FieldErrors) {
+  function showErr(key: keyof Omit<FieldErrors, "lines">) {
     return submitAttempted && fieldErrors[key] ? (
       <p className="mt-1 text-xs text-red-600">{fieldErrors[key]}</p>
     ) : null;
@@ -204,6 +350,11 @@ export default function CreatePiBillingModal({
   function handleClose() {
     if (busy) return;
     onClose();
+  }
+
+  function lineLabel(line: LineItemDraft, index: number): string {
+    const code = line.cptCode.trim() || `line ${index + 1}`;
+    return `${code} (${line.units || "1"} unit${Number(line.units) === 1 ? "" : "s"})`;
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -221,65 +372,108 @@ export default function CreatePiBillingModal({
     setBusy(true);
     try {
       const h = await authHeaders();
-      const recordBody: Record<string, unknown> = {
-        clinic_id: context.clinicId,
-        patient_id: context.patientId,
-        pi_case_id: context.piCaseId,
-        date_of_service: dateOfService.trim(),
-        billing_type: "pi",
-      };
-      const carrier = (context.insuranceCarrier ?? "").trim();
-      if (carrier) recordBody.insurance_carrier = carrier;
-      const claim = (context.claimNumber ?? "").trim();
-      if (claim) recordBody.claim_number = claim;
-      if (appointmentId.trim()) recordBody.appointment_id = appointmentId.trim();
-      if (providerId.trim()) recordBody.provider_id = providerId.trim();
-      if (notes.trim()) recordBody.notes = notes.trim();
+      let recordId = createdRecordId;
 
-      const recordRes = await fetch(`${API_BASE}/billing-records`, {
-        method: "POST",
-        headers: h,
-        body: JSON.stringify(recordBody),
-      });
-
-      if (!recordRes.ok) {
-        const json: unknown = await recordRes.json().catch(() => ({}));
-        setSubmitError(parseApiError(json, `Could not create billing record (${recordRes.status}).`));
-        return;
-      }
-
-      const recordJson = (await recordRes.json()) as { id?: string };
-      const recordId = String(recordJson.id ?? "").trim();
       if (!recordId) {
-        setSubmitError("Billing record was created but no record id was returned.");
-        return;
-      }
+        const recordBody: Record<string, unknown> = {
+          clinic_id: context.clinicId,
+          patient_id: context.patientId,
+          pi_case_id: context.piCaseId,
+          date_of_service: dateOfService.trim(),
+          billing_type: "pi",
+        };
+        const carrier = (context.insuranceCarrier ?? "").trim();
+        if (carrier) recordBody.insurance_carrier = carrier;
+        const claim = (context.claimNumber ?? "").trim();
+        if (claim) recordBody.claim_number = claim;
+        if (appointmentId.trim()) recordBody.appointment_id = appointmentId.trim();
+        if (providerId.trim()) recordBody.provider_id = providerId.trim();
+        if (notes.trim()) recordBody.notes = notes.trim();
 
-      const lineItemRes = await fetch(
-        `${API_BASE}/billing-records/${encodeURIComponent(recordId)}/line-items`,
-        {
+        const recordRes = await fetch(`${API_BASE}/billing-records`, {
           method: "POST",
           headers: h,
-          body: JSON.stringify({
-            cpt_code: cptCode.trim(),
-            rate_cents: Math.round(rateNum * 100),
-            units: unitsNum,
-          }),
-        },
-      );
+          body: JSON.stringify(recordBody),
+        });
 
-      if (!lineItemRes.ok) {
-        const json: unknown = await lineItemRes.json().catch(() => ({}));
+        if (!recordRes.ok) {
+          const json: unknown = await recordRes.json().catch(() => ({}));
+          setSubmitError(
+            parseApiError(json, `Could not create billing record (${recordRes.status}).`),
+          );
+          return;
+        }
+
+        const recordJson = (await recordRes.json()) as { id?: string };
+        recordId = String(recordJson.id ?? "").trim();
+        if (!recordId) {
+          setSubmitError("Billing record was created but no record id was returned.");
+          return;
+        }
+        setCreatedRecordId(recordId);
+      }
+
+      const succeeded = new Set(savedLineIds);
+      const failed: { lineId: string; label: string; detail: string }[] = [];
+
+      for (const line of lines) {
+        if (succeeded.has(line.id)) continue;
+
+        const rateNum = Number(line.rate);
+        const unitsNum = Number(line.units);
+
+        const lineItemRes = await fetch(
+          `${API_BASE}/billing-records/${encodeURIComponent(recordId)}/line-items`,
+          {
+            method: "POST",
+            headers: h,
+            body: JSON.stringify({
+              cpt_code: line.cptCode.trim(),
+              rate_cents: Math.round(rateNum * 100),
+              units: unitsNum,
+            }),
+          },
+        );
+
+        if (!lineItemRes.ok) {
+          const json: unknown = await lineItemRes.json().catch(() => ({}));
+          failed.push({
+            lineId: line.id,
+            label: lineLabel(line, lines.indexOf(line)),
+            detail: parseApiError(json, `Error ${lineItemRes.status}`),
+          });
+          continue;
+        }
+
+        succeeded.add(line.id);
+      }
+
+      setSavedLineIds(new Set(succeeded));
+
+      if (failed.length > 0) {
+        const savedLabels = lines
+          .filter((line) => succeeded.has(line.id))
+          .map((line, i) => lineLabel(line, i));
+        const failedLines = failed
+          .map((f) => `${f.label}: ${f.detail}`)
+          .join("; ");
         setSubmitError(
-          `Billing record was created (ID: ${recordId}) but the line item failed to save: ${parseApiError(
-            json,
-            `Error ${lineItemRes.status}`,
-          )}. Add the line item manually using this record id.`,
+          `Billing record ${recordId} — saved ${succeeded.size} of ${lines.length} line item(s).` +
+            (savedLabels.length
+              ? ` Saved: ${savedLabels.join(", ")}.`
+              : "") +
+            ` Failed: ${failedLines}.` +
+            " Fix the failed row(s) and submit again to add the rest (the billing record will not be duplicated).",
         );
         return;
       }
 
-      onSuccess("Billing record created — view it on the patient's Billing tab.");
+      const count = lines.length;
+      onSuccess(
+        count === 1
+          ? "Billing record created — view it on the patient's Billing tab."
+          : `Billing record created with ${count} line items — view it on the patient's Billing tab.`,
+      );
       onClose();
     } catch {
       setSubmitError("Could not create billing record.");
@@ -290,7 +484,7 @@ export default function CreatePiBillingModal({
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
-      <div className={`max-h-[92vh] w-full max-w-lg overflow-y-auto ${DS_CARD}`}>
+      <div className={`max-h-[92vh] w-full max-w-2xl overflow-y-auto ${DS_CARD}`}>
         <div className="flex items-start justify-between border-b border-gray-100 pb-4">
           <h2 className="text-lg font-semibold text-gray-900">Create Billing</h2>
           <button
@@ -321,6 +515,13 @@ export default function CreatePiBillingModal({
             </dl>
           </div>
 
+          {createdRecordId ? (
+            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+              Billing record <span className="font-mono">{createdRecordId}</span> was created. Submit
+              again to add any remaining line items without creating a duplicate record.
+            </p>
+          ) : null}
+
           <div>
             <label className="mb-1 block text-xs font-semibold uppercase text-gray-500">
               Date of Service
@@ -330,6 +531,7 @@ export default function CreatePiBillingModal({
               value={dateOfService}
               onChange={(e) => setDateOfService(e.target.value)}
               className={DS_INPUT}
+              disabled={busy || Boolean(createdRecordId)}
               required
             />
             {showErr("dateOfService")}
@@ -344,6 +546,7 @@ export default function CreatePiBillingModal({
                 value={appointmentId}
                 onChange={(e) => setAppointmentId(e.target.value)}
                 className={DS_INPUT}
+                disabled={busy || Boolean(createdRecordId)}
               >
                 <option value="">None</option>
                 {appointments.map((a) => (
@@ -364,6 +567,7 @@ export default function CreatePiBillingModal({
                 value={providerId}
                 onChange={(e) => setProviderId(e.target.value)}
                 className={DS_INPUT}
+                disabled={busy || Boolean(createdRecordId)}
               >
                 <option value="">None</option>
                 {clinicians.map((c) => (
@@ -383,55 +587,18 @@ export default function CreatePiBillingModal({
               onChange={(e) => setNotes(e.target.value)}
               className={DS_INPUT}
               placeholder="Optional"
+              disabled={busy || Boolean(createdRecordId)}
             />
           </div>
 
           <div className="rounded-lg border border-gray-200 p-3">
-            <p className="text-xs font-semibold uppercase text-gray-500">Line Item</p>
-            <p className="mt-1 text-xs text-gray-500">
-              You can add more line items after creating this billing record.
-            </p>
-            <div className="mt-3 grid gap-3 sm:grid-cols-3">
-              <div className="sm:col-span-1">
-                <label className="mb-1 block text-xs font-medium text-gray-700">CPT Code</label>
-                <input
-                  type="text"
-                  value={cptCode}
-                  onChange={(e) => setCptCode(e.target.value)}
-                  className={DS_INPUT}
-                  placeholder="e.g. 97110"
-                  required
-                />
-                {showErr("cptCode")}
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-700">Rate ($)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={rate}
-                  onChange={(e) => setRate(e.target.value)}
-                  className={DS_INPUT}
-                  placeholder="0.00"
-                  required
-                />
-                {showErr("rate")}
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-700">Units</label>
-                <input
-                  type="number"
-                  min="1"
-                  step="1"
-                  value={units}
-                  onChange={(e) => setUnits(e.target.value)}
-                  className={DS_INPUT}
-                  required
-                />
-                {showErr("units")}
-              </div>
-            </div>
+            <PiBillingLineItemsField
+              lines={lines}
+              onChange={setLines}
+              fieldErrors={fieldErrors.lines}
+              submitAttempted={submitAttempted}
+              disabled={busy}
+            />
           </div>
 
           {submitError ? (
@@ -445,7 +612,13 @@ export default function CreatePiBillingModal({
               Cancel
             </button>
             <button type="submit" disabled={busy} className={DS_PRIMARY_BTN}>
-              {busy ? "Creating…" : "Create Billing Record"}
+              {busy
+                ? createdRecordId
+                  ? "Saving line items…"
+                  : "Creating…"
+                : createdRecordId
+                  ? "Add remaining line items"
+                  : "Create Billing Record"}
             </button>
           </div>
         </form>
