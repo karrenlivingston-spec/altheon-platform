@@ -11,12 +11,16 @@ type PiCasesSidePanelsProps = {
   deadlines: PiCaseDeadline[];
   attorneys: PiCaseTopAttorney[];
   loading?: boolean;
+  onViewAll?: () => void;
+  onViewReport?: () => void;
 };
 
 export default function PiCasesSidePanels({
   deadlines,
   attorneys,
   loading,
+  onViewAll,
+  onViewReport,
 }: PiCasesSidePanelsProps) {
   const maxValue = Math.max(...attorneys.map((a) => a.total_value), 1);
 
@@ -58,7 +62,11 @@ export default function PiCasesSidePanels({
             })
           )}
         </ul>
-        <button type="button" className="mt-3 text-xs font-medium text-emerald-700 hover:underline">
+        <button
+          type="button"
+          className="mt-3 text-xs font-medium text-emerald-700 hover:underline"
+          onClick={onViewAll}
+        >
           View All →
         </button>
       </div>
@@ -86,7 +94,11 @@ export default function PiCasesSidePanels({
             ))
           )}
         </div>
-        <button type="button" className="mt-3 text-xs font-medium text-emerald-700 hover:underline">
+        <button
+          type="button"
+          className="mt-3 text-xs font-medium text-emerald-700 hover:underline"
+          onClick={onViewReport}
+        >
           View Report →
         </button>
       </div>

@@ -8,6 +8,7 @@ import { PiCaseActivity } from "@/components/admin/pi-cases/piCasesTypes";
 type PiCasesActivityFeedProps = {
   items: PiCaseActivity[];
   loading?: boolean;
+  onViewAll?: () => void;
 };
 
 function ActivityIcon({ type }: { type: PiCaseActivity["type"] }) {
@@ -26,7 +27,11 @@ function ActivityIcon({ type }: { type: PiCaseActivity["type"] }) {
   }
 }
 
-export default function PiCasesActivityFeed({ items, loading }: PiCasesActivityFeedProps) {
+export default function PiCasesActivityFeed({
+  items,
+  loading,
+  onViewAll,
+}: PiCasesActivityFeedProps) {
   return (
     <div className={DS_CARD}>
       <h3 className="text-sm font-semibold text-gray-900">Case Activity</h3>
@@ -52,7 +57,11 @@ export default function PiCasesActivityFeed({ items, loading }: PiCasesActivityF
           ))
         )}
       </ul>
-      <button type="button" className="mt-2 text-xs font-medium text-emerald-700 hover:underline">
+      <button
+        type="button"
+        className="mt-2 text-xs font-medium text-emerald-700 hover:underline"
+        onClick={onViewAll}
+      >
         View All →
       </button>
     </div>

@@ -81,6 +81,20 @@ export default function AdminPiCasesPage() {
   const [editingCase, setEditingCase] = useState<PiCaseBoardItem | null>(null);
   const [defaultStatus, setDefaultStatus] = useState<PiCaseStatus>("intake_open");
   const [saving, setSaving] = useState(false);
+  const [toast, setToast] = useState<{
+    kind: "success" | "error";
+    message: string;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = window.setTimeout(() => setToast(null), 3000);
+    return () => window.clearTimeout(t);
+  }, [toast]);
+
+  function showComingSoon(message: string) {
+    setToast({ kind: "success", message });
+  }
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search), 300);
@@ -302,7 +316,11 @@ export default function AdminPiCasesPage() {
           </p>
         </div>
         <div className="flex gap-2">
-          <button type="button" className={DS_SECONDARY_BTN}>
+          <button
+            type="button"
+            className={DS_SECONDARY_BTN}
+            onClick={() => showComingSoon("Reports are coming soon")}
+          >
             Reports
           </button>
           <button type="button" className={DS_PRIMARY_BTN} onClick={() => openCreate()}>
@@ -383,13 +401,19 @@ export default function AdminPiCasesPage() {
                 deadlines={deadlines}
                 attorneys={attorneys}
                 loading={loading}
+                onViewAll={() => showComingSoon("This feature is coming soon")}
+                onViewReport={() => showComingSoon("Report viewing is coming soon")}
               />
             </div>
           </div>
 
           <div className="mt-6 grid gap-4 lg:grid-cols-5">
             <div className="lg:col-span-3">
-              <PiCasesActivityFeed items={activity} loading={loading} />
+              <PiCasesActivityFeed
+                items={activity}
+                loading={loading}
+                onViewAll={() => showComingSoon("This feature is coming soon")}
+              />
             </div>
             <div className="lg:col-span-2">
               <PiCasesDonutChart stats={stats} loading={loading} />
@@ -421,6 +445,16 @@ export default function AdminPiCasesPage() {
         onSubmit={(v) => void (modalMode === "create" ? handleCreate(v) : handleEdit(v))}
         searchPatients={searchPatients}
       />
+
+      {toast ? (
+        <div
+          className={`fixed right-4 bottom-4 z-[70] rounded-lg px-4 py-2 text-sm font-medium text-white shadow-lg ${
+            toast.kind === "success" ? "bg-[#16A34A]" : "bg-[#DC2626]"
+          }`}
+        >
+          {toast.message}
+        </div>
+      ) : null}
     </div>
   );
 }
