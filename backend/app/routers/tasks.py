@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.services.system_tasks import reconcile_system_tasks
 from app.dependencies.permissions import ALL_ROLES, require_role
 from app.sms import send_sms
@@ -59,17 +60,31 @@ def _handle_supabase_error(response: Any, *, table: str = "unknown") -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
+def _sb_execute(fn, *, table: str = "unknown"):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp, table=table)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[tasks] Supabase exception table={table}: {exc}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 def load_clinic_staff_list(clinic_id: str) -> list[dict[str, Any]]:
     """Resolve clinic staff via clinic_users → auth.users email → clinicians.email."""
     cid = clinic_id.strip()
     try:
-        clinic_users_resp = (
-            supabase.table("clinic_users")
+        clinic_users_resp = _sb_execute(
+            lambda: supabase.table("clinic_users")
             .select("user_id, role")
             .eq("clinic_id", cid)
-            .execute()
+            .execute(),
+            table="clinic_users",
         )
-        _handle_supabase_error(clinic_users_resp, table="clinic_users")
     except HTTPException:
         raise
     except Exception:
@@ -87,15 +102,15 @@ def load_clinic_staff_list(clinic_id: str) -> list[dict[str, Any]]:
             email = get_user_email_by_id(user_id)
             if not email:
                 continue
-            clinician_resp = (
-                supabase.table("clinicians")
+            clinician_resp = _sb_execute(
+                lambda: supabase.table("clinicians")
                 .select("first_name, last_name, phone")
                 .eq("email", email)
                 .eq("is_active", True)
                 .limit(1)
-                .execute()
+                .execute(),
+                table="clinicians",
             )
-            _handle_supabase_error(clinician_resp, table="clinicians")
             rows = clinician_resp.data or []
             if not rows:
                 continue
@@ -153,14 +168,14 @@ def _patient_display_name(row: Optional[dict[str, Any]]) -> Optional[str]:
 
 def _clinic_admin_user_ids(clinic_id: str) -> list[str]:
     try:
-        resp = (
-            supabase.table("clinic_users")
+        resp = _sb_execute(
+            lambda: supabase.table("clinic_users")
             .select("user_id, role")
             .eq("clinic_id", clinic_id.strip())
             .in_("role", list(_ADMIN_ROLES))
-            .execute()
+            .execute(),
+            table="clinic_users",
         )
-        _handle_supabase_error(resp, table="clinic_users")
     except Exception:
         traceback.print_exc()
         return []
@@ -179,14 +194,14 @@ def _load_patient_names(clinic_id: str, patient_ids: list[str]) -> dict[str, str
     if not ids:
         return {}
     try:
-        resp = (
-            supabase.table("patients")
+        resp = _sb_execute(
+            lambda: supabase.table("patients")
             .select("id, first_name, last_name")
             .eq("clinic_id", clinic_id.strip())
             .in_("id", ids)
-            .execute()
+            .execute(),
+            table="patients",
         )
-        _handle_supabase_error(resp, table="patients")
     except Exception:
         traceback.print_exc()
         return {}
@@ -235,14 +250,14 @@ def shape_task(row: dict[str, Any], profiles: dict[str, dict[str, Any]], patient
 
 def _clinic_display_name(clinic_id: str) -> str:
     try:
-        resp = (
-            supabase.table("clinics")
+        resp = _sb_execute(
+            lambda: supabase.table("clinics")
             .select("name")
             .eq("id", clinic_id.strip())
             .limit(1)
-            .execute()
+            .execute(),
+            table="clinics",
         )
-        _handle_supabase_error(resp, table="clinics")
         rows = resp.data or []
         if rows:
             return str(rows[0].get("name") or "your clinic").strip() or "your clinic"
@@ -270,8 +285,10 @@ def create_task_notifications(
         for uid in deduped
     ]
     try:
-        resp = supabase.table("task_notifications").insert(rows).execute()
-        _handle_supabase_error(resp, table="task_notifications")
+        resp = _sb_execute(
+            lambda: supabase.table("task_notifications").insert(rows).execute(),
+            table="task_notifications",
+        )
     except Exception:
         traceback.print_exc()
 
@@ -336,8 +353,10 @@ def create_task_record(
         "updated_at": _now_iso(),
     }
     try:
-        resp = supabase.table("tasks").insert(insert_row).execute()
-        _handle_supabase_error(resp, table="tasks")
+        resp = _sb_execute(
+            lambda: supabase.table("tasks").insert(insert_row).execute(),
+            table="tasks",
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -408,16 +427,16 @@ def list_task_notifications(
         return {"unread_count": 0, "notifications": []}
 
     try:
-        resp = (
-            supabase.table("task_notifications")
+        resp = _sb_execute(
+            lambda: supabase.table("task_notifications")
             .select("id, clinic_id, user_id, task_id, notification_type, read_at, created_at")
             .eq("clinic_id", cid)
             .eq("user_id", uid)
             .is_("read_at", "null")
             .order("created_at", desc=True)
-            .execute()
+            .execute(),
+            table="task_notifications",
         )
-        _handle_supabase_error(resp, table="task_notifications")
         rows = [r for r in (resp.data or []) if isinstance(r, dict)]
     except Exception:
         traceback.print_exc()
@@ -444,15 +463,15 @@ def mark_task_notifications_read(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
-        resp = (
-            supabase.table("task_notifications")
+        resp = _sb_execute(
+            lambda: supabase.table("task_notifications")
             .update({"read_at": _now_iso()})
             .eq("clinic_id", cid)
             .eq("user_id", uid)
             .is_("read_at", "null")
-            .execute()
+            .execute(),
+            table="task_notifications",
         )
-        _handle_supabase_error(resp, table="task_notifications")
     except HTTPException:
         raise
     except Exception as exc:
@@ -497,8 +516,7 @@ def list_tasks(
             if pr not in _VALID_PRIORITIES:
                 raise HTTPException(status_code=400, detail="Invalid priority filter")
             q = q.eq("priority", pr)
-        resp = q.execute()
-        _handle_supabase_error(resp, table="tasks")
+        resp = _sb_execute(lambda: q.execute(), table="tasks")
         rows = [r for r in (resp.data or []) if isinstance(r, dict)]
     except HTTPException:
         raise
@@ -576,14 +594,14 @@ def update_task_status(
         update_payload["resolved_by"] = caller
 
     try:
-        resp = (
-            supabase.table("tasks")
+        resp = _sb_execute(
+            lambda: supabase.table("tasks")
             .update(update_payload)
             .eq("id", tid)
             .eq("clinic_id", cid)
-            .execute()
+            .execute(),
+            table="tasks",
         )
-        _handle_supabase_error(resp, table="tasks")
     except HTTPException:
         raise
     except Exception as exc:

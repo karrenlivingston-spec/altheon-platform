@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 
@@ -30,7 +31,7 @@ def _handle_supabase_error(response: Any, *, table: str) -> None:
 
 def _supabase_execute(fn, *, table: str):
     try:
-        response = fn()
+        response = supabase_execute(fn)
         _handle_supabase_error(response, table=table)
         return response
     except HTTPException:

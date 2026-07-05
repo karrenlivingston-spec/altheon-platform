@@ -8,6 +8,7 @@ from fastapi import Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from routers.fee_schedule import _resolve_bearer_user_id
 
 ADMIN_ROLES: list[str] = ["super_admin", "clinic_admin"]
@@ -51,8 +52,8 @@ def get_clinic_user_access(clinic_id: str, user_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=403, detail="No clinic access for user")
 
     try:
-        resp = (
-            supabase.table("clinic_users")
+        resp = supabase_execute(
+            lambda: supabase.table("clinic_users")
             .select("role,billing_only")
             .eq("user_id", uid)
             .eq("clinic_id", cid)

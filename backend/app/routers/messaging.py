@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.dependencies.permissions import ALL_ROLES, require_role
 from app.routers.tasks import _staff_display_name, load_clinic_staff_list, load_staff_profiles
 from routers.fee_schedule import (
@@ -30,6 +31,20 @@ def _handle_supabase_error(response: Any, *, table: str = "unknown") -> None:
         detail = getattr(error, "message", None) or str(error)
         print(f"[messaging] Supabase error table={table} detail={detail}")
         raise HTTPException(status_code=500, detail=detail)
+
+
+def _sb_execute(fn, *, table: str = "unknown"):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp, table=table)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        print(f"[messaging] Supabase exception table={table}: {exc}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 class MessageCreate(BaseModel):
@@ -59,25 +74,25 @@ def _shape_message(row: dict[str, Any], profiles: dict[str, dict[str, Any]]) -> 
 def _ensure_clinic_wide_conversation(clinic_id: str) -> dict[str, Any]:
     cid = clinic_id.strip()
     try:
-        existing = (
-            supabase.table("conversations")
+        existing = _sb_execute(
+            lambda: supabase.table("conversations")
             .select("id, clinic_id, type, created_at")
             .eq("clinic_id", cid)
             .eq("type", "clinic_wide")
             .limit(1)
-            .execute()
+            .execute(),
+            table="conversations",
         )
-        _handle_supabase_error(existing, table="conversations")
         rows = existing.data or []
         if rows:
             return rows[0]
 
-        created = (
-            supabase.table("conversations")
+        created = _sb_execute(
+            lambda: supabase.table("conversations")
             .insert({"clinic_id": cid, "type": "clinic_wide"})
-            .execute()
+            .execute(),
+            table="conversations",
         )
-        _handle_supabase_error(created, table="conversations")
         conv_rows = created.data or []
         if not conv_rows:
             raise HTTPException(status_code=500, detail="Failed to create clinic-wide conversation")
@@ -96,8 +111,12 @@ def _ensure_clinic_wide_conversation(clinic_id: str) -> dict[str, Any]:
     ]
     if participant_rows:
         try:
-            ins = supabase.table("conversation_participants").insert(participant_rows).execute()
-            _handle_supabase_error(ins, table="conversation_participants")
+            ins = _sb_execute(
+                lambda: supabase.table("conversation_participants")
+                .insert(participant_rows)
+                .execute(),
+                table="conversation_participants",
+            )
         except Exception:
             traceback.print_exc()
     return conv
@@ -108,22 +127,22 @@ def _sync_clinic_wide_participants(clinic_id: str, conversation_id: str) -> None
     if not profiles:
         return
     try:
-        existing = (
-            supabase.table("conversation_participants")
+        existing = _sb_execute(
+            lambda: supabase.table("conversation_participants")
             .select("user_id")
             .eq("conversation_id", conversation_id)
-            .execute()
+            .execute(),
+            table="conversation_participants",
         )
-        _handle_supabase_error(existing, table="conversation_participants")
         have = {str(r.get("user_id") or "") for r in (existing.data or []) if isinstance(r, dict)}
         missing = [uid for uid in profiles.keys() if uid not in have]
         if missing:
-            ins = (
-                supabase.table("conversation_participants")
+            ins = _sb_execute(
+                lambda: supabase.table("conversation_participants")
                 .insert([{"conversation_id": conversation_id, "user_id": uid} for uid in missing])
-                .execute()
+                .execute(),
+                table="conversation_participants",
             )
-            _handle_supabase_error(ins, table="conversation_participants")
     except Exception:
         traceback.print_exc()
 
@@ -131,26 +150,26 @@ def _sync_clinic_wide_participants(clinic_id: str, conversation_id: str) -> None
 def _find_existing_dm(clinic_id: str, user_a: str, user_b: str) -> Optional[dict[str, Any]]:
     pair = sorted([user_a.strip(), user_b.strip()])
     try:
-        conv_resp = (
-            supabase.table("conversations")
+        conv_resp = _sb_execute(
+            lambda: supabase.table("conversations")
             .select("id, clinic_id, type, created_at")
             .eq("clinic_id", clinic_id.strip())
             .eq("type", "direct")
-            .execute()
+            .execute(),
+            table="conversations",
         )
-        _handle_supabase_error(conv_resp, table="conversations")
         conv_ids = [str(c.get("id") or "") for c in (conv_resp.data or []) if c.get("id")]
         if not conv_ids:
             return None
 
-        parts_resp = (
-            supabase.table("conversation_participants")
+        parts_resp = _sb_execute(
+            lambda: supabase.table("conversation_participants")
             .select("conversation_id, user_id")
             .in_("conversation_id", conv_ids)
             .in_("user_id", pair)
-            .execute()
+            .execute(),
+            table="conversation_participants",
         )
-        _handle_supabase_error(parts_resp, table="conversation_participants")
         by_conv: dict[str, set[str]] = {}
         for row in parts_resp.data or []:
             if not isinstance(row, dict):
@@ -171,15 +190,15 @@ def _find_existing_dm(clinic_id: str, user_a: str, user_b: str) -> Optional[dict
 
 def _participant_last_read(conversation_id: str, user_id: str) -> Optional[str]:
     try:
-        resp = (
-            supabase.table("conversation_participants")
+        resp = _sb_execute(
+            lambda: supabase.table("conversation_participants")
             .select("last_read_at")
             .eq("conversation_id", conversation_id)
             .eq("user_id", user_id)
             .limit(1)
-            .execute()
+            .execute(),
+            table="conversation_participants",
         )
-        _handle_supabase_error(resp, table="conversation_participants")
         rows = resp.data or []
         if rows:
             return rows[0].get("last_read_at")
@@ -198,8 +217,7 @@ def _unread_count(conversation_id: str, user_id: str, last_read_at: Optional[str
         )
         if last_read_at:
             q = q.gt("created_at", last_read_at)
-        resp = q.execute()
-        _handle_supabase_error(resp, table="messages")
+        resp = _sb_execute(lambda: q.execute(), table="messages")
         count = getattr(resp, "count", None)
         if count is not None:
             return int(count)
@@ -211,15 +229,15 @@ def _unread_count(conversation_id: str, user_id: str, last_read_at: Optional[str
 
 def _last_message(conversation_id: str, profiles: dict[str, dict[str, Any]]) -> Optional[dict[str, Any]]:
     try:
-        resp = (
-            supabase.table("messages")
+        resp = _sb_execute(
+            lambda: supabase.table("messages")
             .select("id, sender_id, content, created_at")
             .eq("conversation_id", conversation_id)
             .order("created_at", desc=True)
             .limit(1)
-            .execute()
+            .execute(),
+            table="messages",
         )
-        _handle_supabase_error(resp, table="messages")
         rows = resp.data or []
         if not rows:
             return None
@@ -242,13 +260,13 @@ def _conversation_participants(
     profiles: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]]:
     try:
-        resp = (
-            supabase.table("conversation_participants")
+        resp = _sb_execute(
+            lambda: supabase.table("conversation_participants")
             .select("user_id")
             .eq("conversation_id", conversation_id)
-            .execute()
+            .execute(),
+            table="conversation_participants",
         )
-        _handle_supabase_error(resp, table="conversation_participants")
         out: list[dict[str, Any]] = []
         for row in resp.data or []:
             if not isinstance(row, dict):
@@ -292,23 +310,23 @@ def _shape_conversation(
 
 def _ensure_participant(conversation_id: str, user_id: str) -> None:
     try:
-        resp = (
-            supabase.table("conversation_participants")
+        resp = _sb_execute(
+            lambda: supabase.table("conversation_participants")
             .select("id")
             .eq("conversation_id", conversation_id)
             .eq("user_id", user_id)
             .limit(1)
-            .execute()
+            .execute(),
+            table="conversation_participants",
         )
-        _handle_supabase_error(resp, table="conversation_participants")
         if resp.data:
             return
-        ins = (
-            supabase.table("conversation_participants")
+        ins = _sb_execute(
+            lambda: supabase.table("conversation_participants")
             .insert({"conversation_id": conversation_id, "user_id": user_id})
-            .execute()
+            .execute(),
+            table="conversation_participants",
         )
-        _handle_supabase_error(ins, table="conversation_participants")
     except Exception:
         traceback.print_exc()
 
@@ -316,20 +334,25 @@ def _ensure_participant(conversation_id: str, user_id: str) -> None:
 def _mark_conversation_read(conversation_id: str, user_id: str, read_at: Optional[str] = None) -> None:
     stamp = read_at or _now_iso()
     try:
-        resp = (
-            supabase.table("conversation_participants")
+        resp = _sb_execute(
+            lambda: supabase.table("conversation_participants")
             .update({"last_read_at": stamp})
             .eq("conversation_id", conversation_id)
             .eq("user_id", user_id)
-            .execute()
+            .execute(),
+            table="conversation_participants",
         )
-        _handle_supabase_error(resp, table="conversation_participants")
         if resp.data:
             return
         _ensure_participant(conversation_id, user_id)
-        supabase.table("conversation_participants").update({"last_read_at": stamp}).eq(
-            "conversation_id", conversation_id
-        ).eq("user_id", user_id).execute()
+        _sb_execute(
+            lambda: supabase.table("conversation_participants")
+            .update({"last_read_at": stamp})
+            .eq("conversation_id", conversation_id)
+            .eq("user_id", user_id)
+            .execute(),
+            table="conversation_participants",
+        )
     except Exception:
         traceback.print_exc()
 
@@ -401,13 +424,13 @@ def list_conversations(
         traceback.print_exc()
 
     try:
-        part_resp = (
-            supabase.table("conversation_participants")
+        part_resp = _sb_execute(
+            lambda: supabase.table("conversation_participants")
             .select("conversation_id")
             .eq("user_id", uid)
-            .execute()
+            .execute(),
+            table="conversation_participants",
         )
-        _handle_supabase_error(part_resp, table="conversation_participants")
         conv_ids = list(
             {
                 str(r.get("conversation_id") or "")
@@ -416,15 +439,15 @@ def list_conversations(
             }
         )
         if conv_ids:
-            conv_resp = (
-                supabase.table("conversations")
+            conv_resp = _sb_execute(
+                lambda: supabase.table("conversations")
                 .select("id, clinic_id, type, created_at")
                 .eq("clinic_id", cid)
                 .eq("type", "direct")
                 .in_("id", conv_ids)
-                .execute()
+                .execute(),
+                table="conversations",
             )
-            _handle_supabase_error(conv_resp, table="conversations")
             for conv in conv_resp.data or []:
                 if not isinstance(conv, dict):
                     continue
@@ -472,28 +495,28 @@ def create_dm_conversation(
         return _shape_conversation(existing, caller, profiles)
 
     try:
-        created = (
-            supabase.table("conversations")
+        created = _sb_execute(
+            lambda: supabase.table("conversations")
             .insert({"clinic_id": cid, "type": "direct"})
-            .execute()
+            .execute(),
+            table="conversations",
         )
-        _handle_supabase_error(created, table="conversations")
         rows = created.data or []
         if not rows:
             raise HTTPException(status_code=500, detail="Failed to create conversation")
         conv = rows[0]
         conv_id = str(conv.get("id") or "").strip()
-        ins = (
-            supabase.table("conversation_participants")
+        ins = _sb_execute(
+            lambda: supabase.table("conversation_participants")
             .insert(
                 [
                     {"conversation_id": conv_id, "user_id": user_a},
                     {"conversation_id": conv_id, "user_id": user_b},
                 ]
             )
-            .execute()
+            .execute(),
+            table="conversation_participants",
         )
-        _handle_supabase_error(ins, table="conversation_participants")
     except HTTPException:
         raise
     except Exception as exc:
@@ -524,28 +547,28 @@ def list_messages(
         return []
 
     try:
-        conv_resp = (
-            supabase.table("conversations")
+        conv_resp = _sb_execute(
+            lambda: supabase.table("conversations")
             .select("id, clinic_id, type")
             .eq("id", conv_id)
             .eq("clinic_id", cid)
             .limit(1)
-            .execute()
+            .execute(),
+            table="conversations",
         )
-        _handle_supabase_error(conv_resp, table="conversations")
         if not (conv_resp.data or []):
             raise HTTPException(status_code=404, detail="Conversation not found")
         conv = conv_resp.data[0]
         if conv.get("type") == "direct":
-            part = (
-                supabase.table("conversation_participants")
+            part = _sb_execute(
+                lambda: supabase.table("conversation_participants")
                 .select("id")
                 .eq("conversation_id", conv_id)
                 .eq("user_id", uid)
                 .limit(1)
-                .execute()
+                .execute(),
+                table="conversation_participants",
             )
-            _handle_supabase_error(part, table="conversation_participants")
             if not (part.data or []):
                 raise HTTPException(status_code=403, detail="Not a participant in this conversation")
     except HTTPException:
@@ -555,15 +578,15 @@ def list_messages(
         return []
 
     try:
-        resp = (
-            supabase.table("messages")
+        resp = _sb_execute(
+            lambda: supabase.table("messages")
             .select("id, conversation_id, sender_id, content, created_at")
             .eq("conversation_id", conv_id)
             .order("created_at", desc=True)
             .limit(100)
-            .execute()
+            .execute(),
+            table="messages",
         )
-        _handle_supabase_error(resp, table="messages")
         rows = [r for r in (resp.data or []) if isinstance(r, dict)]
         rows.reverse()
     except Exception:
@@ -605,35 +628,35 @@ def create_message(
         raise HTTPException(status_code=403, detail="sender_id must match authenticated user")
 
     try:
-        conv_resp = (
-            supabase.table("conversations")
+        conv_resp = _sb_execute(
+            lambda: supabase.table("conversations")
             .select("id, clinic_id, type")
             .eq("id", conv_id)
             .eq("clinic_id", cid)
             .limit(1)
-            .execute()
+            .execute(),
+            table="conversations",
         )
-        _handle_supabase_error(conv_resp, table="conversations")
         if not (conv_resp.data or []):
             raise HTTPException(status_code=404, detail="Conversation not found")
         conv = conv_resp.data[0]
         if conv.get("type") == "direct":
-            part = (
-                supabase.table("conversation_participants")
+            part = _sb_execute(
+                lambda: supabase.table("conversation_participants")
                 .select("id")
                 .eq("conversation_id", conv_id)
                 .eq("user_id", sender_id)
                 .limit(1)
-                .execute()
+                .execute(),
+                table="conversation_participants",
             )
-            _handle_supabase_error(part, table="conversation_participants")
             if not (part.data or []):
                 raise HTTPException(status_code=403, detail="Not a participant in this conversation")
         else:
             _ensure_participant(conv_id, sender_id)
 
-        ins = (
-            supabase.table("messages")
+        ins = _sb_execute(
+            lambda: supabase.table("messages")
             .insert(
                 {
                     "conversation_id": conv_id,
@@ -641,9 +664,9 @@ def create_message(
                     "content": content,
                 }
             )
-            .execute()
+            .execute(),
+            table="messages",
         )
-        _handle_supabase_error(ins, table="messages")
         rows = ins.data or []
         if not rows:
             raise HTTPException(status_code=500, detail="Failed to create message")
