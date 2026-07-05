@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from app.db import supabase
 from app.sms import send_sms
+from routers.fee_schedule import _resolve_bearer_user_id
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -31,35 +32,6 @@ def _handle_supabase_error(response: Any) -> None:
     if error:
         detail = getattr(error, "message", None) or str(error)
         raise HTTPException(status_code=500, detail=detail)
-
-
-def _extract_bearer_token(authorization: Optional[str]) -> str:
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-    parts = authorization.strip().split(" ", 1)
-    if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1].strip():
-        raise HTTPException(status_code=401, detail="Invalid Authorization header")
-    return parts[1].strip()
-
-
-def _resolve_bearer_user_id(authorization: Optional[str]) -> str:
-    token = _extract_bearer_token(authorization)
-    try:
-        auth_response = supabase.auth.get_user(token)
-    except Exception as exc:
-        logger.exception("outcome_measures auth.get_user failed")
-        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
-
-    user_obj = getattr(auth_response, "user", None)
-    if user_obj is None and isinstance(auth_response, dict):
-        user_obj = auth_response.get("user")
-
-    user_id = str(getattr(user_obj, "id", None) or "").strip()
-    if not user_id and isinstance(user_obj, dict):
-        user_id = str(user_obj.get("id") or "").strip()
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
-    return user_id
 
 
 def _assert_user_has_clinic_access(user_id: str, clinic_id: str) -> None:
