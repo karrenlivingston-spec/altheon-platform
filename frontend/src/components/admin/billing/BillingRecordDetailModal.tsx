@@ -240,6 +240,8 @@ export default function BillingRecordDetailModal({
   const [fieldErrors, setFieldErrors] = useState<
     Record<number, LineFieldErrors>
   >({});
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   const reloadRecord = useCallback(async (id: string) => {
     const result = await fetchBillingRecord(id);
@@ -261,6 +263,8 @@ export default function BillingRecordDetailModal({
       setSaveError(null);
       setSubmitAttempted(false);
       setFieldErrors({});
+      setPdfLoading(false);
+      setPdfError(null);
       return;
     }
 
@@ -271,6 +275,7 @@ export default function BillingRecordDetailModal({
       setRecord(null);
       setEditing(false);
       setSaveError(null);
+      setPdfError(null);
       const data = await fetchBillingRecord(recordId);
       if (cancelled) return;
       if (data.error) {
@@ -407,6 +412,40 @@ export default function BillingRecordDetailModal({
     }
   }
 
+  async function handleDownloadPdf() {
+    if (!recordId) return;
+    setPdfLoading(true);
+    setPdfError(null);
+    try {
+      const h = await authHeaders();
+      const res = await fetch(
+        `${API_BASE}/billing-records/${encodeURIComponent(recordId)}/pdf`,
+        { headers: h },
+      );
+      if (!res.ok) {
+        const json: unknown = await res.json().catch(() => ({}));
+        setPdfError(parseApiError(json, `Could not generate PDF (${res.status}).`));
+        return;
+      }
+      const blob = await res.blob();
+      const disposition = res.headers.get("Content-Disposition") ?? "";
+      const match = /filename="([^"]+)"/.exec(disposition);
+      const filename = match?.[1] ?? "billing_record.pdf";
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setPdfError("Could not generate PDF.");
+    } finally {
+      setPdfLoading(false);
+    }
+  }
+
   if (!isOpen) return null;
 
   const lineItems = record?.line_items ?? [];
@@ -444,6 +483,23 @@ export default function BillingRecordDetailModal({
             ) : null}
           </div>
           <div className="flex items-center gap-2">
+            {!loading && record && !editing ? (
+              <button
+                type="button"
+                onClick={() => void handleDownloadPdf()}
+                disabled={pdfLoading || saveBusy}
+                className={`${DS_SECONDARY_BTN} inline-flex items-center gap-2 disabled:opacity-60`}
+              >
+                {pdfLoading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                    Generating…
+                  </>
+                ) : (
+                  "Download PDF"
+                )}
+              </button>
+            ) : null}
             {!loading && record && isDraft && !editing ? (
               <button
                 type="button"
@@ -474,6 +530,12 @@ export default function BillingRecordDetailModal({
         {saveError ? (
           <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             {saveError}
+          </div>
+        ) : null}
+
+        {pdfError ? (
+          <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {pdfError}
           </div>
         ) : null}
 

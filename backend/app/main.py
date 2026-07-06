@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import Body, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field, field_validator
 import os
@@ -75,6 +76,7 @@ from routers.plan_of_care import router as plan_of_care_router
 from routers.analytics_router import router as analytics_router
 from routers.payer_optimizer import router as payer_optimizer_router
 from routers.voice_router import router as voice_call_logs_router
+from app.routers.billing_record_pdf import build_billing_record_pdf
 
 load_dotenv()
 
@@ -1296,6 +1298,124 @@ def get_billing_record(record_id: str):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
     record["line_items"] = items.data or []
     return record
+
+
+@app.get("/billing-records/{record_id}/pdf")
+def get_billing_record_pdf(record_id: str):
+    try:
+        rec = (
+            supabase.table("billing_records")
+            .select("*")
+            .eq("id", record_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(rec)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    rec_rows = rec.data or []
+    if not rec_rows:
+        raise HTTPException(status_code=404, detail="Billing record not found")
+    record = dict(rec_rows[0])
+
+    try:
+        items = (
+            supabase.table("billing_line_items")
+            .select("*")
+            .eq("billing_record_id", record_id)
+            .execute()
+        )
+        _handle_supabase_error(items)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    line_items = [r for r in (items.data or []) if isinstance(r, dict)]
+
+    patient_id = str(record.get("patient_id") or "").strip()
+    clinic_id = str(record.get("clinic_id") or "").strip()
+    if not patient_id or not clinic_id:
+        raise HTTPException(status_code=400, detail="Billing record missing patient or clinic")
+
+    try:
+        patient_resp = (
+            supabase.table("patients")
+            .select(
+                "id, first_name, last_name, date_of_birth, "
+                "address_line1, address_line2, city, state, zip"
+            )
+            .eq("id", patient_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(patient_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    patient_rows = patient_resp.data or []
+    if not patient_rows:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    patient = patient_rows[0]
+
+    try:
+        clinic_resp = (
+            supabase.table("clinics")
+            .select("name, address, phone")
+            .eq("id", clinic_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(clinic_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    clinic_rows = clinic_resp.data or []
+    clinic = clinic_rows[0] if clinic_rows else {}
+
+    pi_case: Optional[dict[str, Any]] = None
+    pi_case_id = str(record.get("pi_case_id") or "").strip()
+    if pi_case_id:
+        try:
+            pi_resp = (
+                supabase.table("pi_cases")
+                .select(
+                    "id, firm_name, attorney_name, attorney_phone, attorney_email"
+                )
+                .eq("id", pi_case_id)
+                .limit(1)
+                .execute()
+            )
+            _handle_supabase_error(pi_resp)
+            pi_rows = pi_resp.data or []
+            if pi_rows:
+                pi_case = pi_rows[0]
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    try:
+        pdf_bytes, filename = build_billing_record_pdf(
+            clinic=clinic,
+            patient=patient,
+            record=record,
+            line_items=line_items,
+            pi_case=pi_case,
+        )
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500, detail=f"Billing record PDF generation failed: {exc}"
+        ) from exc
+
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.patch("/billing-records/{record_id}/status")
