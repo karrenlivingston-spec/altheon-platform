@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from typing import Any, Optional
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
@@ -22,6 +23,10 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _MAX_PDF_BYTES = 20 * 1024 * 1024
+_DEFAULT_LIST_LIMIT = 20
+_MAX_LIST_LIMIT = 100
+
+_TIER_COUNT_KEYS = ("high", "moderate", "low")
 
 
 def _handle_supabase_error(response: Any) -> None:
@@ -82,6 +87,135 @@ def _resolve_clinician_id_optional(
         return None
     cid = str(rows[0].get("id") or "").strip()
     return cid or None
+
+
+def _count_exact(resp: Any) -> int:
+    count = int(getattr(resp, "count", None) or 0)
+    if count == 0 and resp.data is not None:
+        count = len(resp.data)
+    return count
+
+
+def _nested_row(value: Any) -> dict[str, Any]:
+    if isinstance(value, list):
+        value = value[0] if value else None
+    return value if isinstance(value, dict) else {}
+
+
+def _patient_display_name(first: Any, last: Any) -> str:
+    return f"{str(first or '').strip()} {str(last or '').strip()}".strip()
+
+
+def _empty_tier_counts() -> dict[str, int]:
+    return {key: 0 for key in _TIER_COUNT_KEYS}
+
+
+def _increment_tier_count(counts: dict[str, int], tier: Any) -> None:
+    if tier is None:
+        return
+    key = str(tier).strip().lower()
+    if key in counts:
+        counts[key] += 1
+
+
+def _compute_clinic_session_stats(clinic_id: str) -> dict[str, Any]:
+    """Aggregate APS stats for a clinic (count queries + findings for tier breakdown)."""
+    cid = clinic_id.strip()
+    month_start = date.today().replace(day=1).isoformat()
+
+    try:
+        total_resp = (
+            supabase.table("aps_sessions")
+            .select("id", count="exact")
+            .eq("clinic_id", cid)
+            .execute()
+        )
+        _handle_supabase_error(total_resp)
+        month_resp = (
+            supabase.table("aps_sessions")
+            .select("id", count="exact")
+            .eq("clinic_id", cid)
+            .gte("session_date", month_start)
+            .execute()
+        )
+        _handle_supabase_error(month_resp)
+        patient_resp = (
+            supabase.table("aps_sessions")
+            .select("patient_id")
+            .eq("clinic_id", cid)
+            .execute()
+        )
+        _handle_supabase_error(patient_resp)
+        ids_resp = (
+            supabase.table("aps_sessions")
+            .select("id")
+            .eq("clinic_id", cid)
+            .execute()
+        )
+        _handle_supabase_error(ids_resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    total_sessions = _count_exact(total_resp)
+    sessions_this_month = _count_exact(month_resp)
+    patient_ids = {
+        str(row.get("patient_id") or "").strip()
+        for row in (patient_resp.data or [])
+        if str(row.get("patient_id") or "").strip()
+    }
+    session_ids = [
+        str(row.get("id") or "").strip()
+        for row in (ids_resp.data or [])
+        if str(row.get("id") or "").strip()
+    ]
+
+    tier_counts = _empty_tier_counts()
+    if session_ids:
+        try:
+            fresp = (
+                supabase.table("aps_findings")
+                .select("*")
+                .in_("aps_session_id", session_ids)
+                .execute()
+            )
+            _handle_supabase_error(fresp)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+        findings_by_session: dict[str, list[dict[str, Any]]] = {
+            sid: [] for sid in session_ids
+        }
+        for row in fresp.data or []:
+            sid = str(row.get("aps_session_id") or "").strip()
+            if sid in findings_by_session:
+                findings_by_session[sid].append(_shape_finding(row))
+
+        for sid in session_ids:
+            summary = build_session_summary_from_findings(findings_by_session.get(sid, []))
+            _increment_tier_count(tier_counts, summary.get("overall_tier"))
+
+    return {
+        "total_sessions": total_sessions,
+        "sessions_this_month": sessions_this_month,
+        "distinct_patients": len(patient_ids),
+        "tier_counts": tier_counts,
+    }
+
+
+def _shape_clinic_session_row(row: dict[str, Any]) -> dict[str, Any]:
+    shaped = dict(row)
+    patient = _nested_row(shaped.pop("patients", None))
+    first = patient.get("first_name")
+    last = patient.get("last_name")
+    shaped["patient_first_name"] = first
+    shaped["patient_last_name"] = last
+    shaped["patient_name"] = _patient_display_name(first, last) or None
+    shaped.pop("raw_extracted_json", None)
+    return shaped
 
 
 def _shape_finding(row: dict[str, Any]) -> dict[str, Any]:
@@ -258,6 +392,88 @@ async def upload_aps_session(
     session["findings"] = db_findings
     session["session_summary"] = session_summary
     return session
+
+
+@router.get("/sessions")
+def list_clinic_aps_sessions(
+    clinic_id: str = Query(..., min_length=1),
+    limit: int = Query(default=_DEFAULT_LIST_LIMIT, ge=0, le=_MAX_LIST_LIMIT),
+    offset: int = Query(default=0, ge=0),
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+):
+    enforce_clinic_role_from_auth_header(authorization, clinic_id, *CLINICAL_ROLES)
+    cid = clinic_id.strip()
+    stats = _compute_clinic_session_stats(cid)
+
+    if limit == 0:
+        return {
+            "stats": stats,
+            "total": stats["total_sessions"],
+            "limit": limit,
+            "offset": offset,
+            "sessions": [],
+        }
+
+    try:
+        resp = (
+            supabase.table("aps_sessions")
+            .select("*, patients(first_name, last_name)", count="exact")
+            .eq("clinic_id", cid)
+            .order("session_date", desc=True)
+            .range(offset, offset + limit - 1)
+            .execute()
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    total = _count_exact(resp)
+    sessions = [_shape_clinic_session_row(dict(r)) for r in (resp.data or [])]
+    if not sessions:
+        return {
+            "stats": stats,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "sessions": [],
+        }
+
+    session_ids = [str(s["id"]) for s in sessions if s.get("id")]
+    findings_by_session: dict[str, list[dict[str, Any]]] = {sid: [] for sid in session_ids}
+    if session_ids:
+        try:
+            fresp = (
+                supabase.table("aps_findings")
+                .select("*")
+                .in_("aps_session_id", session_ids)
+                .order("created_at")
+                .execute()
+            )
+            _handle_supabase_error(fresp)
+            for row in fresp.data or []:
+                sid = str(row.get("aps_session_id") or "")
+                if sid in findings_by_session:
+                    findings_by_session[sid].append(_shape_finding(row))
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    for session in sessions:
+        sid = str(session.get("id") or "")
+        findings = findings_by_session.get(sid, [])
+        session["findings"] = findings
+        session["session_summary"] = build_session_summary_from_findings(findings)
+
+    return {
+        "stats": stats,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "sessions": sessions,
+    }
 
 
 @router.get("/sessions/{session_id}")

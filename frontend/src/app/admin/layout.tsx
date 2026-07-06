@@ -17,7 +17,7 @@ import {
   Briefcase,
   ClipboardList,
   FileArchive,
-  BookOpen,
+  Activity,
   Phone,
   Building2,
   Settings,
@@ -494,16 +494,16 @@ function AdminAuthenticatedShellInner({
             ) : null}
             {canViewClinicalNotes ? (
             <Link
-              href="/admin/protocols"
-              className={navLinkClass("/admin/protocols")}
+              href="/admin/performance-center"
+              className={navLinkClass("/admin/performance-center")}
               onClick={() => setSidebarOpen(false)}
             >
               <span className="flex items-center gap-3">
-                <BookOpen
-                  className={navIconClass("/admin/protocols")}
+                <Activity
+                  className={navIconClass("/admin/performance-center")}
                   aria-hidden
                 />
-                Protocols
+                Performance Center
               </span>
             </Link>
             ) : null}

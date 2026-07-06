@@ -44,6 +44,65 @@ export type ApsSession = {
   created_at?: string | null;
 };
 
+export type ApsTierCounts = {
+  high: number;
+  moderate: number;
+  low: number;
+};
+
+export type ApsClinicSessionStats = {
+  total_sessions: number;
+  sessions_this_month: number;
+  distinct_patients: number;
+  tier_counts: ApsTierCounts;
+};
+
+export const EMPTY_APS_TIER_COUNTS: ApsTierCounts = {
+  high: 0,
+  moderate: 0,
+  low: 0,
+};
+
+export type ApsClinicSessionListItem = ApsSession & {
+  patient_first_name?: string | null;
+  patient_last_name?: string | null;
+  patient_name?: string | null;
+};
+
+export type ApsClinicSessionsResponse = {
+  stats: ApsClinicSessionStats;
+  total: number;
+  limit: number;
+  offset: number;
+  sessions: ApsClinicSessionListItem[];
+};
+
+export function tierCountsTotal(counts: ApsTierCounts): number {
+  return counts.high + counts.moderate + counts.low;
+}
+
+export function apsTierCountTextClass(tier: "high" | "moderate" | "low"): string {
+  switch (tier) {
+    case "high":
+      return "text-blue-800";
+    case "moderate":
+      return "text-amber-900";
+    case "low":
+      return "text-slate-700";
+  }
+}
+
+export function apsTierCountShortLabel(tier: "high" | "moderate" | "low"): string {
+  switch (tier) {
+    case "high":
+      return "High";
+    case "moderate":
+      return "Moderate";
+    case "low":
+      return "Low";
+  }
+}
+
 export const APS_TEST_ORDER = [
   "CMJ",
   "SJ",
