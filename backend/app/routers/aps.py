@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 from typing import Any, Optional
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
@@ -16,7 +16,11 @@ from app.services.aps_parser import (
     parse_kinvent_pdf,
     parse_session_date,
 )
-from app.services.aps_rules import apply_aps_rules, build_session_summary_from_findings
+from app.services.aps_rules import (
+    apply_aps_rules,
+    build_session_summary_from_findings,
+    deficient_side,
+)
 from app.utils.auth_users import get_email_from_token, get_user_id_from_token
 
 router = APIRouter()
@@ -118,10 +122,18 @@ def _increment_tier_count(counts: dict[str, int], tier: Any) -> None:
         counts[key] += 1
 
 
+def _side_label(left: Any, right: Any) -> Optional[str]:
+    side = deficient_side(left, right)
+    if not side:
+        return None
+    return side.capitalize()
+
+
 def _compute_clinic_session_stats(clinic_id: str) -> dict[str, Any]:
     """Aggregate APS stats for a clinic (count queries + findings for tier breakdown)."""
     cid = clinic_id.strip()
     month_start = date.today().replace(day=1).isoformat()
+    volume_start = (date.today() - timedelta(weeks=8)).isoformat()
 
     try:
         total_resp = (
@@ -146,13 +158,13 @@ def _compute_clinic_session_stats(clinic_id: str) -> dict[str, Any]:
             .execute()
         )
         _handle_supabase_error(patient_resp)
-        ids_resp = (
+        sessions_resp = (
             supabase.table("aps_sessions")
-            .select("id")
+            .select("id, session_date, patients(first_name, last_name)")
             .eq("clinic_id", cid)
             .execute()
         )
-        _handle_supabase_error(ids_resp)
+        _handle_supabase_error(sessions_resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -165,13 +177,31 @@ def _compute_clinic_session_stats(clinic_id: str) -> dict[str, Any]:
         for row in (patient_resp.data or [])
         if str(row.get("patient_id") or "").strip()
     }
-    session_ids = [
-        str(row.get("id") or "").strip()
-        for row in (ids_resp.data or [])
-        if str(row.get("id") or "").strip()
+
+    session_ids: list[str] = []
+    session_patient_names: dict[str, str] = {}
+    testing_volume_counts: dict[str, int] = {}
+    for row in sessions_resp.data or []:
+        sid = str(row.get("id") or "").strip()
+        if not sid:
+            continue
+        session_ids.append(sid)
+        patient = _nested_row(row.get("patients"))
+        session_patient_names[sid] = (
+            _patient_display_name(patient.get("first_name"), patient.get("last_name"))
+            or "Unknown athlete"
+        )
+        session_day = str(row.get("session_date") or "")[:10]
+        if session_day and session_day >= volume_start:
+            testing_volume_counts[session_day] = testing_volume_counts.get(session_day, 0) + 1
+
+    testing_volume = [
+        {"date": day, "count": testing_volume_counts[day]}
+        for day in sorted(testing_volume_counts.keys())
     ]
 
     tier_counts = _empty_tier_counts()
+    notable_all: list[dict[str, Any]] = []
     if session_ids:
         try:
             fresp = (
@@ -195,14 +225,51 @@ def _compute_clinic_session_stats(clinic_id: str) -> dict[str, Any]:
                 findings_by_session[sid].append(_shape_finding(row))
 
         for sid in session_ids:
-            summary = build_session_summary_from_findings(findings_by_session.get(sid, []))
+            session_findings = findings_by_session.get(sid, [])
+            summary = build_session_summary_from_findings(session_findings)
             _increment_tier_count(tier_counts, summary.get("overall_tier"))
+            outlier_keys = {
+                (
+                    str(item.get("test_type") or ""),
+                    str(item.get("metric_name") or ""),
+                )
+                for item in (summary.get("outlier_findings") or [])
+            }
+            patient_name = session_patient_names.get(sid, "Unknown athlete")
+            for finding in session_findings:
+                if not finding.get("is_notable"):
+                    continue
+                test_type = str(finding.get("test_type") or "")
+                metric_name = str(finding.get("metric_name") or "")
+                asym = finding.get("asymmetry_pct")
+                asym_val = float(asym) if asym is not None else None
+                notable_all.append(
+                    {
+                        "patient_name": patient_name,
+                        "test_type": test_type,
+                        "metric_name": metric_name,
+                        "asymmetry_pct": asym_val,
+                        "side": _side_label(
+                            finding.get("left_value"),
+                            finding.get("right_value"),
+                        ),
+                        "is_outlier": (test_type, metric_name) in outlier_keys,
+                    }
+                )
+
+    notable_all.sort(
+        key=lambda row: float(row.get("asymmetry_pct") or 0),
+        reverse=True,
+    )
 
     return {
         "total_sessions": total_sessions,
         "sessions_this_month": sessions_this_month,
         "distinct_patients": len(patient_ids),
         "tier_counts": tier_counts,
+        "notable_findings_count": len(notable_all),
+        "notable_findings": notable_all[:5],
+        "testing_volume": testing_volume,
     }
 
 

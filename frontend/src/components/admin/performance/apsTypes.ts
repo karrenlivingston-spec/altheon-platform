@@ -50,11 +50,28 @@ export type ApsTierCounts = {
   low: number;
 };
 
+export type ApsClinicNotableFinding = {
+  patient_name: string;
+  test_type: string;
+  metric_name: string;
+  asymmetry_pct: number | null;
+  side: string | null;
+  is_outlier?: boolean;
+};
+
+export type ApsTestingVolumePoint = {
+  date: string;
+  count: number;
+};
+
 export type ApsClinicSessionStats = {
   total_sessions: number;
   sessions_this_month: number;
   distinct_patients: number;
   tier_counts: ApsTierCounts;
+  notable_findings_count: number;
+  notable_findings: ApsClinicNotableFinding[];
+  testing_volume: ApsTestingVolumePoint[];
 };
 
 export const EMPTY_APS_TIER_COUNTS: ApsTierCounts = {
@@ -102,6 +119,21 @@ export function apsTierCountShortLabel(tier: "high" | "moderate" | "low"): strin
     case "low":
       return "Low";
   }
+}
+
+export const APS_TIER_CHART_COLORS: Record<"high" | "moderate" | "low", string> = {
+  high: "#1e40af",
+  moderate: "#78350f",
+  low: "#334155",
+};
+
+export function formatNotableFindingLine(finding: ApsClinicNotableFinding): string {
+  const pct =
+    finding.asymmetry_pct != null && !Number.isNaN(finding.asymmetry_pct)
+      ? `${Math.round(finding.asymmetry_pct * 10) / 10}%`
+      : "—";
+  const sidePart = finding.side ? ` ${finding.side}` : "";
+  return `${finding.patient_name} — ${finding.test_type}${sidePart} ${pct}`;
 }
 
 export const APS_TEST_ORDER = [
