@@ -92,6 +92,7 @@ export type PatientRecord = {
   insurance_group_number?: string | null;
   primary_complaint?: string | null;
   referring_provider?: string | null;
+  sport?: string | null;
   referral_source?: ReferralSource | string | null;
   created_at?: string | null;
 };

@@ -281,6 +281,7 @@ export default function PerformanceCenterAssessmentsTab() {
             <thead className={DS_TABLE_HEAD}>
               <tr>
                 <th className={DS_TH}>Athlete</th>
+                <th className={DS_TH}>Sport</th>
                 <th className={DS_TH}>Date</th>
                 <th className={DS_TH}>Pattern tier</th>
                 <th className={DS_TH} aria-label="Actions" />
@@ -289,7 +290,7 @@ export default function PerformanceCenterAssessmentsTab() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={4} className="px-6 py-10 text-center text-gray-500">
+                  <td colSpan={5} className="px-6 py-10 text-center text-gray-500">
                     <span className="inline-flex items-center gap-2">
                       <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
                       Loading assessments…
@@ -298,7 +299,7 @@ export default function PerformanceCenterAssessmentsTab() {
                 </tr>
               ) : sessions.length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-6 py-10 text-center text-gray-500">
+                  <td colSpan={5} className="px-6 py-10 text-center text-gray-500">
                     <p className="font-medium text-gray-900">No assessments yet</p>
                     <p className="mx-auto mt-2 max-w-md text-sm text-gray-600">
                       Import a Kinvent Smart Mode PDF to analyze jump-test data for an
@@ -321,6 +322,9 @@ export default function PerformanceCenterAssessmentsTab() {
                     <tr key={session.id} className={DS_TR}>
                       <td className={`${DS_TD_PRIMARY} font-medium text-gray-900`}>
                         {session.patient_name?.trim() || "—"}
+                      </td>
+                      <td className={DS_TD_PRIMARY}>
+                        {session.patient_sport?.trim() || "—"}
                       </td>
                       <td className={`${DS_TD_PRIMARY} whitespace-nowrap`}>
                         {formatApsDate(session.session_date)}

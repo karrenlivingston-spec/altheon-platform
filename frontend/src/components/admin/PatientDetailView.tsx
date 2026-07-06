@@ -93,6 +93,7 @@ type PatientRecord = {
   insurance_group_number?: string | null;
   primary_complaint?: string | null;
   referring_provider?: string | null;
+  sport?: string | null;
   referral_source?: string | null;
   notes?: string | null;
   created_at?: string | null;
@@ -784,6 +785,7 @@ export function PatientDetailView({
         "insurance_group_number",
         "primary_complaint",
         "referring_provider",
+        "sport",
         "referral_source",
         "notes",
       ] as const;
@@ -1156,6 +1158,14 @@ export function PatientDetailView({
                 className={FIELD_INPUT}
                 value={d.referring_provider ?? ""}
                 onChange={(e) => setDraftField("referring_provider", e.target.value)}
+              />
+            </div>
+            <div>
+              <span className={LABEL_CLASS}>Sport</span>
+              <input
+                className={FIELD_INPUT}
+                value={d.sport ?? ""}
+                onChange={(e) => setDraftField("sport", e.target.value)}
               />
             </div>
             <div>

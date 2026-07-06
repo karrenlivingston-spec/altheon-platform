@@ -36,6 +36,7 @@ export default function NewPatientModal({
   const [dateOfBirth, setDateOfBirth] = useState("");
   const [email, setEmail] = useState("");
   const [address, setAddress] = useState("");
+  const [sport, setSport] = useState("");
   const [referralSource, setReferralSource] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,6 +53,7 @@ export default function NewPatientModal({
     setDateOfBirth("");
     setEmail("");
     setAddress("");
+    setSport("");
     setReferralSource("");
     setError(null);
     setInfo(null);
@@ -74,6 +76,7 @@ export default function NewPatientModal({
     };
     if (email.trim()) body.email = email.trim();
     if (address.trim()) body.address_line1 = address.trim();
+    if (sport.trim()) body.sport = sport.trim();
     if (referralSource.trim()) body.referral_source = referralSource.trim();
     return body;
   }
@@ -223,6 +226,16 @@ export default function NewPatientModal({
               onChange={(e) => setAddress(e.target.value)}
               className={`mt-1 ${DS_INPUT}`}
               placeholder="Optional — street, city, state, zip"
+            />
+          </label>
+          <label className="block text-sm font-medium text-gray-700 sm:col-span-2">
+            Sport
+            <input
+              type="text"
+              value={sport}
+              onChange={(e) => setSport(e.target.value)}
+              className={`mt-1 ${DS_INPUT}`}
+              placeholder="Optional"
             />
           </label>
           <label className="block text-sm font-medium text-gray-700 sm:col-span-2">

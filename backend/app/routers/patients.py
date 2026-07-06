@@ -44,6 +44,7 @@ _PATIENT_PUBLIC_KEYS = (
     "insurance_group_number",
     "primary_complaint",
     "referring_provider",
+    "sport",
     "referral_source",
     "notes",
     "created_at",

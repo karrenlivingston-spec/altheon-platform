@@ -67,6 +67,7 @@ export type ApsClinicSessionListItem = ApsSession & {
   patient_first_name?: string | null;
   patient_last_name?: string | null;
   patient_name?: string | null;
+  patient_sport?: string | null;
 };
 
 export type ApsClinicSessionsResponse = {

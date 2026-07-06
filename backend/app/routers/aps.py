@@ -214,6 +214,7 @@ def _shape_clinic_session_row(row: dict[str, Any]) -> dict[str, Any]:
     shaped["patient_first_name"] = first
     shaped["patient_last_name"] = last
     shaped["patient_name"] = _patient_display_name(first, last) or None
+    shaped["patient_sport"] = patient.get("sport")
     shaped.pop("raw_extracted_json", None)
     return shaped
 
@@ -417,7 +418,7 @@ def list_clinic_aps_sessions(
     try:
         resp = (
             supabase.table("aps_sessions")
-            .select("*, patients(first_name, last_name)", count="exact")
+            .select("*, patients(first_name, last_name, sport)", count="exact")
             .eq("clinic_id", cid)
             .order("session_date", desc=True)
             .range(offset, offset + limit - 1)

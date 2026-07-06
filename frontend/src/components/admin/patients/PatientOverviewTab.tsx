@@ -72,6 +72,12 @@ export default function PatientOverviewTab({
                   <dt className="text-gray-500">Gender</dt>
                   <dd className="text-gray-900">{patient.gender?.trim() || "—"}</dd>
                 </div>
+                {patient.sport?.trim() ? (
+                  <div>
+                    <dt className="text-gray-500">Sport</dt>
+                    <dd className="text-gray-900">{patient.sport.trim()}</dd>
+                  </div>
+                ) : null}
                 <div>
                   <dt className="text-gray-500">Phone</dt>
                   <dd className="text-gray-900">{patient.phone?.trim() || "—"}</dd>
