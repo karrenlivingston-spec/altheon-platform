@@ -1552,6 +1552,7 @@ export function PatientDetailView({
           recordId={billingDetailRecordId}
           isOpen={billingDetailRecordId != null}
           onClose={() => setBillingDetailRecordId(null)}
+          onRecordUpdated={() => void loadSecondaryResources(() => false)}
         />
         </div>
       ) : null}

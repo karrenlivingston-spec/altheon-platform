@@ -1121,6 +1121,31 @@ def _ask_altheon_call_anthropic(question: str, context: str) -> str:
     return " ".join(parts)
 
 
+def _assert_billing_record_draft(record_id: str) -> None:
+    try:
+        rec = (
+            supabase.table("billing_records")
+            .select("status")
+            .eq("id", record_id)
+            .limit(1)
+            .execute()
+        )
+        _handle_supabase_error(rec)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    rows = rec.data or []
+    if not rows:
+        raise HTTPException(status_code=404, detail="Billing record not found")
+    status = str(rows[0].get("status") or "draft").lower()
+    if status != "draft":
+        raise HTTPException(
+            status_code=403,
+            detail="Cannot modify line items on a record that has been submitted.",
+        )
+
+
 def _recalculate_billing_record_total(billing_record_id: str) -> None:
     items = (
         supabase.table("billing_line_items")
@@ -1317,6 +1342,7 @@ def create_billing_line_item(record_id: str, body: dict = Body(...)):
     prow = parent.data or []
     if not prow:
         raise HTTPException(status_code=404, detail="Billing record not found")
+    _assert_billing_record_draft(record_id)
     clinic_id = prow[0]["clinic_id"]
     row = {
         "billing_record_id": record_id,
@@ -1377,6 +1403,7 @@ def patch_billing_line_item(item_id: str, body: dict = Body(...)):
     if not erows:
         raise HTTPException(status_code=404, detail="Line item not found")
     record_id = erows[0]["billing_record_id"]
+    _assert_billing_record_draft(record_id)
     try:
         upd = (
             supabase.table("billing_line_items")
@@ -1420,6 +1447,7 @@ def delete_billing_line_item(item_id: str):
     if not erows:
         raise HTTPException(status_code=404, detail="Line item not found")
     record_id = erows[0]["billing_record_id"]
+    _assert_billing_record_draft(record_id)
     try:
         del_resp = supabase.table("billing_line_items").delete().eq("id", item_id).execute()
         _handle_supabase_error(del_resp)
