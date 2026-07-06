@@ -77,6 +77,7 @@ from routers.analytics_router import router as analytics_router
 from routers.payer_optimizer import router as payer_optimizer_router
 from routers.voice_router import router as voice_call_logs_router
 from app.routers.billing_record_pdf import build_billing_record_pdf
+from app.routers.clinic_documents_router import router as clinic_documents_router
 
 load_dotenv()
 
@@ -221,6 +222,7 @@ app.include_router(tasks_router.router, prefix="/tasks", tags=["Tasks"])
 app.include_router(messaging_router.router, prefix="/messaging", tags=["Messaging"])
 app.include_router(aria_tasks_router.router, prefix="/aria", tags=["Aria Tasks"])
 app.include_router(aps_router.router, prefix="/aps", tags=["APS"])
+app.include_router(clinic_documents_router, tags=["Clinic Documents"])
 
 
 @app.get("/")
