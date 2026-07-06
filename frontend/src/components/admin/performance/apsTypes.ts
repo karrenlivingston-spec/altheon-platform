@@ -127,15 +127,6 @@ export const APS_TIER_CHART_COLORS: Record<"high" | "moderate" | "low", string> 
   low: "#334155",
 };
 
-export function formatNotableFindingLine(finding: ApsClinicNotableFinding): string {
-  const pct =
-    finding.asymmetry_pct != null && !Number.isNaN(finding.asymmetry_pct)
-      ? `${Math.round(finding.asymmetry_pct * 10) / 10}%`
-      : "—";
-  const sidePart = finding.side ? ` ${finding.side}` : "";
-  return `${finding.patient_name} — ${finding.test_type}${sidePart} ${pct}`;
-}
-
 export const APS_TEST_ORDER = [
   "CMJ",
   "SJ",
@@ -171,6 +162,20 @@ export const APS_METRIC_LABELS: Record<string, string> = {
   pace: "Pace",
   average_power: "Average power",
 };
+
+export function formatNotableFindingLine(finding: ApsClinicNotableFinding): string {
+  const pct =
+    finding.asymmetry_pct != null && !Number.isNaN(finding.asymmetry_pct)
+      ? `${Math.round(finding.asymmetry_pct * 10) / 10}%`
+      : "—";
+  const metricLabel =
+    APS_METRIC_LABELS[finding.metric_name] ?? finding.metric_name;
+  const metricPart = `${finding.test_type} ${metricLabel}`;
+  const detailPart = finding.side
+    ? `${metricPart} — ${finding.side} ${pct}`
+    : `${metricPart} ${pct}`;
+  return `${finding.patient_name} — ${detailPart}`;
+}
 
 export function formatApsDate(iso: string | null | undefined): string {
   if (!iso) return "—";

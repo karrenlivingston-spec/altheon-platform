@@ -10,6 +10,7 @@ from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadF
 
 from app.db import supabase
 from app.dependencies.permissions import CLINICAL_ROLES, enforce_clinic_role_from_auth_header
+from app.retry_utils import supabase_execute
 from app.services.aps_parser import (
     ApsParseError,
     flatten_findings,
@@ -42,13 +43,15 @@ def _handle_supabase_error(response: Any) -> None:
 
 def _assert_patient_in_clinic(patient_id: str, clinic_id: str) -> None:
     try:
-        resp = (
-            supabase.table("patient_clinic_access")
-            .select("id")
-            .eq("patient_id", patient_id)
-            .eq("clinic_id", clinic_id)
-            .limit(1)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("patient_clinic_access")
+                .select("id")
+                .eq("patient_id", patient_id)
+                .eq("clinic_id", clinic_id)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -71,14 +74,16 @@ def _resolve_clinician_id_optional(
     if not email:
         return None
     try:
-        resp = (
-            supabase.table("clinicians")
-            .select("id")
-            .eq("clinic_id", clinic_id)
-            .eq("email", email)
-            .eq("is_active", True)
-            .limit(1)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("clinicians")
+                .select("id")
+                .eq("clinic_id", clinic_id)
+                .eq("email", email)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -136,33 +141,41 @@ def _compute_clinic_session_stats(clinic_id: str) -> dict[str, Any]:
     volume_start = (date.today() - timedelta(weeks=8)).isoformat()
 
     try:
-        total_resp = (
-            supabase.table("aps_sessions")
-            .select("id", count="exact")
-            .eq("clinic_id", cid)
-            .execute()
+        total_resp = supabase_execute(
+            lambda: (
+                supabase.table("aps_sessions")
+                .select("id", count="exact")
+                .eq("clinic_id", cid)
+                .execute()
+            )
         )
         _handle_supabase_error(total_resp)
-        month_resp = (
-            supabase.table("aps_sessions")
-            .select("id", count="exact")
-            .eq("clinic_id", cid)
-            .gte("session_date", month_start)
-            .execute()
+        month_resp = supabase_execute(
+            lambda: (
+                supabase.table("aps_sessions")
+                .select("id", count="exact")
+                .eq("clinic_id", cid)
+                .gte("session_date", month_start)
+                .execute()
+            )
         )
         _handle_supabase_error(month_resp)
-        patient_resp = (
-            supabase.table("aps_sessions")
-            .select("patient_id")
-            .eq("clinic_id", cid)
-            .execute()
+        patient_resp = supabase_execute(
+            lambda: (
+                supabase.table("aps_sessions")
+                .select("patient_id")
+                .eq("clinic_id", cid)
+                .execute()
+            )
         )
         _handle_supabase_error(patient_resp)
-        sessions_resp = (
-            supabase.table("aps_sessions")
-            .select("id, session_date, patients(first_name, last_name)")
-            .eq("clinic_id", cid)
-            .execute()
+        sessions_resp = supabase_execute(
+            lambda: (
+                supabase.table("aps_sessions")
+                .select("id, session_date, patients(first_name, last_name)")
+                .eq("clinic_id", cid)
+                .execute()
+            )
         )
         _handle_supabase_error(sessions_resp)
     except HTTPException:
@@ -204,11 +217,13 @@ def _compute_clinic_session_stats(clinic_id: str) -> dict[str, Any]:
     notable_all: list[dict[str, Any]] = []
     if session_ids:
         try:
-            fresp = (
-                supabase.table("aps_findings")
-                .select("*")
-                .in_("aps_session_id", session_ids)
-                .execute()
+            fresp = supabase_execute(
+                lambda: (
+                    supabase.table("aps_findings")
+                    .select("*")
+                    .in_("aps_session_id", session_ids)
+                    .execute()
+                )
             )
             _handle_supabase_error(fresp)
         except HTTPException:
@@ -306,12 +321,14 @@ def _shape_finding(row: dict[str, Any]) -> dict[str, Any]:
 
 def _load_session_with_findings(session_id: str) -> dict[str, Any]:
     try:
-        sresp = (
-            supabase.table("aps_sessions")
-            .select("*")
-            .eq("id", session_id)
-            .limit(1)
-            .execute()
+        sresp = supabase_execute(
+            lambda: (
+                supabase.table("aps_sessions")
+                .select("*")
+                .eq("id", session_id)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(sresp)
     except HTTPException:
@@ -325,12 +342,14 @@ def _load_session_with_findings(session_id: str) -> dict[str, Any]:
     session = dict(sessions[0])
 
     try:
-        fresp = (
-            supabase.table("aps_findings")
-            .select("*")
-            .eq("aps_session_id", session_id)
-            .order("created_at")
-            .execute()
+        fresp = supabase_execute(
+            lambda: (
+                supabase.table("aps_findings")
+                .select("*")
+                .eq("aps_session_id", session_id)
+                .order("created_at")
+                .execute()
+            )
         )
         _handle_supabase_error(fresp)
     except HTTPException:
@@ -418,7 +437,9 @@ async def upload_aps_session(
     }
 
     try:
-        ins = supabase.table("aps_sessions").insert(session_row).execute()
+        ins = supabase_execute(
+            lambda: supabase.table("aps_sessions").insert(session_row).execute()
+        )
         _handle_supabase_error(ins)
     except HTTPException:
         raise
@@ -447,7 +468,9 @@ async def upload_aps_session(
             "recommended_next_test": row.get("recommended_next_test"),
         }
         try:
-            fins = supabase.table("aps_findings").insert(frow).execute()
+            fins = supabase_execute(
+                lambda frow=frow: supabase.table("aps_findings").insert(frow).execute()
+            )
             _handle_supabase_error(fins)
         except HTTPException:
             raise
@@ -483,13 +506,15 @@ def list_clinic_aps_sessions(
         }
 
     try:
-        resp = (
-            supabase.table("aps_sessions")
-            .select("*, patients(first_name, last_name, sport)", count="exact")
-            .eq("clinic_id", cid)
-            .order("session_date", desc=True)
-            .range(offset, offset + limit - 1)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("aps_sessions")
+                .select("*, patients(first_name, last_name, sport)", count="exact")
+                .eq("clinic_id", cid)
+                .order("session_date", desc=True)
+                .range(offset, offset + limit - 1)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -512,12 +537,14 @@ def list_clinic_aps_sessions(
     findings_by_session: dict[str, list[dict[str, Any]]] = {sid: [] for sid in session_ids}
     if session_ids:
         try:
-            fresp = (
-                supabase.table("aps_findings")
-                .select("*")
-                .in_("aps_session_id", session_ids)
-                .order("created_at")
-                .execute()
+            fresp = supabase_execute(
+                lambda: (
+                    supabase.table("aps_findings")
+                    .select("*")
+                    .in_("aps_session_id", session_ids)
+                    .order("created_at")
+                    .execute()
+                )
             )
             _handle_supabase_error(fresp)
             for row in fresp.data or []:
@@ -570,13 +597,15 @@ def list_patient_aps_sessions(
     _assert_patient_in_clinic(pid, cid)
 
     try:
-        resp = (
-            supabase.table("aps_sessions")
-            .select("*")
-            .eq("patient_id", pid)
-            .eq("clinic_id", cid)
-            .order("session_date", desc=True)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("aps_sessions")
+                .select("*")
+                .eq("patient_id", pid)
+                .eq("clinic_id", cid)
+                .order("session_date", desc=True)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -592,12 +621,14 @@ def list_patient_aps_sessions(
     findings_by_session: dict[str, list[dict[str, Any]]] = {sid: [] for sid in session_ids}
     if session_ids:
         try:
-            fresp = (
-                supabase.table("aps_findings")
-                .select("*")
-                .in_("aps_session_id", session_ids)
-                .order("created_at")
-                .execute()
+            fresp = supabase_execute(
+                lambda: (
+                    supabase.table("aps_findings")
+                    .select("*")
+                    .in_("aps_session_id", session_ids)
+                    .order("created_at")
+                    .execute()
+                )
             )
             _handle_supabase_error(fresp)
             for row in fresp.data or []:
