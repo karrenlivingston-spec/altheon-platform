@@ -38,17 +38,19 @@ logger = logging.getLogger(__name__)
 def list_appointments(clinic_id: str = Query(...)):
     """Return all appointments for a clinic with patient names and treatment type name."""
     try:
-        resp = (
-            supabase.table("appointments")
-            .select(
-                "id, clinic_id, patient_id, clinician_id, location_id, treatment_type_id, "
-                "start_time, end_time, status, notes, created_at, "
-                "patients(first_name, last_name), treatment_types(name), "
-                "clinicians(first_name, last_name)"
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .select(
+                    "id, clinic_id, patient_id, clinician_id, location_id, treatment_type_id, "
+                    "start_time, end_time, status, notes, created_at, "
+                    "patients(first_name, last_name), treatment_types(name), "
+                    "clinicians(first_name, last_name)"
+                )
+                .eq("clinic_id", clinic_id)
+                .order("start_time")
+                .execute()
             )
-            .eq("clinic_id", clinic_id)
-            .order("start_time")
-            .execute()
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -107,20 +109,22 @@ def get_patient_flow(
     day_end_utc = day_end_local.astimezone(timezone.utc)
 
     try:
-        ap_resp = (
-            supabase.table("appointments")
-            .select(
-                "id,clinic_id,patient_id,clinician_id,location_id,treatment_type_id,"
-                "start_time,end_time,status,source,"
-                "patients(id,first_name,last_name,phone,created_at),"
-                "clinicians(id,first_name,last_name,color,title),"
-                "treatment_types(id,name,duration_minutes)"
+        ap_resp = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .select(
+                    "id,clinic_id,patient_id,clinician_id,location_id,treatment_type_id,"
+                    "start_time,end_time,status,source,"
+                    "patients(id,first_name,last_name,phone,created_at),"
+                    "clinicians(id,first_name,last_name,color,title),"
+                    "treatment_types(id,name,duration_minutes)"
+                )
+                .eq("clinic_id", clinic_id)
+                .gte("start_time", day_start_utc.isoformat())
+                .lt("start_time", day_end_utc.isoformat())
+                .order("start_time")
+                .execute()
             )
-            .eq("clinic_id", clinic_id)
-            .gte("start_time", day_start_utc.isoformat())
-            .lt("start_time", day_end_utc.isoformat())
-            .order("start_time")
-            .execute()
         )
         _handle_supabase_error(ap_resp)
     except HTTPException:
@@ -139,13 +143,15 @@ def get_patient_flow(
     first_appt_by_patient: dict[str, datetime] = {}
     if patient_ids:
         try:
-            hist_resp = (
-                supabase.table("appointments")
-                .select("patient_id,start_time")
-                .eq("clinic_id", clinic_id)
-                .in_("patient_id", patient_ids)
-                .order("start_time")
-                .execute()
+            hist_resp = supabase_execute(
+                lambda: (
+                    supabase.table("appointments")
+                    .select("patient_id,start_time")
+                    .eq("clinic_id", clinic_id)
+                    .in_("patient_id", patient_ids)
+                    .order("start_time")
+                    .execute()
+                )
             )
             _handle_supabase_error(hist_resp)
         except HTTPException:
@@ -340,7 +346,9 @@ def get_appointments_calendar(
         )
         if clinician_id and clinician_id.strip():
             q = q.eq("clinician_id", clinician_id.strip())
-        ap_resp = q.execute()
+        ap_resp = supabase_execute(
+            lambda: q.execute()
+        )
         _handle_supabase_error(ap_resp)
     except HTTPException:
         raise
@@ -358,13 +366,15 @@ def get_appointments_calendar(
     first_appt_by_patient: dict[str, datetime] = {}
     if patient_ids:
         try:
-            hist_resp = (
-                supabase.table("appointments")
-                .select("patient_id,start_time")
-                .eq("clinic_id", clinic_id)
-                .in_("patient_id", patient_ids)
-                .order("start_time")
-                .execute()
+            hist_resp = supabase_execute(
+                lambda: (
+                    supabase.table("appointments")
+                    .select("patient_id,start_time")
+                    .eq("clinic_id", clinic_id)
+                    .in_("patient_id", patient_ids)
+                    .order("start_time")
+                    .execute()
+                )
             )
             _handle_supabase_error(hist_resp)
         except HTTPException:
@@ -390,14 +400,16 @@ def get_appointments_calendar(
     package_by_patient: dict[str, Any] = {}
     if patient_ids:
         try:
-            pkg_resp = (
-                supabase.table("patient_packages")
-                .select("patient_id, visits_used, total_visits, status, purchase_date")
-                .in_("patient_id", patient_ids)
-                .eq("clinic_id", clinic_id)
-                .eq("status", "active")
-                .order("purchase_date", desc=False)
-                .execute()
+            pkg_resp = supabase_execute(
+                lambda: (
+                    supabase.table("patient_packages")
+                    .select("patient_id, visits_used, total_visits, status, purchase_date")
+                    .in_("patient_id", patient_ids)
+                    .eq("clinic_id", clinic_id)
+                    .eq("status", "active")
+                    .order("purchase_date", desc=False)
+                    .execute()
+                )
             )
             _handle_supabase_error(pkg_resp)
             for pkg_row in pkg_resp.data or []:
@@ -515,15 +527,17 @@ def update_appointment_time(
 ):
     user_id = _resolve_bearer_user_id(authorization)
     try:
-        ap_resp = (
-            supabase.table("appointments")
-            .select(
-                "id,clinic_id,patient_id,clinician_id,location_id,start_time,end_time,status,source,"
-                "treatment_types(duration_minutes)"
+        ap_resp = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .select(
+                    "id,clinic_id,patient_id,clinician_id,location_id,start_time,end_time,status,source,"
+                    "treatment_types(duration_minutes)"
+                )
+                .eq("id", appointment_id)
+                .limit(1)
+                .execute()
             )
-            .eq("id", appointment_id)
-            .limit(1)
-            .execute()
         )
         _handle_supabase_error(ap_resp)
     except HTTPException:
@@ -548,12 +562,14 @@ def update_appointment_time(
         dur = max(1, int(body.duration_minutes))
     elif body.treatment_type_id and str(body.treatment_type_id).strip():
         try:
-            tt = (
-                supabase.table("treatment_types")
-                .select("duration_minutes")
-                .eq("id", str(body.treatment_type_id).strip())
-                .limit(1)
-                .execute()
+            tt = supabase_execute(
+                lambda: (
+                    supabase.table("treatment_types")
+                    .select("duration_minutes")
+                    .eq("id", str(body.treatment_type_id).strip())
+                    .limit(1)
+                    .execute()
+                )
             )
             _handle_supabase_error(tt)
             trows = tt.data or []
@@ -610,11 +626,13 @@ def update_appointment_time(
         update_payload["treatment_type_id"] = str(body.treatment_type_id).strip()
 
     try:
-        upd = (
-            supabase.table("appointments")
-            .update(update_payload)
-            .eq("id", appointment_id)
-            .execute()
+        upd = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .update(update_payload)
+                .eq("id", appointment_id)
+                .execute()
+            )
         )
         _handle_supabase_error(upd)
     except HTTPException:
@@ -637,17 +655,19 @@ def update_appointment_time(
 
     clinic_tz = ZoneInfo("America/New_York")
     try:
-        refetch = (
-            supabase.table("appointments")
-            .select(
-                "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,is_virtual,"
-                "patients(id,first_name,last_name,phone),"
-                "clinicians(id,first_name,last_name,color,title),"
-                "treatment_types(id,name,duration_minutes)"
+        refetch = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .select(
+                    "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,is_virtual,"
+                    "patients(id,first_name,last_name,phone),"
+                    "clinicians(id,first_name,last_name,color,title),"
+                    "treatment_types(id,name,duration_minutes)"
+                )
+                .eq("id", appointment_id)
+                .limit(1)
+                .execute()
             )
-            .eq("id", appointment_id)
-            .limit(1)
-            .execute()
         )
         _handle_supabase_error(refetch)
     except HTTPException:
@@ -663,14 +683,16 @@ def update_appointment_time(
     first_map: dict[str, datetime] = {}
     if pid:
         try:
-            hist_resp = (
-                supabase.table("appointments")
-                .select("patient_id,start_time")
-                .eq("clinic_id", clinic_id)
-                .eq("patient_id", pid)
-                .order("start_time")
-                .limit(1)
-                .execute()
+            hist_resp = supabase_execute(
+                lambda: (
+                    supabase.table("appointments")
+                    .select("patient_id,start_time")
+                    .eq("clinic_id", clinic_id)
+                    .eq("patient_id", pid)
+                    .order("start_time")
+                    .limit(1)
+                    .execute()
+                )
             )
             _handle_supabase_error(hist_resp)
         except HTTPException:
@@ -703,12 +725,14 @@ def swap_appointment_times(
         raise HTTPException(status_code=400, detail="Cannot swap an appointment with itself")
 
     def fetch_slot(aid: str) -> dict[str, Any]:
-        resp = (
-            supabase.table("appointments")
-            .select("id,clinic_id,start_time,end_time")
-            .eq("id", aid)
-            .limit(1)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .select("id,clinic_id,start_time,end_time")
+                .eq("id", aid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
         rows = resp.data or []
@@ -736,18 +760,22 @@ def swap_appointment_times(
     now_ts = datetime.now(timezone.utc).isoformat()
 
     try:
-        u1 = (
-            supabase.table("appointments")
-            .update({"start_time": s2, "end_time": e2, "updated_at": now_ts})
-            .eq("id", id1)
-            .execute()
+        u1 = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .update({"start_time": s2, "end_time": e2, "updated_at": now_ts})
+                .eq("id", id1)
+                .execute()
+            )
         )
         _handle_supabase_error(u1)
-        u2 = (
-            supabase.table("appointments")
-            .update({"start_time": s1, "end_time": e1, "updated_at": now_ts})
-            .eq("id", id2)
-            .execute()
+        u2 = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .update({"start_time": s1, "end_time": e1, "updated_at": now_ts})
+                .eq("id", id2)
+                .execute()
+            )
         )
         _handle_supabase_error(u2)
     except HTTPException:
@@ -761,17 +789,19 @@ def swap_appointment_times(
     out_rows: list[dict[str, Any]] = []
     try:
         for aid in (id1, id2):
-            refetch = (
-                supabase.table("appointments")
-                .select(
-                    "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,is_virtual,"
-                    "patients(id,first_name,last_name,phone),"
-                    "clinicians(id,first_name,last_name,color,title),"
-                    "treatment_types(id,name,duration_minutes)"
+            refetch = supabase_execute(
+                lambda aid=aid: (
+                    supabase.table("appointments")
+                    .select(
+                        "id,start_time,end_time,status,source,patient_id,clinician_id,location_id,is_virtual,"
+                        "patients(id,first_name,last_name,phone),"
+                        "clinicians(id,first_name,last_name,color,title),"
+                        "treatment_types(id,name,duration_minutes)"
+                    )
+                    .eq("id", aid)
+                    .limit(1)
+                    .execute()
                 )
-                .eq("id", aid)
-                .limit(1)
-                .execute()
             )
             _handle_supabase_error(refetch)
             r0 = (refetch.data or [None])[0]
@@ -783,13 +813,15 @@ def swap_appointment_times(
                     pids.append(pid)
 
         if pids:
-            hist_resp = (
-                supabase.table("appointments")
-                .select("patient_id,start_time")
-                .eq("clinic_id", c1)
-                .in_("patient_id", pids)
-                .order("start_time")
-                .execute()
+            hist_resp = supabase_execute(
+                lambda: (
+                    supabase.table("appointments")
+                    .select("patient_id,start_time")
+                    .eq("clinic_id", c1)
+                    .in_("patient_id", pids)
+                    .order("start_time")
+                    .execute()
+                )
             )
             _handle_supabase_error(hist_resp)
             for hr in hist_resp.data or []:
@@ -815,15 +847,17 @@ def swap_appointment_times(
 
 def _maybe_decrement_patient_package(patient_id: str, clinic_id: str) -> None:
     """Consume one visit from the patient's oldest active package, if any."""
-    pkg_resp = (
-        supabase.table("patient_packages")
-        .select("id, total_visits, visits_used")
-        .eq("patient_id", patient_id)
-        .eq("clinic_id", clinic_id)
-        .eq("status", "active")
-        .order("purchase_date", desc=False)
-        .limit(1)
-        .execute()
+    pkg_resp = supabase_execute(
+        lambda: (
+            supabase.table("patient_packages")
+            .select("id, total_visits, visits_used")
+            .eq("patient_id", patient_id)
+            .eq("clinic_id", clinic_id)
+            .eq("status", "active")
+            .order("purchase_date", desc=False)
+            .limit(1)
+            .execute()
+        )
     )
     err = getattr(pkg_resp, "error", None)
     if err:
@@ -847,11 +881,13 @@ def _maybe_decrement_patient_package(patient_id: str, clinic_id: str) -> None:
     if new_used >= total_visits:
         update_data["status"] = "completed"
 
-    upd = (
-        supabase.table("patient_packages")
-        .update(update_data)
-        .eq("id", pkg["id"])
-        .execute()
+    upd = supabase_execute(
+        lambda: (
+            supabase.table("patient_packages")
+            .update(update_data)
+            .eq("id", pkg["id"])
+            .execute()
+        )
     )
     upd_err = getattr(upd, "error", None)
     if upd_err:
@@ -874,14 +910,16 @@ def update_appointment_status(
         )
 
     try:
-        appt = (
-            supabase.table("appointments")
-            .select(
-                "id, clinic_id, patient_id, google_event_id, clinician_id, start_time, end_time, status"
+        appt = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .select(
+                    "id, clinic_id, patient_id, google_event_id, clinician_id, start_time, end_time, status"
+                )
+                .eq("id", appointment_id)
+                .limit(1)
+                .execute()
             )
-            .eq("id", appointment_id)
-            .limit(1)
-            .execute()
         )
         _handle_supabase_error(appt)
     except HTTPException:
@@ -912,11 +950,13 @@ def update_appointment_status(
     )
 
     try:
-        result = (
-            supabase.table("appointments")
-            .update({"status": status, "updated_at": datetime.now(timezone.utc).isoformat()})
-            .eq("id", appointment_id)
-            .execute()
+        result = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .update({"status": status, "updated_at": datetime.now(timezone.utc).isoformat()})
+                .eq("id", appointment_id)
+                .execute()
+            )
         )
         err = getattr(result, "error", None)
         logger.debug(
@@ -1177,12 +1217,14 @@ def _fetch_clinic_sms_context(clinic_id: str) -> dict[str, str]:
     if not cid:
         return defaults
     try:
-        resp = (
-            supabase.table("clinics")
-            .select("name, phone, sms_display_name, address")
-            .eq("id", cid)
-            .limit(1)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("clinics")
+                .select("name, phone, sms_display_name, address")
+                .eq("id", cid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except Exception:
@@ -1252,14 +1294,16 @@ def _parse_iso_utc(value: str) -> datetime:
 def _is_blocked_time(clinician_id: str, start_time: str, end_time: str) -> bool:
     start_dt = _parse_iso_utc(start_time)
     end_dt = _parse_iso_utc(end_time)
-    query = (
-        supabase.table("blocked_time")
-        .select("id,start_time,end_time")
-        .eq("clinician_id", clinician_id)
-        .lt("start_time", end_dt.isoformat())
-        .gt("end_time", start_dt.isoformat())
-        .limit(1)
-        .execute()
+    query = supabase_execute(
+        lambda: (
+            supabase.table("blocked_time")
+            .select("id,start_time,end_time")
+            .eq("clinician_id", clinician_id)
+            .lt("start_time", end_dt.isoformat())
+            .gt("end_time", start_dt.isoformat())
+            .limit(1)
+            .execute()
+        )
     )
     _handle_supabase_error(query)
     return bool(query.data)
@@ -1286,16 +1330,18 @@ def _find_clinician_appointment_overlap(
     exclude_id = str(exclude_appointment_id or "").strip()
     if not cid or not exclude_id:
         return None
-    query = (
-        supabase.table("appointments")
-        .select("id,start_time,end_time,status")
-        .eq("clinician_id", cid)
-        .neq("id", exclude_id)
-        .neq("status", "cancelled")
-        .lt("start_time", end_time)
-        .gt("end_time", start_time)
-        .limit(1)
-        .execute()
+    query = supabase_execute(
+        lambda: (
+            supabase.table("appointments")
+            .select("id,start_time,end_time,status")
+            .eq("clinician_id", cid)
+            .neq("id", exclude_id)
+            .neq("status", "cancelled")
+            .lt("start_time", end_time)
+            .gt("end_time", start_time)
+            .limit(1)
+            .execute()
+        )
     )
     _handle_supabase_error(query)
     rows = query.data or []
@@ -1346,11 +1392,13 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
 
     clinic_id_for_lookup = (payload.clinic_id or STTPDN_CLINIC_ID).strip()
     try:
-        all_patients = (
-            supabase.table("patients")
-            .select("id, phone, first_name, last_name, preferred_language")
-            .eq("clinic_id", clinic_id_for_lookup)
-            .execute()
+        all_patients = supabase_execute(
+            lambda: (
+                supabase.table("patients")
+                .select("id, phone, first_name, last_name, preferred_language")
+                .eq("clinic_id", clinic_id_for_lookup)
+                .execute()
+            )
         )
         _handle_supabase_error(all_patients)
     except HTTPException:
@@ -1375,9 +1423,11 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
     normalized_stored = re.sub(r"\D", "", stored_phone)
     if stored_phone != normalized_stored:
         try:
-            supabase.table("patients").update({"phone": normalized_stored}).eq(
+            supabase_execute(
+                lambda: supabase.table("patients").update({"phone": normalized_stored}).eq(
                 "id", patient_id
             ).execute()
+            )
             patient["phone"] = normalized_stored
         except Exception:
             logger.exception(
@@ -1389,9 +1439,11 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
         new_lang = str(payload.preferred_language).strip()
         if new_lang:
             try:
-                supabase.table("patients").update({"preferred_language": new_lang}).eq(
+                supabase_execute(
+                    lambda: supabase.table("patients").update({"preferred_language": new_lang}).eq(
                     "id", patient_id
                 ).execute()
+                )
                 patient["preferred_language"] = new_lang
             except Exception:
                 logger.exception(
@@ -1400,14 +1452,16 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
                 )
 
     try:
-        result = (
-            supabase.table("appointments")
-            .select("*")
-            .eq("patient_id", patient_id)
-            .in_("status", ["scheduled", "confirmed"])
-            .order("start_time", desc=False)
-            .limit(1)
-            .execute()
+        result = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .select("*")
+                .eq("patient_id", patient_id)
+                .in_("status", ["scheduled", "confirmed"])
+                .order("start_time", desc=False)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(result)
     except HTTPException:
@@ -1469,11 +1523,13 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
     print("Cancelling old appointment...")
     try:
         cancel_updated_at = datetime.now(timezone.utc).isoformat()
-        cancel_result = (
-            supabase.table("appointments")
-            .update({"status": "cancelled", "updated_at": cancel_updated_at})
-            .eq("id", old_appointment_id)
-            .execute()
+        cancel_result = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .update({"status": "cancelled", "updated_at": cancel_updated_at})
+                .eq("id", old_appointment_id)
+                .execute()
+            )
         )
         _handle_supabase_error(cancel_result)
     except HTTPException:
@@ -1502,23 +1558,25 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
 
     print("Booking new appointment...")
     try:
-        ins = (
-            supabase.table("appointments")
-            .insert(
-                {
-                    "clinic_id": clinic_id,
-                    "patient_id": patient_id,
-                    "clinician_id": clinician_id,
-                    "location_id": location_id,
-                    "treatment_type_id": treatment_type_id,
-                    "start_time": start_iso,
-                    "end_time": end_iso,
-                    "notes": row.get("notes"),
-                    "source": "ai",
-                    "status": "scheduled",
-                }
+        ins = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .insert(
+                    {
+                        "clinic_id": clinic_id,
+                        "patient_id": patient_id,
+                        "clinician_id": clinician_id,
+                        "location_id": location_id,
+                        "treatment_type_id": treatment_type_id,
+                        "start_time": start_iso,
+                        "end_time": end_iso,
+                        "notes": row.get("notes"),
+                        "source": "ai",
+                        "status": "scheduled",
+                    }
+                )
+                .execute()
             )
-            .execute()
         )
         _handle_supabase_error(ins)
     except HTTPException:
@@ -1542,17 +1600,19 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
     resolve_system_task(clinic_id, TASK_INCOMPLETE_INTAKE, old_appointment_id)
 
     try:
-        new_appt = (
-            supabase.table("appointments")
-            .select(
-                "id,start_time,end_time,google_event_id,"
-                "patients(first_name,last_name),"
-                "clinicians(first_name,last_name),"
-                "treatment_types(name)"
+        new_appt = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .select(
+                    "id,start_time,end_time,google_event_id,"
+                    "patients(first_name,last_name),"
+                    "clinicians(first_name,last_name),"
+                    "treatment_types(name)"
+                )
+                .eq("id", new_appointment_id)
+                .limit(1)
+                .execute()
             )
-            .eq("id", new_appointment_id)
-            .limit(1)
-            .execute()
         )
         _handle_supabase_error(new_appt)
         nrow = (new_appt.data or [None])[0]
@@ -1587,9 +1647,11 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
                     location=None,
                 )
                 if created_google_event_id:
-                    supabase.table("appointments").update(
+                    supabase_execute(
+                        lambda: supabase.table("appointments").update(
                         {"google_event_id": created_google_event_id}
                     ).eq("id", new_appointment_id).execute()
+                    )
     except Exception:
         logger.exception(
             "google calendar sync failed for reschedule appointment_id=%s",
@@ -1597,12 +1659,14 @@ def reschedule_appointment(payload: RescheduleAppointmentRequest):
         )
 
     try:
-        pt_msg = (
-            supabase.table("patients")
-            .select("first_name, phone, preferred_language")
-            .eq("id", patient_id)
-            .limit(1)
-            .execute()
+        pt_msg = supabase_execute(
+            lambda: (
+                supabase.table("patients")
+                .select("first_name, phone, preferred_language")
+                .eq("id", patient_id)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(pt_msg)
         pr = (pt_msg.data or [{}])[0]
@@ -1647,12 +1711,14 @@ def patch_appointment_virtual(
     _assert_user_has_clinic_access(user_id, cid)
 
     try:
-        appt = (
-            supabase.table("appointments")
-            .select("id,clinic_id")
-            .eq("id", appointment_id)
-            .limit(1)
-            .execute()
+        appt = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .select("id,clinic_id")
+                .eq("id", appointment_id)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(appt)
     except HTTPException:
@@ -1665,12 +1731,14 @@ def patch_appointment_virtual(
         raise HTTPException(status_code=404, detail="Appointment not found")
 
     try:
-        upd = (
-            supabase.table("appointments")
-            .update({"is_virtual": bool(body.is_virtual)})
-            .eq("id", appointment_id)
-            .eq("clinic_id", cid)
-            .execute()
+        upd = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .update({"is_virtual": bool(body.is_virtual)})
+                .eq("id", appointment_id)
+                .eq("clinic_id", cid)
+                .execute()
+            )
         )
         _handle_supabase_error(upd)
     except HTTPException:
@@ -1701,10 +1769,12 @@ def create_appointment(
                 detail="patient_phone is required when patient_id is not provided",
             )
         try:
-            rpc_resp = supabase.rpc(
+            rpc_resp = supabase_execute(
+                lambda: supabase.rpc(
                 "find_patient_by_clinic_phone",
                 {"p_clinic_id": clinic_id, "p_phone": phone}
             ).execute()
+            )
             patient_data = rpc_resp.data or []
         except Exception as exc:
             raise HTTPException(status_code=500, detail=str(exc)) from exc
@@ -1714,9 +1784,11 @@ def create_appointment(
             stored_phone = str(patient_data[0].get("phone") or "")
             if stored_phone != phone:
                 try:
-                    supabase.table("patients").update({"phone": phone}).eq(
+                    supabase_execute(
+                        lambda: supabase.table("patients").update({"phone": phone}).eq(
                         "id", patient_id
                     ).execute()
+                    )
                 except Exception:
                     logger.exception(
                         "create appointment: failed to normalize phone patient_id=%s",
@@ -1731,18 +1803,20 @@ def create_appointment(
                     detail="patient_first_name and patient_last_name are required for new patient booking",
                 )
             try:
-                patient_insert = (
-                    supabase.table("patients")
-                    .insert(
-                        {
-                            "first_name": first_name,
-                            "last_name": last_name,
-                            "phone": phone,
-                            "email": payload.patient_email,
-                            "clinic_id": payload.clinic_id,
-                        }
+                patient_insert = supabase_execute(
+                    lambda: (
+                        supabase.table("patients")
+                        .insert(
+                            {
+                                "first_name": first_name,
+                                "last_name": last_name,
+                                "phone": phone,
+                                "email": payload.patient_email,
+                                "clinic_id": payload.clinic_id,
+                            }
+                        )
+                        .execute()
                     )
-                    .execute()
                 )
                 _handle_supabase_error(patient_insert)
             except HTTPException:
@@ -1755,13 +1829,15 @@ def create_appointment(
             patient_id = str(inserted_patients[0]["id"])
 
     try:
-        access_lookup = (
-            supabase.table("patient_clinic_access")
-            .select("id")
-            .eq("patient_id", patient_id)
-            .eq("clinic_id", payload.clinic_id)
-            .limit(1)
-            .execute()
+        access_lookup = supabase_execute(
+            lambda: (
+                supabase.table("patient_clinic_access")
+                .select("id")
+                .eq("patient_id", patient_id)
+                .eq("clinic_id", payload.clinic_id)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(access_lookup)
     except HTTPException:
@@ -1771,10 +1847,12 @@ def create_appointment(
 
     if not (access_lookup.data or []):
         try:
-            access_insert = (
-                supabase.table("patient_clinic_access")
-                .insert({"patient_id": patient_id, "clinic_id": payload.clinic_id})
-                .execute()
+            access_insert = supabase_execute(
+                lambda: (
+                    supabase.table("patient_clinic_access")
+                    .insert({"patient_id": patient_id, "clinic_id": payload.clinic_id})
+                    .execute()
+                )
             )
             _handle_supabase_error(access_insert)
         except HTTPException:
@@ -1787,9 +1865,11 @@ def create_appointment(
         (str(pref_raw).strip() if pref_raw is not None else "") or "en"
     )
     try:
-        supabase.table("patients").update({"preferred_language": pref_stored}).eq(
+        supabase_execute(
+            lambda: supabase.table("patients").update({"preferred_language": pref_stored}).eq(
             "id", patient_id
         ).execute()
+        )
     except Exception:
         logger.exception(
             "create appointment: failed to update preferred_language patient_id=%s",
@@ -1804,12 +1884,14 @@ def create_appointment(
             duration_minutes = max(1, int(payload.duration_minutes))
         else:
             try:
-                tt = (
-                    supabase.table("treatment_types")
-                    .select("duration_minutes")
-                    .eq("id", payload.treatment_type_id)
-                    .limit(1)
-                    .execute()
+                tt = supabase_execute(
+                    lambda: (
+                        supabase.table("treatment_types")
+                        .select("duration_minutes")
+                        .eq("id", payload.treatment_type_id)
+                        .limit(1)
+                        .execute()
+                    )
                 )
                 _handle_supabase_error(tt)
             except HTTPException:
@@ -1833,24 +1915,26 @@ def create_appointment(
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
-        appointment_insert = (
-            supabase.table("appointments")
-            .insert(
-                {
-                    "clinic_id": payload.clinic_id,
-                    "patient_id": patient_id,
-                    "clinician_id": payload.clinician_id,
-                    "location_id": payload.location_id,
-                    "treatment_type_id": payload.treatment_type_id,
-                    "start_time": start_iso,
-                    "end_time": end_iso,
-                    "notes": payload.notes,
-                    "source": source,
-                    "status": "scheduled",
-                    "is_virtual": bool(payload.is_virtual),
-                }
+        appointment_insert = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .insert(
+                    {
+                        "clinic_id": payload.clinic_id,
+                        "patient_id": patient_id,
+                        "clinician_id": payload.clinician_id,
+                        "location_id": payload.location_id,
+                        "treatment_type_id": payload.treatment_type_id,
+                        "start_time": start_iso,
+                        "end_time": end_iso,
+                        "notes": payload.notes,
+                        "source": source,
+                        "status": "scheduled",
+                        "is_virtual": bool(payload.is_virtual),
+                    }
+                )
+                .execute()
             )
-            .execute()
         )
         _handle_supabase_error(appointment_insert)
     except HTTPException:
@@ -1872,17 +1956,19 @@ def create_appointment(
     )
 
     try:
-        appt_with_details = (
-            supabase.table("appointments")
-            .select(
-                "id,start_time,end_time,"
-                "patients(first_name,last_name),"
-                "clinicians(first_name,last_name),"
-                "treatment_types(name)"
+        appt_with_details = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .select(
+                    "id,start_time,end_time,"
+                    "patients(first_name,last_name),"
+                    "clinicians(first_name,last_name),"
+                    "treatment_types(name)"
+                )
+                .eq("id", appointment_id)
+                .limit(1)
+                .execute()
             )
-            .eq("id", appointment_id)
-            .limit(1)
-            .execute()
         )
         _handle_supabase_error(appt_with_details)
         crow = (appt_with_details.data or [None])[0]
@@ -1908,9 +1994,11 @@ def create_appointment(
                 location=None,
             )
             if google_event_id:
-                supabase.table("appointments").update(
+                supabase_execute(
+                    lambda: supabase.table("appointments").update(
                     {"google_event_id": google_event_id}
                 ).eq("id", appointment_id).execute()
+                )
     except Exception:
         logger.exception(
             "google calendar sync failed for create appointment_id=%s",
@@ -1921,12 +2009,14 @@ def create_appointment(
     fname = (payload.patient_first_name or "").strip()
     pref_lang = pref_stored
     try:
-        pt_msg = (
-            supabase.table("patients")
-            .select("first_name, phone, preferred_language")
-            .eq("id", patient_id)
-            .limit(1)
-            .execute()
+        pt_msg = supabase_execute(
+            lambda: (
+                supabase.table("patients")
+                .select("first_name, phone, preferred_language")
+                .eq("id", patient_id)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(pt_msg)
         prow = (pt_msg.data or [{}])[0]

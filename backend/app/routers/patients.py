@@ -114,11 +114,13 @@ def _find_clinic_phone_matches(
     if not normalized_phone:
         return []
     try:
-        resp = (
-            supabase.table("patients")
-            .select("id, first_name, last_name, date_of_birth, phone")
-            .eq("clinic_id", clinic_id)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("patients")
+                .select("id, first_name, last_name, date_of_birth, phone")
+                .eq("clinic_id", clinic_id)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -161,11 +163,13 @@ def _referral_source_label(value: Optional[str]) -> str:
 
 def _user_has_platform_role(user_id: str) -> bool:
     try:
-        resp = (
-            supabase.table("clinic_users")
-            .select("role")
-            .eq("user_id", user_id)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("clinic_users")
+                .select("role")
+                .eq("user_id", user_id)
+                .execute()
+            )
         )
         roles = {row.get("role") for row in resp.data or []}
         return bool(roles & {"super_admin", "platform_admin"})
@@ -193,13 +197,15 @@ def _normalize_patient_row(row: dict[str, Any]) -> dict[str, Any]:
 
 def _has_clinic_access(clinic_id: str, patient_id: str) -> bool:
     try:
-        resp = (
-            supabase.table("patient_clinic_access")
-            .select("id")
-            .eq("clinic_id", clinic_id)
-            .eq("patient_id", patient_id)
-            .limit(1)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("patient_clinic_access")
+                .select("id")
+                .eq("clinic_id", clinic_id)
+                .eq("patient_id", patient_id)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -216,7 +222,9 @@ def _fetch_patient_row(
         q = supabase.table("patients").select("*").eq("id", patient_id)
         if restrict_clinic_id is not None:
             q = q.eq("clinic_id", restrict_clinic_id)
-        resp = q.limit(1).execute()
+        resp = supabase_execute(
+            lambda: q.limit(1).execute()
+        )
         _handle_supabase_error(resp)
     except HTTPException:
         raise
@@ -265,15 +273,17 @@ def _eastern_date_ymd_from_iso(iso_val: Any) -> str:
 
 def _related_appointments(patient_id: str, clinic_id: str) -> list[dict[str, Any]]:
     try:
-        resp = (
-            supabase.table("appointments")
-            .select(
-                "start_time,status,clinicians(first_name,last_name),treatment_types(name)"
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .select(
+                    "start_time,status,clinicians(first_name,last_name),treatment_types(name)"
+                )
+                .eq("patient_id", patient_id)
+                .eq("clinic_id", clinic_id)
+                .order("start_time", desc=True)
+                .execute()
             )
-            .eq("patient_id", patient_id)
-            .eq("clinic_id", clinic_id)
-            .order("start_time", desc=True)
-            .execute()
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -295,13 +305,15 @@ def _related_appointments(patient_id: str, clinic_id: str) -> list[dict[str, Any
 
 def _related_billing(patient_id: str, clinic_id: str) -> list[dict[str, Any]]:
     try:
-        resp = (
-            supabase.table("billing_records")
-            .select("date_of_service,total_billed_cents,amount_paid_cents,status")
-            .eq("patient_id", patient_id)
-            .eq("clinic_id", clinic_id)
-            .order("date_of_service", desc=True)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("billing_records")
+                .select("date_of_service,total_billed_cents,amount_paid_cents,status")
+                .eq("patient_id", patient_id)
+                .eq("clinic_id", clinic_id)
+                .order("date_of_service", desc=True)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -324,17 +336,19 @@ def _related_billing(patient_id: str, clinic_id: str) -> list[dict[str, Any]]:
 
 def _related_membership(patient_id: str, clinic_id: str) -> Optional[dict[str, Any]]:
     try:
-        resp = (
-            supabase.table("patient_memberships")
-            .select(
-                "status,visits_remaining,"
-                "membership_tiers!patient_memberships_tier_id_fkey(name)"
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("patient_memberships")
+                .select(
+                    "status,visits_remaining,"
+                    "membership_tiers!patient_memberships_tier_id_fkey(name)"
+                )
+                .eq("patient_id", patient_id)
+                .eq("clinic_id", clinic_id)
+                .eq("status", "active")
+                .limit(1)
+                .execute()
             )
-            .eq("patient_id", patient_id)
-            .eq("clinic_id", clinic_id)
-            .eq("status", "active")
-            .limit(1)
-            .execute()
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -360,15 +374,17 @@ def _related_membership(patient_id: str, clinic_id: str) -> Optional[dict[str, A
 
 def _related_pi_cases(patient_id: str, clinic_id: str) -> list[dict[str, Any]]:
     try:
-        resp = (
-            supabase.table("pi_cases")
-            .select(
-                "claim_number,date_of_accident,status,attorney_name"
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("pi_cases")
+                .select(
+                    "claim_number,date_of_accident,status,attorney_name"
+                )
+                .eq("patient_id", patient_id)
+                .eq("clinic_id", clinic_id)
+                .order("created_at", desc=True)
+                .execute()
             )
-            .eq("patient_id", patient_id)
-            .eq("clinic_id", clinic_id)
-            .order("created_at", desc=True)
-            .execute()
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -399,7 +415,9 @@ def referral_source_summary(
         q = supabase.table("patients").select("referral_source")
         if not (platform_wide and _user_has_platform_role(clinic.user_id)):
             q = q.eq("clinic_id", clinic.clinic_id)
-        resp = q.execute()
+        resp = supabase_execute(
+            lambda: q.execute()
+        )
         _handle_supabase_error(resp)
 
         counts: dict[Optional[str], int] = defaultdict(int)
@@ -447,13 +465,15 @@ def list_patient_surveys(patient_id: str, clinic_id: str = Query(...)):
     if not _has_clinic_access(clinic_id, patient_id):
         raise HTTPException(status_code=404, detail="Patient not found")
     try:
-        resp = (
-            supabase.table("survey_responses")
-            .select("*")
-            .eq("patient_id", patient_id)
-            .eq("clinic_id", clinic_id)
-            .order("created_at", desc=True)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("survey_responses")
+                .select("*")
+                .eq("patient_id", patient_id)
+                .eq("clinic_id", clinic_id)
+                .order("created_at", desc=True)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -475,7 +495,9 @@ def list_patients(clinic_id: str = Query(...), search: Optional[str] = Query(def
             q = q.or_(
                 f"first_name.ilike.{like},last_name.ilike.{like},phone.ilike.{like}"
             )
-        resp = q.execute()
+        resp = supabase_execute(
+            lambda: q.execute()
+        )
         _handle_supabase_error(resp)
     except HTTPException:
         raise
@@ -530,7 +552,9 @@ def create_patient(
             insert_data[key] = body[key]
 
     try:
-        ins = supabase.table("patients").insert(insert_data).execute()
+        ins = supabase_execute(
+            lambda: supabase.table("patients").insert(insert_data).execute()
+        )
         _handle_supabase_error(ins)
     except HTTPException:
         raise
@@ -544,12 +568,14 @@ def create_patient(
     patient_id = str(new_row["id"])
 
     try:
-        access_ins = (
-            supabase.table("patient_clinic_access")
-            .insert(
-                {"patient_id": patient_id, "clinic_id": clinic_id}
+        access_ins = supabase_execute(
+            lambda: (
+                supabase.table("patient_clinic_access")
+                .insert(
+                    {"patient_id": patient_id, "clinic_id": clinic_id}
+                )
+                .execute()
             )
-            .execute()
         )
         _handle_supabase_error(access_ins)
     except HTTPException:
@@ -609,12 +635,14 @@ def patch_patient(patient_id: str, clinic_id: str = Query(...), body: dict = Bod
     if update_data:
         update_data["updated_at"] = _now_iso()
         try:
-            upd = (
-                supabase.table("patients")
-                .update(update_data)
-                .eq("id", patient_id)
-                .eq("clinic_id", clinic_id)
-                .execute()
+            upd = supabase_execute(
+                lambda: (
+                    supabase.table("patients")
+                    .update(update_data)
+                    .eq("id", patient_id)
+                    .eq("clinic_id", clinic_id)
+                    .execute()
+                )
             )
             _handle_supabase_error(upd)
         except HTTPException:
