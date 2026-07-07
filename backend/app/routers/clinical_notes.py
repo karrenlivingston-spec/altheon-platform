@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.services.system_tasks import (
     TASK_NOTE_REVIEW,
     ensure_note_review_task,
@@ -297,11 +298,13 @@ def _load_clinic_users_map(user_ids: list[str]) -> dict[str, dict[str, Any]]:
         return by_id
 
     try:
-        resp = (
-            supabase.table("clinic_users")
-            .select("*")
-            .in_("id", user_ids)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("clinic_users")
+                .select("*")
+                .in_("id", user_ids)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
         for row in resp.data or []:
@@ -322,11 +325,13 @@ def _load_clinicians_map(clinician_ids: list[str]) -> dict[str, dict[str, Any]]:
         return by_id
 
     try:
-        resp = (
-            supabase.table("clinicians")
-            .select("id,first_name,last_name")
-            .in_("id", clinician_ids)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("clinicians")
+                .select("id,first_name,last_name")
+                .in_("id", clinician_ids)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
         for row in resp.data or []:
@@ -388,11 +393,13 @@ def _enrich_notes_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     patients_map: dict[str, dict[str, Any]] = {}
     try:
         if patient_ids:
-            presp = (
-                supabase.table("patients")
-                .select("id,first_name,last_name")
-                .in_("id", patient_ids)
-                .execute()
+            presp = supabase_execute(
+                lambda: (
+                    supabase.table("patients")
+                    .select("id,first_name,last_name")
+                    .in_("id", patient_ids)
+                    .execute()
+                )
             )
             _handle_supabase_error(presp)
             for pr in presp.data or []:
@@ -500,11 +507,13 @@ def _load_appointments_map(appointment_ids: list[str]) -> dict[str, dict[str, An
     if not ids:
         return by_id
     try:
-        resp = (
-            supabase.table("appointments")
-            .select("id,start_time,clinician_id")
-            .in_("id", ids)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .select("id,start_time,clinician_id")
+                .in_("id", ids)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
         for row in resp.data or []:
@@ -549,11 +558,13 @@ def _enrich_notes_for_list(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _fetch_clinic_notes_rows(clinic_id: str) -> list[dict[str, Any]]:
-    resp = (
-        supabase.table("clinical_notes")
-        .select("*")
-        .eq("clinic_id", clinic_id)
-        .execute()
+    resp = supabase_execute(
+        lambda: (
+            supabase.table("clinical_notes")
+            .select("*")
+            .eq("clinic_id", clinic_id)
+            .execute()
+        )
     )
     _handle_supabase_error(resp)
     return [r for r in (resp.data or []) if isinstance(r, dict)]
@@ -844,7 +855,9 @@ def list_clinical_notes(
             q = q.gte("created_at", f"{str(date_from)[:10]}T00:00:00")
         if date_to:
             q = q.lte("created_at", f"{str(date_to)[:10]}T23:59:59")
-        resp = q.order("created_at", desc=True).execute()
+        resp = supabase_execute(
+            lambda: q.order("created_at", desc=True).execute()
+        )
         _handle_supabase_error(resp)
         raw_rows = [r for r in (resp.data or []) if isinstance(r, dict)]
 
@@ -968,13 +981,15 @@ def _resolve_clinic_users_pk(
         raise HTTPException(status_code=400, detail="Invalid clinic user reference")
 
     try:
-        by_id = (
-            supabase.table("clinic_users")
-            .select("id")
-            .eq("id", key)
-            .eq("clinic_id", cid)
-            .limit(1)
-            .execute()
+        by_id = supabase_execute(
+            lambda: (
+                supabase.table("clinic_users")
+                .select("id")
+                .eq("id", key)
+                .eq("clinic_id", cid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(by_id)
         rows = by_id.data or []
@@ -983,13 +998,15 @@ def _resolve_clinic_users_pk(
             if rid:
                 return rid
 
-        by_uid = (
-            supabase.table("clinic_users")
-            .select("id")
-            .eq("user_id", key)
-            .eq("clinic_id", cid)
-            .limit(1)
-            .execute()
+        by_uid = supabase_execute(
+            lambda: (
+                supabase.table("clinic_users")
+                .select("id")
+                .eq("user_id", key)
+                .eq("clinic_id", cid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(by_uid)
         rows = by_uid.data or []
@@ -1018,13 +1035,15 @@ def _resolve_clinician_author_from_token(
         raise HTTPException(status_code=400, detail="Invalid author reference")
 
     try:
-        cu_resp = (
-            supabase.table("clinic_users")
-            .select("user_id")
-            .eq("user_id", jwt_user_id)
-            .eq("clinic_id", cid)
-            .limit(1)
-            .execute()
+        cu_resp = supabase_execute(
+            lambda: (
+                supabase.table("clinic_users")
+                .select("user_id")
+                .eq("user_id", jwt_user_id)
+                .eq("clinic_id", cid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(cu_resp)
         if not (cu_resp.data or []):
@@ -1034,13 +1053,15 @@ def _resolve_clinician_author_from_token(
         if not email_str:
             raise HTTPException(status_code=404, detail=not_found_detail)
 
-        clinician_resp = (
-            supabase.table("clinicians")
-            .select("id")
-            .eq("email", email_str)
-            .eq("is_active", True)
-            .limit(1)
-            .execute()
+        clinician_resp = supabase_execute(
+            lambda: (
+                supabase.table("clinicians")
+                .select("id")
+                .eq("email", email_str)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(clinician_resp)
         clinician_rows = clinician_resp.data or []
@@ -1071,26 +1092,30 @@ def _resolve_clinician_author_id(
 
     try:
         auth_user_id = ""
-        by_uid = (
-            supabase.table("clinic_users")
-            .select("user_id")
-            .eq("user_id", key)
-            .eq("clinic_id", cid)
-            .limit(1)
-            .execute()
+        by_uid = supabase_execute(
+            lambda: (
+                supabase.table("clinic_users")
+                .select("user_id")
+                .eq("user_id", key)
+                .eq("clinic_id", cid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(by_uid)
         rows = by_uid.data or []
         if rows:
             auth_user_id = str(rows[0].get("user_id") or "").strip()
         else:
-            by_pk = (
-                supabase.table("clinic_users")
-                .select("user_id")
-                .eq("id", key)
-                .eq("clinic_id", cid)
-                .limit(1)
-                .execute()
+            by_pk = supabase_execute(
+                lambda: (
+                    supabase.table("clinic_users")
+                    .select("user_id")
+                    .eq("id", key)
+                    .eq("clinic_id", cid)
+                    .limit(1)
+                    .execute()
+                )
             )
             _handle_supabase_error(by_pk)
             rows = by_pk.data or []
@@ -1104,13 +1129,15 @@ def _resolve_clinician_author_id(
         if not email_str:
             raise HTTPException(status_code=404, detail=not_found_detail)
 
-        clinician_resp = (
-            supabase.table("clinicians")
-            .select("id")
-            .eq("email", email_str)
-            .eq("is_active", True)
-            .limit(1)
-            .execute()
+        clinician_resp = supabase_execute(
+            lambda: (
+                supabase.table("clinicians")
+                .select("id")
+                .eq("email", email_str)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(clinician_resp)
         clinician_rows = clinician_resp.data or []
@@ -1180,7 +1207,9 @@ def create_clinical_note(
             row[key] = val
 
     try:
-        ins = supabase.table("clinical_notes").insert(row).execute()
+        ins = supabase_execute(
+            lambda: supabase.table("clinical_notes").insert(row).execute()
+        )
         _handle_supabase_error(ins)
     except HTTPException:
         raise
@@ -1234,11 +1263,13 @@ def list_special_tests_catalog():
     so regions appear in the clinical sequence cervical → functional movement.
     """
     try:
-        resp = (
-            supabase.table("orthopedic_special_tests")
-            .select("id,region,subcategory,test_name")
-            .order("created_at")
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("orthopedic_special_tests")
+                .select("id,region,subcategory,test_name")
+                .order("created_at")
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -1302,12 +1333,14 @@ def _fetch_note_for_clinic(note_id: str, clinic_id: str) -> dict[str, Any]:
         raise HTTPException(status_code=400, detail="clinic_id is required")
 
     try:
-        resp = (
-            supabase.table("clinical_notes")
-            .select("id,clinic_id")
-            .eq("id", nid)
-            .limit(1)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("clinical_notes")
+                .select("id,clinic_id")
+                .eq("id", nid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -1356,10 +1389,12 @@ def save_note_special_tests(
         return {"saved": True, "count": 0}
 
     try:
-        resp = (
-            supabase.table("note_special_test_results")
-            .upsert(rows, on_conflict="note_id,test_id")
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("note_special_test_results")
+                .upsert(rows, on_conflict="note_id,test_id")
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -1378,14 +1413,16 @@ def get_note_special_tests(
     _fetch_note_for_clinic(note_id, clinic_id)
 
     try:
-        resp = (
-            supabase.table("note_special_test_results")
-            .select(
-                "test_id,result,clinician_notes,"
-                "orthopedic_special_tests(test_name,region,subcategory)"
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("note_special_test_results")
+                .select(
+                    "test_id,result,clinician_notes,"
+                    "orthopedic_special_tests(test_name,region,subcategory)"
+                )
+                .eq("note_id", note_id.strip())
+                .execute()
             )
-            .eq("note_id", note_id.strip())
-            .execute()
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -1545,12 +1582,14 @@ class SuggestGoalsBody(BaseModel):
 @router.get("/clinical-notes/{note_id}/goals", dependencies=[Depends(require_clinical_notes_read())])
 def list_note_goals(note_id: str):
     try:
-        resp = (
-            supabase.table("note_goals")
-            .select("id,note_id,description,goal_type,target_weeks,percent_met")
-            .eq("note_id", note_id.strip())
-            .order("created_at")
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("note_goals")
+                .select("id,note_id,description,goal_type,target_weeks,percent_met")
+                .eq("note_id", note_id.strip())
+                .order("created_at")
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
         return [_shape_goal_row(r) for r in resp.data or [] if isinstance(r, dict)]
@@ -1571,12 +1610,14 @@ def create_note_goal(note_id: str, body: CreateNoteGoalBody):
         raise HTTPException(status_code=400, detail="Invalid goal_type")
 
     try:
-        note_resp = (
-            supabase.table("clinical_notes")
-            .select("id")
-            .eq("id", nid)
-            .limit(1)
-            .execute()
+        note_resp = supabase_execute(
+            lambda: (
+                supabase.table("clinical_notes")
+                .select("id")
+                .eq("id", nid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(note_resp)
         if not (note_resp.data or []):
@@ -1595,7 +1636,9 @@ def create_note_goal(note_id: str, body: CreateNoteGoalBody):
         "updated_at": _now_iso(),
     }
     try:
-        ins = supabase.table("note_goals").insert(row).execute()
+        ins = supabase_execute(
+            lambda: supabase.table("note_goals").insert(row).execute()
+        )
         _handle_supabase_error(ins)
         rows = ins.data or []
         if not rows:
@@ -1622,12 +1665,14 @@ def patch_note_goal(note_id: str, goal_id: str, body: PatchNoteGoalBody):
     data["updated_at"] = _now_iso()
 
     try:
-        upd = (
-            supabase.table("note_goals")
-            .update(data)
-            .eq("id", goal_id.strip())
-            .eq("note_id", note_id.strip())
-            .execute()
+        upd = supabase_execute(
+            lambda: (
+                supabase.table("note_goals")
+                .update(data)
+                .eq("id", goal_id.strip())
+                .eq("note_id", note_id.strip())
+                .execute()
+            )
         )
         _handle_supabase_error(upd)
         rows = upd.data or []
@@ -1643,12 +1688,14 @@ def patch_note_goal(note_id: str, goal_id: str, body: PatchNoteGoalBody):
 @router.delete("/clinical-notes/{note_id}/goals/{goal_id}", dependencies=[Depends(require_role(*CLINICAL_ROLES))])
 def delete_note_goal(note_id: str, goal_id: str):
     try:
-        dele = (
-            supabase.table("note_goals")
-            .delete()
-            .eq("id", goal_id.strip())
-            .eq("note_id", note_id.strip())
-            .execute()
+        dele = supabase_execute(
+            lambda: (
+                supabase.table("note_goals")
+                .delete()
+                .eq("id", goal_id.strip())
+                .eq("note_id", note_id.strip())
+                .execute()
+            )
         )
         _handle_supabase_error(dele)
         return {"deleted": True}
@@ -1662,12 +1709,14 @@ def delete_note_goal(note_id: str, goal_id: str):
 def suggest_note_goals(note_id: str, body: SuggestGoalsBody):
     nid = note_id.strip()
     try:
-        note_resp = (
-            supabase.table("clinical_notes")
-            .select("id")
-            .eq("id", nid)
-            .limit(1)
-            .execute()
+        note_resp = supabase_execute(
+            lambda: (
+                supabase.table("clinical_notes")
+                .select("id")
+                .eq("id", nid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(note_resp)
         if not (note_resp.data or []):
@@ -1700,12 +1749,14 @@ def get_clinical_note(
         raise HTTPException(status_code=400, detail="Invalid note_id")
 
     try:
-        resp = (
-            supabase.table("clinical_notes")
-            .select("*")
-            .eq("id", nid)
-            .limit(1)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("clinical_notes")
+                .select("*")
+                .eq("id", nid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -1730,12 +1781,14 @@ def patch_clinical_note(note_id: str, body: PatchClinicalNoteBody):
         raise HTTPException(status_code=400, detail="Invalid note_id")
 
     try:
-        cur = (
-            supabase.table("clinical_notes")
-            .select("id,status")
-            .eq("id", nid)
-            .limit(1)
-            .execute()
+        cur = supabase_execute(
+            lambda: (
+                supabase.table("clinical_notes")
+                .select("id,status")
+                .eq("id", nid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(cur)
     except HTTPException:
@@ -1773,7 +1826,9 @@ def patch_clinical_note(note_id: str, body: PatchClinicalNoteBody):
     data["updated_at"] = _now_iso()
 
     try:
-        upd = supabase.table("clinical_notes").update(data).eq("id", nid).execute()
+        upd = supabase_execute(
+            lambda: supabase.table("clinical_notes").update(data).eq("id", nid).execute()
+        )
         _handle_supabase_error(upd)
     except HTTPException:
         raise
@@ -1785,12 +1840,14 @@ def patch_clinical_note(note_id: str, body: PatchClinicalNoteBody):
         raise HTTPException(status_code=404, detail="Clinical note not found")
 
     try:
-        full_resp = (
-            supabase.table("clinical_notes")
-            .select("*")
-            .eq("id", nid)
-            .limit(1)
-            .execute()
+        full_resp = supabase_execute(
+            lambda: (
+                supabase.table("clinical_notes")
+                .select("*")
+                .eq("id", nid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(full_resp)
         full_rows = full_resp.data or []
@@ -1810,12 +1867,14 @@ def submit_clinical_note(note_id: str):
         raise HTTPException(status_code=400, detail="Invalid note_id")
 
     try:
-        resp = (
-            supabase.table("clinical_notes")
-            .select("*")
-            .eq("id", nid)
-            .limit(1)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("clinical_notes")
+                .select("*")
+                .eq("id", nid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -1852,11 +1911,13 @@ def submit_clinical_note(note_id: str):
         "updated_at": _now_iso(),
     }
     try:
-        upd_p = (
-            supabase.table("clinical_notes")
-            .update(pending_update)
-            .eq("id", nid)
-            .execute()
+        upd_p = supabase_execute(
+            lambda: (
+                supabase.table("clinical_notes")
+                .update(pending_update)
+                .eq("id", nid)
+                .execute()
+            )
         )
         _handle_supabase_error(upd_p)
     except HTTPException:
@@ -1876,7 +1937,9 @@ def submit_clinical_note(note_id: str):
             "updated_at": _now_iso(),
         }
         try:
-            supabase.table("clinical_notes").update(fail_update).eq("id", nid).execute()
+            supabase_execute(
+                lambda: supabase.table("clinical_notes").update(fail_update).eq("id", nid).execute()
+            )
         except Exception:
             pass
         ensure_note_review_task(
@@ -1894,7 +1957,9 @@ def submit_clinical_note(note_id: str):
             "updated_at": _now_iso(),
         }
         try:
-            supabase.table("clinical_notes").update(fail_update).eq("id", nid).execute()
+            supabase_execute(
+                lambda: supabase.table("clinical_notes").update(fail_update).eq("id", nid).execute()
+            )
         except Exception:
             pass
         ensure_note_review_task(
@@ -1921,11 +1986,13 @@ def submit_clinical_note(note_id: str):
         }
 
     try:
-        upd_f = (
-            supabase.table("clinical_notes")
-            .update(final_update)
-            .eq("id", nid)
-            .execute()
+        upd_f = supabase_execute(
+            lambda: (
+                supabase.table("clinical_notes")
+                .update(final_update)
+                .eq("id", nid)
+                .execute()
+            )
         )
         _handle_supabase_error(upd_f)
     except HTTPException:
@@ -1959,12 +2026,14 @@ def sign_clinical_note(
         raise HTTPException(status_code=400, detail="note_id and signed_by are required")
 
     try:
-        cur = (
-            supabase.table("clinical_notes")
-            .select("id,status,clinic_id")
-            .eq("id", nid)
-            .limit(1)
-            .execute()
+        cur = supabase_execute(
+            lambda: (
+                supabase.table("clinical_notes")
+                .select("id,status,clinic_id")
+                .eq("id", nid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(cur)
     except HTTPException:
@@ -2002,7 +2071,9 @@ def sign_clinical_note(
         "updated_at": _now_iso(),
     }
     try:
-        upd = supabase.table("clinical_notes").update(data).eq("id", nid).execute()
+        upd = supabase_execute(
+            lambda: supabase.table("clinical_notes").update(data).eq("id", nid).execute()
+        )
         _handle_supabase_error(upd)
     except HTTPException:
         raise
@@ -2027,12 +2098,14 @@ def request_correction(note_id: str, body: RequestCorrectionBody):
         )
 
     try:
-        cur = (
-            supabase.table("clinical_notes")
-            .select("id,status")
-            .eq("id", nid)
-            .limit(1)
-            .execute()
+        cur = supabase_execute(
+            lambda: (
+                supabase.table("clinical_notes")
+                .select("id,status")
+                .eq("id", nid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(cur)
     except HTTPException:
@@ -2057,7 +2130,9 @@ def request_correction(note_id: str, body: RequestCorrectionBody):
         "updated_at": _now_iso(),
     }
     try:
-        upd = supabase.table("clinical_notes").update(data).eq("id", nid).execute()
+        upd = supabase_execute(
+            lambda: supabase.table("clinical_notes").update(data).eq("id", nid).execute()
+        )
         _handle_supabase_error(upd)
     except HTTPException:
         raise
@@ -2107,7 +2182,9 @@ def list_clinic_clinical_notes(
         if author_id is not None and str(author_id).strip():
             resolved_author = _author_id_for_clinical_notes_filter(cid, str(author_id).strip())
             q = q.eq("author_id", resolved_author)
-        resp = q.order("created_at", desc=True).execute()
+        resp = supabase_execute(
+            lambda: q.order("created_at", desc=True).execute()
+        )
         _handle_supabase_error(resp)
     except HTTPException:
         raise
@@ -2128,12 +2205,14 @@ def list_patient_clinical_notes(
         raise HTTPException(status_code=400, detail="Invalid patient_id")
 
     try:
-        resp = (
-            supabase.table("clinical_notes")
-            .select("*")
-            .eq("patient_id", pid)
-            .order("created_at", desc=True)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("clinical_notes")
+                .select("*")
+                .eq("patient_id", pid)
+                .order("created_at", desc=True)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -2148,12 +2227,14 @@ def list_patient_clinical_notes(
             enforce_clinical_notes_read_from_auth_header(authorization, clinic_id)
         else:
             try:
-                patient_resp = (
-                    supabase.table("patients")
-                    .select("clinic_id")
-                    .eq("id", pid)
-                    .limit(1)
-                    .execute()
+                patient_resp = supabase_execute(
+                    lambda: (
+                        supabase.table("patients")
+                        .select("clinic_id")
+                        .eq("id", pid)
+                        .limit(1)
+                        .execute()
+                    )
                 )
                 _handle_supabase_error(patient_resp)
                 patient_rows = patient_resp.data or []

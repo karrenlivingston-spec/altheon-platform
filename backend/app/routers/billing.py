@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, Header
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.dependencies.permissions import (
     BILLING_CLAIM_SUBMIT_ROLES,
     BILLING_READ_ROLES,
@@ -107,12 +108,14 @@ def _shape_claim(row: dict[str, Any]) -> dict[str, Any]:
 
 def _fetch_claim(claim_id: str) -> dict[str, Any]:
     try:
-        resp = (
-            supabase.table("insurance_claims")
-            .select("*")
-            .eq("id", claim_id)
-            .limit(1)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("insurance_claims")
+                .select("*")
+                .eq("id", claim_id)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -171,7 +174,9 @@ def _insert_audit_log(
         row["details"] = details
     if payer_response is not None:
         row["payer_response"] = payer_response
-    ins = supabase.table("claim_audit_log").insert(row).execute()
+    ins = supabase_execute(
+        lambda: supabase.table("claim_audit_log").insert(row).execute()
+    )
     _handle_supabase_error(ins)
 
 
@@ -901,15 +906,17 @@ def _fetch_patient_for_claim(patient_id: Any) -> Optional[dict[str, Any]]:
     if not patient_id:
         return None
     try:
-        resp = (
-            supabase.table("patients")
-            .select(
-                "first_name,last_name,date_of_birth,gender,"
-                "address_line1,address_line2,city,state,zip,insurance_group_number"
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("patients")
+                .select(
+                    "first_name,last_name,date_of_birth,gender,"
+                    "address_line1,address_line2,city,state,zip,insurance_group_number"
+                )
+                .eq("id", str(patient_id))
+                .limit(1)
+                .execute()
             )
-            .eq("id", str(patient_id))
-            .limit(1)
-            .execute()
         )
         _handle_supabase_error(resp)
         rows = resp.data or []
@@ -1020,12 +1027,14 @@ def list_claims(clinic_id: str = Query(...)):
     if not cid:
         raise HTTPException(status_code=400, detail="clinic_id is required")
     try:
-        resp = (
-            supabase.table("insurance_claims")
-            .select("*")
-            .eq("clinic_id", cid)
-            .order("filing_deadline")
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("insurance_claims")
+                .select("*")
+                .eq("clinic_id", cid)
+                .order("filing_deadline")
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -1044,7 +1053,9 @@ def create_claim(
     _require_billing_claim_submit_access(authorization, body.clinic_id)
     row = _claim_row_from_create(body)
     try:
-        ins = supabase.table("insurance_claims").insert(row).execute()
+        ins = supabase_execute(
+            lambda: supabase.table("insurance_claims").insert(row).execute()
+        )
         _handle_supabase_error(ins)
     except HTTPException:
         raise
@@ -1074,12 +1085,14 @@ def get_claim(
     claim = _fetch_claim(claim_id)
     _require_billing_read_access(authorization, claim.get("clinic_id"))
     try:
-        audit_resp = (
-            supabase.table("claim_audit_log")
-            .select("*")
-            .eq("claim_id", claim_id)
-            .order("created_at")
-            .execute()
+        audit_resp = supabase_execute(
+            lambda: (
+                supabase.table("claim_audit_log")
+                .select("*")
+                .eq("claim_id", claim_id)
+                .order("created_at")
+                .execute()
+            )
         )
         _handle_supabase_error(audit_resp)
     except HTTPException:
@@ -1128,7 +1141,9 @@ def patch_claim(
     data["updated_at"] = _now_iso()
 
     try:
-        upd = supabase.table("insurance_claims").update(data).eq("id", claim_id).execute()
+        upd = supabase_execute(
+            lambda: supabase.table("insurance_claims").update(data).eq("id", claim_id).execute()
+        )
         _handle_supabase_error(upd)
     except HTTPException:
         raise
@@ -1235,11 +1250,13 @@ async def submit_claim(
         upd_data["reference_number"] = reference
 
     try:
-        upd = (
-            supabase.table("insurance_claims")
-            .update(upd_data)
-            .eq("id", claim_id)
-            .execute()
+        upd = supabase_execute(
+            lambda: (
+                supabase.table("insurance_claims")
+                .update(upd_data)
+                .eq("id", claim_id)
+                .execute()
+            )
         )
         _handle_supabase_error(upd)
     except HTTPException:
@@ -1283,13 +1300,15 @@ def resubmit_claim(
         )
 
     try:
-        eob_resp = (
-            supabase.table("eob_extractions")
-            .select("*")
-            .eq("id", eob_id)
-            .eq("clinic_id", clinic_id)
-            .limit(1)
-            .execute()
+        eob_resp = supabase_execute(
+            lambda: (
+                supabase.table("eob_extractions")
+                .select("*")
+                .eq("id", eob_id)
+                .eq("clinic_id", clinic_id)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(eob_resp)
     except HTTPException:
@@ -1353,7 +1372,9 @@ def resubmit_claim(
     )
 
     try:
-        ins = supabase.table("insurance_claims").insert(insert_row).execute()
+        ins = supabase_execute(
+            lambda: supabase.table("insurance_claims").insert(insert_row).execute()
+        )
         _handle_supabase_error(ins)
     except HTTPException:
         raise
@@ -1377,23 +1398,27 @@ def resubmit_claim(
     new_claim = ins_rows[0]
 
     try:
-        upd_original = (
-            supabase.table("insurance_claims")
-            .update({"status": "resubmitted", "updated_at": now})
-            .eq("id", claim_id)
-            .execute()
+        upd_original = supabase_execute(
+            lambda: (
+                supabase.table("insurance_claims")
+                .update({"status": "resubmitted", "updated_at": now})
+                .eq("id", claim_id)
+                .execute()
+            )
         )
         _handle_supabase_error(upd_original)
     except Exception:
         logger.exception("resubmit update original failed claim_id=%s", claim_id)
 
     try:
-        supabase.table("eob_extractions").update(
+        supabase_execute(
+            lambda: supabase.table("eob_extractions").update(
             {
                 "resubmission_submitted": True,
                 "resubmission_claim_id": new_claim_id,
             }
         ).eq("id", eob_id).execute()
+        )
     except Exception:
         logger.exception("resubmit update eob failed eob_id=%s", eob_id)
 
@@ -1401,15 +1426,19 @@ def resubmit_claim(
     try:
         task_update = {"status": "completed", "completed_at": now, "updated_at": now}
         if task_id:
-            supabase.table("clinic_tasks").update(task_update).eq("id", task_id).eq(
+            supabase_execute(
+                lambda: supabase.table("clinic_tasks").update(task_update).eq("id", task_id).eq(
                 "clinic_id", clinic_id
             ).execute()
+            )
         else:
-            supabase.table("clinic_tasks").update(task_update).eq(
+            supabase_execute(
+                lambda: supabase.table("clinic_tasks").update(task_update).eq(
                 "claim_id", claim_id
             ).eq("clinic_id", clinic_id).eq("task_type", "eob_resubmission").in_(
                 "status", ["open", "in_progress"]
             ).execute()
+            )
     except Exception:
         logger.exception(
             "resubmit update clinic_task failed claim_id=%s eob_id=%s",
@@ -1497,11 +1526,13 @@ async def check_claim_status(
     new_status = _claim_status_from_stedi_response(data)
     now = _now_iso()
     try:
-        upd = (
-            supabase.table("insurance_claims")
-            .update({"status": new_status, "updated_at": now})
-            .eq("id", claim_id)
-            .execute()
+        upd = supabase_execute(
+            lambda: (
+                supabase.table("insurance_claims")
+                .update({"status": new_status, "updated_at": now})
+                .eq("id", claim_id)
+                .execute()
+            )
         )
         _handle_supabase_error(upd)
     except HTTPException:
@@ -1575,7 +1606,9 @@ def delete_claim(
             detail="Only draft claims can be deleted",
         )
     try:
-        dele = supabase.table("insurance_claims").delete().eq("id", claim_id).execute()
+        dele = supabase_execute(
+            lambda: supabase.table("insurance_claims").delete().eq("id", claim_id).execute()
+        )
         _handle_supabase_error(dele)
     except HTTPException:
         raise
@@ -1698,11 +1731,13 @@ def list_unbilled_appointments(clinic_id: str = Query(...)):
     ).astimezone(timezone.utc)
 
     try:
-        claims_resp = (
-            supabase.table("insurance_claims")
-            .select("appointment_id")
-            .eq("clinic_id", cid)
-            .execute()
+        claims_resp = supabase_execute(
+            lambda: (
+                supabase.table("insurance_claims")
+                .select("appointment_id")
+                .eq("clinic_id", cid)
+                .execute()
+            )
         )
         _handle_supabase_error(claims_resp)
         claimed_appt_ids = {
@@ -1711,12 +1746,14 @@ def list_unbilled_appointments(clinic_id: str = Query(...)):
             if r.get("appointment_id")
         }
 
-        fee_resp = (
-            supabase.table("clinic_fee_schedules")
-            .select("cpt_code, charge")
-            .eq("clinic_id", cid)
-            .eq("is_active", True)
-            .execute()
+        fee_resp = supabase_execute(
+            lambda: (
+                supabase.table("clinic_fee_schedules")
+                .select("cpt_code, charge")
+                .eq("clinic_id", cid)
+                .eq("is_active", True)
+                .execute()
+            )
         )
         _handle_supabase_error(fee_resp)
         fee_by_code: dict[str, float] = {}
@@ -1729,20 +1766,22 @@ def list_unbilled_appointments(clinic_id: str = Query(...)):
             except (TypeError, ValueError):
                 fee_by_code[code] = 0.0
 
-        appt_resp = (
-            supabase.table("appointments")
-            .select(
-                "id, patient_id, clinician_id, start_time, status, "
-                "patients(first_name, last_name), "
-                "clinicians(first_name, last_name, title), "
-                "treatment_types(name)"
+        appt_resp = supabase_execute(
+            lambda: (
+                supabase.table("appointments")
+                .select(
+                    "id, patient_id, clinician_id, start_time, status, "
+                    "patients(first_name, last_name), "
+                    "clinicians(first_name, last_name, title), "
+                    "treatment_types(name)"
+                )
+                .eq("clinic_id", cid)
+                .eq("status", "completed")
+                .gte("start_time", lookback_start.isoformat())
+                .lte("start_time", end_of_today.isoformat())
+                .order("start_time", desc=True)
+                .execute()
             )
-            .eq("clinic_id", cid)
-            .eq("status", "completed")
-            .gte("start_time", lookback_start.isoformat())
-            .lte("start_time", end_of_today.isoformat())
-            .order("start_time", desc=True)
-            .execute()
         )
         _handle_supabase_error(appt_resp)
 
@@ -1832,15 +1871,17 @@ def aging_report(clinic_id: str = Query(...)):
     today = datetime.now(NY).date()
 
     try:
-        resp = (
-            supabase.table("insurance_claims")
-            .select(
-                "id, payer_name, first_treatment_date, total_amount, status, "
-                "patients(first_name, last_name)"
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("insurance_claims")
+                .select(
+                    "id, payer_name, first_treatment_date, total_amount, status, "
+                    "patients(first_name, last_name)"
+                )
+                .eq("clinic_id", cid)
+                .order("first_treatment_date", desc=True)
+                .execute()
             )
-            .eq("clinic_id", cid)
-            .order("first_treatment_date", desc=True)
-            .execute()
         )
         _handle_supabase_error(resp)
 
@@ -1927,11 +1968,13 @@ def payer_summary_report(clinic_id: str = Query(...)):
         raise HTTPException(status_code=400, detail="clinic_id is required")
 
     try:
-        resp = (
-            supabase.table("insurance_claims")
-            .select("payer_name, total_amount, status")
-            .eq("clinic_id", cid)
-            .execute()
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("insurance_claims")
+                .select("payer_name, total_amount, status")
+                .eq("clinic_id", cid)
+                .execute()
+            )
         )
         _handle_supabase_error(resp)
 
@@ -2018,14 +2061,16 @@ def clinic_benefits_ledger(clinic: ClinicUserDep):
     """Insurance utilization grouped by patient and payer (clinic-wide)."""
     cid = clinic.clinic_id
     try:
-        resp = (
-            supabase.table("insurance_claims")
-            .select(
-                "patient_id, payer_name, total_amount, status, "
-                "patients(first_name, last_name)"
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("insurance_claims")
+                .select(
+                    "patient_id, payer_name, total_amount, status, "
+                    "patients(first_name, last_name)"
+                )
+                .eq("clinic_id", cid)
+                .execute()
             )
-            .eq("clinic_id", cid)
-            .execute()
         )
         _handle_supabase_error(resp)
 
@@ -2189,7 +2234,9 @@ def insurance_verification(
     }
 
     try:
-        ins = supabase.table("insurance_verifications").insert(save_row).execute()
+        ins = supabase_execute(
+            lambda: supabase.table("insurance_verifications").insert(save_row).execute()
+        )
         _handle_supabase_error(ins)
     except HTTPException:
         raise
@@ -2220,17 +2267,19 @@ def insurance_verification_history(
         )
 
     try:
-        resp = (
-            supabase.table("insurance_verifications")
-            .select(
-                "id, payer_id, member_id, verified_at, eligible, "
-                "plan_name, copay, deductible"
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("insurance_verifications")
+                .select(
+                    "id, payer_id, member_id, verified_at, eligible, "
+                    "plan_name, copay, deductible"
+                )
+                .eq("clinic_id", cid)
+                .eq("patient_id", pid)
+                .order("verified_at", desc=True)
+                .limit(50)
+                .execute()
             )
-            .eq("clinic_id", cid)
-            .eq("patient_id", pid)
-            .order("verified_at", desc=True)
-            .limit(50)
-            .execute()
         )
         _handle_supabase_error(resp)
     except HTTPException:
@@ -2285,17 +2334,19 @@ def generate_superbill(
         )
 
     try:
-        claim_resp = (
-            supabase.table("insurance_claims")
-            .select(
-                "*, patients(first_name, last_name, date_of_birth, "
-                "address_line1, address_line2, city, state, zip, "
-                "insurance_group_number)"
+        claim_resp = supabase_execute(
+            lambda: (
+                supabase.table("insurance_claims")
+                .select(
+                    "*, patients(first_name, last_name, date_of_birth, "
+                    "address_line1, address_line2, city, state, zip, "
+                    "insurance_group_number)"
+                )
+                .eq("id", claim_id)
+                .eq("clinic_id", cid)
+                .limit(1)
+                .execute()
             )
-            .eq("id", claim_id)
-            .eq("clinic_id", cid)
-            .limit(1)
-            .execute()
         )
         _handle_supabase_error(claim_resp)
     except HTTPException:
@@ -2327,12 +2378,14 @@ def generate_superbill(
     }
 
     try:
-        clinic_resp = (
-            supabase.table("clinics")
-            .select("name, address, phone")
-            .eq("id", cid)
-            .limit(1)
-            .execute()
+        clinic_resp = supabase_execute(
+            lambda: (
+                supabase.table("clinics")
+                .select("name, address, phone")
+                .eq("id", cid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(clinic_resp)
     except HTTPException:
@@ -2348,12 +2401,14 @@ def generate_superbill(
     clinician_id = str(claim.get("clinician_id") or "").strip()
     if clinician_id:
         try:
-            clin_resp = (
-                supabase.table("clinicians")
-                .select("first_name, last_name, title")
-                .eq("id", clinician_id)
-                .limit(1)
-                .execute()
+            clin_resp = supabase_execute(
+                lambda: (
+                    supabase.table("clinicians")
+                    .select("first_name, last_name, title")
+                    .eq("id", clinician_id)
+                    .limit(1)
+                    .execute()
+                )
             )
             _handle_supabase_error(clin_resp)
             clin_rows = clin_resp.data or []
@@ -2369,11 +2424,13 @@ def generate_superbill(
 
     cpt_descriptions: dict[str, str] = {}
     try:
-        cpt_resp = (
-            supabase.table("cpt_codes")
-            .select("code, description")
-            .in_("code", cpt_codes)
-            .execute()
+        cpt_resp = supabase_execute(
+            lambda: (
+                supabase.table("cpt_codes")
+                .select("code, description")
+                .in_("code", cpt_codes)
+                .execute()
+            )
         )
         _handle_supabase_error(cpt_resp)
         for row in cpt_resp.data or []:
@@ -2386,13 +2443,15 @@ def generate_superbill(
 
     fee_by_code: dict[str, float] = {}
     try:
-        fee_resp = (
-            supabase.table("clinic_fee_schedules")
-            .select("cpt_code, charge")
-            .eq("clinic_id", cid)
-            .in_("cpt_code", cpt_codes)
-            .eq("is_active", True)
-            .execute()
+        fee_resp = supabase_execute(
+            lambda: (
+                supabase.table("clinic_fee_schedules")
+                .select("cpt_code, charge")
+                .eq("clinic_id", cid)
+                .in_("cpt_code", cpt_codes)
+                .eq("is_active", True)
+                .execute()
+            )
         )
         _handle_supabase_error(fee_resp)
         for row in fee_resp.data or []:
@@ -2467,16 +2526,18 @@ def generate_patient_statement(
         raise HTTPException(status_code=400, detail="Invalid delivery option")
 
     try:
-        claims_resp = (
-            supabase.table("insurance_claims")
-            .select(
-                "id, first_treatment_date, payer_name, cpt_codes, "
-                "total_amount, status"
+        claims_resp = supabase_execute(
+            lambda: (
+                supabase.table("insurance_claims")
+                .select(
+                    "id, first_treatment_date, payer_name, cpt_codes, "
+                    "total_amount, status"
+                )
+                .eq("clinic_id", cid)
+                .eq("patient_id", pid)
+                .order("first_treatment_date")
+                .execute()
             )
-            .eq("clinic_id", cid)
-            .eq("patient_id", pid)
-            .order("first_treatment_date")
-            .execute()
         )
         _handle_supabase_error(claims_resp)
     except HTTPException:
@@ -2492,15 +2553,17 @@ def generate_patient_statement(
     claims = [r for r in (claims_resp.data or []) if isinstance(r, dict)]
 
     try:
-        patient_resp = (
-            supabase.table("patients")
-            .select(
-                "id, first_name, last_name, date_of_birth, phone, "
-                "address_line1, address_line2, city, state, zip"
+        patient_resp = supabase_execute(
+            lambda: (
+                supabase.table("patients")
+                .select(
+                    "id, first_name, last_name, date_of_birth, phone, "
+                    "address_line1, address_line2, city, state, zip"
+                )
+                .eq("id", pid)
+                .limit(1)
+                .execute()
             )
-            .eq("id", pid)
-            .limit(1)
-            .execute()
         )
         _handle_supabase_error(patient_resp)
     except HTTPException:
@@ -2515,12 +2578,14 @@ def generate_patient_statement(
     patient = patient_rows[0]
 
     try:
-        clinic_resp = (
-            supabase.table("clinics")
-            .select("name, address, phone")
-            .eq("id", cid)
-            .limit(1)
-            .execute()
+        clinic_resp = supabase_execute(
+            lambda: (
+                supabase.table("clinics")
+                .select("name, address, phone")
+                .eq("id", cid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(clinic_resp)
     except HTTPException:
@@ -2701,15 +2766,17 @@ def _fetch_clinical_note_for_claim(
     appointment_id = str(claim.get("appointment_id") or "").strip()
     if appointment_id:
         try:
-            appt_note = (
-                supabase.table("clinical_notes")
-                .select(note_fields)
-                .eq("clinic_id", clinic_id)
-                .eq("patient_id", patient_id)
-                .eq("appointment_id", appointment_id)
-                .order("signed_at", desc=True)
-                .limit(1)
-                .execute()
+            appt_note = supabase_execute(
+                lambda: (
+                    supabase.table("clinical_notes")
+                    .select(note_fields)
+                    .eq("clinic_id", clinic_id)
+                    .eq("patient_id", patient_id)
+                    .eq("appointment_id", appointment_id)
+                    .order("signed_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
             )
             _handle_supabase_error(appt_note)
             rows = appt_note.data or []
@@ -2722,15 +2789,17 @@ def _fetch_clinical_note_for_claim(
             )
 
     try:
-        notes_resp = (
-            supabase.table("clinical_notes")
-            .select(note_fields)
-            .eq("clinic_id", clinic_id)
-            .eq("patient_id", patient_id)
-            .order("signed_at", desc=True)
-            .order("created_at", desc=True)
-            .limit(5)
-            .execute()
+        notes_resp = supabase_execute(
+            lambda: (
+                supabase.table("clinical_notes")
+                .select(note_fields)
+                .eq("clinic_id", clinic_id)
+                .eq("patient_id", patient_id)
+                .order("signed_at", desc=True)
+                .order("created_at", desc=True)
+                .limit(5)
+                .execute()
+            )
         )
         _handle_supabase_error(notes_resp)
         rows = notes_resp.data or []
@@ -2759,14 +2828,16 @@ def generate_resubmission_package(
         )
 
     try:
-        eob_resp = (
-            supabase.table("eob_extractions")
-            .select("*")
-            .eq("id", eob_id)
-            .eq("clinic_id", cid)
-            .eq("patient_id", pid)
-            .limit(1)
-            .execute()
+        eob_resp = supabase_execute(
+            lambda: (
+                supabase.table("eob_extractions")
+                .select("*")
+                .eq("id", eob_id)
+                .eq("clinic_id", cid)
+                .eq("patient_id", pid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(eob_resp)
     except HTTPException:
@@ -2781,18 +2852,20 @@ def generate_resubmission_package(
     eob = eob_rows[0]
 
     try:
-        claim_resp = (
-            supabase.table("insurance_claims")
-            .select(
-                "*, patients(first_name, last_name, date_of_birth, "
-                "address_line1, address_line2, city, state, zip, "
-                "insurance_group_number)"
+        claim_resp = supabase_execute(
+            lambda: (
+                supabase.table("insurance_claims")
+                .select(
+                    "*, patients(first_name, last_name, date_of_birth, "
+                    "address_line1, address_line2, city, state, zip, "
+                    "insurance_group_number)"
+                )
+                .eq("id", claim_id)
+                .eq("clinic_id", cid)
+                .eq("patient_id", pid)
+                .limit(1)
+                .execute()
             )
-            .eq("id", claim_id)
-            .eq("clinic_id", cid)
-            .eq("patient_id", pid)
-            .limit(1)
-            .execute()
         )
         _handle_supabase_error(claim_resp)
     except HTTPException:
@@ -2818,12 +2891,14 @@ def generate_resubmission_package(
         patient = _fetch_patient_for_claim(pid) or {}
 
     try:
-        clinic_resp = (
-            supabase.table("clinics")
-            .select("name, address, phone")
-            .eq("id", cid)
-            .limit(1)
-            .execute()
+        clinic_resp = supabase_execute(
+            lambda: (
+                supabase.table("clinics")
+                .select("name, address, phone")
+                .eq("id", cid)
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(clinic_resp)
     except HTTPException:
@@ -2837,12 +2912,14 @@ def generate_resubmission_package(
     clinician_id = str(claim.get("clinician_id") or "").strip()
     if clinician_id:
         try:
-            clin_resp = (
-                supabase.table("clinicians")
-                .select("first_name, last_name, title")
-                .eq("id", clinician_id)
-                .limit(1)
-                .execute()
+            clin_resp = supabase_execute(
+                lambda: (
+                    supabase.table("clinicians")
+                    .select("first_name, last_name, title")
+                    .eq("id", clinician_id)
+                    .limit(1)
+                    .execute()
+                )
             )
             _handle_supabase_error(clin_resp)
             clin_rows = clin_resp.data or []
@@ -2931,11 +3008,13 @@ def generate_resubmission_package(
 
     cpt_descriptions: dict[str, str] = {}
     try:
-        cpt_resp = (
-            supabase.table("cpt_codes")
-            .select("code, description")
-            .in_("code", cpt_codes)
-            .execute()
+        cpt_resp = supabase_execute(
+            lambda: (
+                supabase.table("cpt_codes")
+                .select("code, description")
+                .in_("code", cpt_codes)
+                .execute()
+            )
         )
         _handle_supabase_error(cpt_resp)
         for row in cpt_resp.data or []:
@@ -2948,13 +3027,15 @@ def generate_resubmission_package(
 
     fee_by_code: dict[str, float] = {}
     try:
-        fee_resp = (
-            supabase.table("clinic_fee_schedules")
-            .select("cpt_code, charge")
-            .eq("clinic_id", cid)
-            .in_("cpt_code", cpt_codes)
-            .eq("is_active", True)
-            .execute()
+        fee_resp = supabase_execute(
+            lambda: (
+                supabase.table("clinic_fee_schedules")
+                .select("cpt_code, charge")
+                .eq("clinic_id", cid)
+                .in_("cpt_code", cpt_codes)
+                .eq("is_active", True)
+                .execute()
+            )
         )
         _handle_supabase_error(fee_resp)
         for row in fee_resp.data or []:
@@ -2991,19 +3072,25 @@ def generate_resubmission_package(
     now = _now_iso()
     task_id = str(eob.get("task_id") or "").strip()
     try:
-        supabase.table("eob_extractions").update(
+        supabase_execute(
+            lambda: supabase.table("eob_extractions").update(
             {"resubmission_prepared": True}
         ).eq("id", eob_id).execute()
+        )
         if task_id:
-            supabase.table("clinic_tasks").update(
+            supabase_execute(
+                lambda: supabase.table("clinic_tasks").update(
                 {"resubmission_generated_at": now, "updated_at": now}
             ).eq("id", task_id).eq("clinic_id", cid).execute()
+            )
         else:
-            supabase.table("clinic_tasks").update(
+            supabase_execute(
+                lambda: supabase.table("clinic_tasks").update(
                 {"resubmission_generated_at": now, "updated_at": now}
             ).eq("claim_id", claim_id).eq("clinic_id", cid).eq(
                 "task_type", "eob_resubmission"
             ).in_("status", ["open", "in_progress"]).execute()
+            )
     except Exception:
         logger.exception(
             "resubmission status update failed eob_id=%s claim_id=%s",
