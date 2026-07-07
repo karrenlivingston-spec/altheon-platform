@@ -15,6 +15,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from routers.fee_schedule import ClinicUserDep
 
 router = APIRouter()
@@ -62,7 +63,9 @@ def _one(table: str, **eq_filters: Any) -> Optional[dict[str, Any]]:
     for k, v in eq_filters.items():
         q = q.eq(k, v)
     try:
-        resp = q.limit(1).execute()
+        resp = supabase_execute(
+                    lambda: q.limit(1).execute()
+                )
         _handle_supabase_error(resp)
     except HTTPException:
         raise
@@ -227,12 +230,12 @@ def _load_clinic_users_map(author_ids: list[str]) -> dict[str, dict[str, Any]]:
     if not author_ids:
         return by_id
     try:
-        resp = (
-            supabase.table("clinic_users")
-            .select("id,first_name,last_name,email")
-            .in_("id", author_ids)
-            .execute()
-        )
+        resp = supabase_execute(
+                    lambda: supabase.table("clinic_users")
+                    .select("id,first_name,last_name,email")
+                    .in_("id", author_ids)
+                    .execute()
+                )
         _handle_supabase_error(resp)
         for row in resp.data or []:
             if isinstance(row, dict) and row.get("id"):
@@ -471,17 +474,17 @@ def list_signed_clinical_notes_for_records(
 
     start_bound, end_bound = _date_range_bounds(from_ymd, to_ymd)
     try:
-        resp = (
-            supabase.table("clinical_notes")
-            .select("id, note_type, status, signed_at, created_at, author_id")
-            .eq("clinic_id", clinic.clinic_id)
-            .eq("patient_id", pid)
-            .eq("status", "signed")
-            .gte("signed_at", start_bound)
-            .lte("signed_at", end_bound)
-            .order("signed_at", desc=False)
-            .execute()
-        )
+        resp = supabase_execute(
+                    lambda: supabase.table("clinical_notes")
+                    .select("id, note_type, status, signed_at, created_at, author_id")
+                    .eq("clinic_id", clinic.clinic_id)
+                    .eq("patient_id", pid)
+                    .eq("status", "signed")
+                    .gte("signed_at", start_bound)
+                    .lte("signed_at", end_bound)
+                    .order("signed_at", desc=False)
+                    .execute()
+                )
         _handle_supabase_error(resp)
     except HTTPException:
         raise
@@ -493,12 +496,12 @@ def list_signed_clinical_notes_for_records(
     clinicians_by_id: dict[str, dict[str, Any]] = {}
     if author_ids:
         try:
-            cresp = (
-                supabase.table("clinicians")
-                .select("id,first_name,last_name")
-                .in_("id", author_ids)
-                .execute()
-            )
+            cresp = supabase_execute(
+                            lambda: supabase.table("clinicians")
+                            .select("id,first_name,last_name")
+                            .in_("id", author_ids)
+                            .execute()
+                        )
             _handle_supabase_error(cresp)
             for crow in cresp.data or []:
                 if isinstance(crow, dict) and crow.get("id"):
@@ -556,15 +559,15 @@ def export_records(
     clinic_name = str(clinic_row.get("name") or "Clinic")
 
     try:
-        resp = (
-            supabase.table("clinical_notes")
-            .select("*")
-            .eq("clinic_id", cid)
-            .eq("patient_id", pid)
-            .eq("status", "signed")
-            .in_("id", note_ids)
-            .execute()
-        )
+        resp = supabase_execute(
+                    lambda: supabase.table("clinical_notes")
+                    .select("*")
+                    .eq("clinic_id", cid)
+                    .eq("patient_id", pid)
+                    .eq("status", "signed")
+                    .in_("id", note_ids)
+                    .execute()
+                )
         _handle_supabase_error(resp)
     except HTTPException:
         raise
@@ -579,12 +582,12 @@ def export_records(
     clinicians_by_id: dict[str, dict[str, Any]] = {}
     if author_ids:
         try:
-            cresp = (
-                supabase.table("clinicians")
-                .select("id,first_name,last_name")
-                .in_("id", author_ids)
-                .execute()
-            )
+            cresp = supabase_execute(
+                            lambda: supabase.table("clinicians")
+                            .select("id,first_name,last_name")
+                            .in_("id", author_ids)
+                            .execute()
+                        )
             _handle_supabase_error(cresp)
             for crow in cresp.data or []:
                 if isinstance(crow, dict) and crow.get("id"):
@@ -637,19 +640,19 @@ def export_records(
         email_sent = False
 
     try:
-        log_resp = (
-            supabase.table("record_exports")
-            .insert(
-                {
-                    "clinic_id": cid,
-                    "patient_id": pid,
-                    "note_ids": note_ids,
-                    "recipient_email": email,
-                    "exported_by": user_id,
-                }
-            )
-            .execute()
-        )
+        log_resp = supabase_execute(
+                    lambda: supabase.table("record_exports")
+                    .insert(
+                        {
+                            "clinic_id": cid,
+                            "patient_id": pid,
+                            "note_ids": note_ids,
+                            "recipient_email": email,
+                            "exported_by": user_id,
+                        }
+                    )
+                    .execute()
+                )
         _handle_supabase_error(log_resp)
     except Exception:
         pass
@@ -721,14 +724,14 @@ def get_records_stats(clinic_id: str = Query(..., min_length=1)):
         prev_start = _prev_month_start(today)
         prev_end = month_start - timedelta(days=1)
 
-        exports_resp = (
-            supabase.table("record_exports")
-            .select(
-                "id, exported_at, recipient_email, legal_request_id, status"
-            )
-            .eq("clinic_id", cid)
-            .execute()
-        )
+        exports_resp = supabase_execute(
+                    lambda: supabase.table("record_exports")
+                    .select(
+                        "id, exported_at, recipient_email, legal_request_id, status"
+                    )
+                    .eq("clinic_id", cid)
+                    .execute()
+                )
         _handle_supabase_error(exports_resp)
         exports = [r for r in (exports_resp.data or []) if isinstance(r, dict)]
 
@@ -754,12 +757,12 @@ def get_records_stats(clinic_id: str = Query(..., min_length=1)):
                 if has_recipient:
                     shared_last_month += 1
 
-        legal_resp = (
-            supabase.table("legal_requests")
-            .select("id, status, records_due_date, due_date, request_date")
-            .eq("clinic_id", cid)
-            .execute()
-        )
+        legal_resp = supabase_execute(
+                    lambda: supabase.table("legal_requests")
+                    .select("id, status, records_due_date, due_date, request_date")
+                    .eq("clinic_id", cid)
+                    .execute()
+                )
         _handle_supabase_error(legal_resp)
         legal_rows = [r for r in (legal_resp.data or []) if isinstance(r, dict)]
 
@@ -821,16 +824,16 @@ def get_records_recent_exports(
     cid = clinic_id.strip()
     offset = (page - 1) * limit
     try:
-        resp = (
-            supabase.table("record_exports")
-            .select(
-                "*, patients(first_name, last_name, pt_id)"
-            )
-            .eq("clinic_id", cid)
-            .order("exported_at", desc=True)
-            .range(offset, offset + limit - 1)
-            .execute()
-        )
+        resp = supabase_execute(
+                    lambda: supabase.table("record_exports")
+                    .select(
+                        "*, patients(first_name, last_name, pt_id)"
+                    )
+                    .eq("clinic_id", cid)
+                    .order("exported_at", desc=True)
+                    .range(offset, offset + limit - 1)
+                    .execute()
+                )
         _handle_supabase_error(resp)
         rows = [r for r in (resp.data or []) if isinstance(r, dict)]
         exporter_ids = list(
@@ -851,19 +854,19 @@ def get_records_attorney_requests(
     cid = clinic_id.strip()
     today = datetime.now(_CLINIC_TZ).date()
     try:
-        resp = (
-            supabase.table("legal_requests")
-            .select(
-                "id, patient_name, firm_name, request_date, records_due_date, "
-                "due_date, status, patients(first_name, last_name)"
-            )
-            .eq("clinic_id", cid)
-            .neq("status", "archived")
-            .neq("status", "delivered")
-            .order("request_date", desc=False)
-            .limit(100)
-            .execute()
-        )
+        resp = supabase_execute(
+                    lambda: supabase.table("legal_requests")
+                    .select(
+                        "id, patient_name, firm_name, request_date, records_due_date, "
+                        "due_date, status, patients(first_name, last_name)"
+                    )
+                    .eq("clinic_id", cid)
+                    .neq("status", "archived")
+                    .neq("status", "delivered")
+                    .order("request_date", desc=False)
+                    .limit(100)
+                    .execute()
+                )
         _handle_supabase_error(resp)
         rows = [r for r in (resp.data or []) if isinstance(r, dict)]
 
@@ -911,13 +914,13 @@ def get_records_type_breakdown(clinic_id: str = Query(..., min_length=1)):
         start_local = datetime.combine(month_start, time(0, 0), tzinfo=_CLINIC_TZ)
         start_utc = start_local.astimezone(timezone.utc)
 
-        resp = (
-            supabase.table("record_exports")
-            .select("record_types, exported_at, note_ids")
-            .eq("clinic_id", cid)
-            .gte("exported_at", start_utc.isoformat())
-            .execute()
-        )
+        resp = supabase_execute(
+                    lambda: supabase.table("record_exports")
+                    .select("record_types, exported_at, note_ids")
+                    .eq("clinic_id", cid)
+                    .gte("exported_at", start_utc.isoformat())
+                    .execute()
+                )
         _handle_supabase_error(resp)
         rows = [r for r in (resp.data or []) if isinstance(r, dict)]
 
@@ -986,16 +989,16 @@ def generate_records_packet(
     if note_type_filter:
         start_bound, end_bound = _date_range_bounds(from_ymd, to_ymd)
         try:
-            nresp = (
-                supabase.table("clinical_notes")
-                .select("id, note_type")
-                .eq("clinic_id", cid)
-                .eq("patient_id", pid)
-                .eq("status", "signed")
-                .gte("signed_at", start_bound)
-                .lte("signed_at", end_bound)
-                .execute()
-            )
+            nresp = supabase_execute(
+                            lambda: supabase.table("clinical_notes")
+                            .select("id, note_type")
+                            .eq("clinic_id", cid)
+                            .eq("patient_id", pid)
+                            .eq("status", "signed")
+                            .gte("signed_at", start_bound)
+                            .lte("signed_at", end_bound)
+                            .execute()
+                        )
             _handle_supabase_error(nresp)
             for n in nresp.data or []:
                 if not isinstance(n, dict):
@@ -1010,13 +1013,13 @@ def generate_records_packet(
 
     if "billing" in record_types:
         try:
-            bresp = (
-                supabase.table("billing_records")
-                .select("id, service_date")
-                .eq("clinic_id", cid)
-                .eq("patient_id", pid)
-                .execute()
-            )
+            bresp = supabase_execute(
+                            lambda: supabase.table("billing_records")
+                            .select("id, service_date")
+                            .eq("clinic_id", cid)
+                            .eq("patient_id", pid)
+                            .execute()
+                        )
             _handle_supabase_error(bresp)
             for b in bresp.data or []:
                 if not isinstance(b, dict) or not b.get("id"):
@@ -1048,7 +1051,9 @@ def generate_records_packet(
     }
 
     try:
-        ins = supabase.table("record_exports").insert(payload).execute()
+        ins = supabase_execute(
+                    lambda: supabase.table("record_exports").insert(payload).execute()
+                )
         _handle_supabase_error(ins)
         rows = ins.data or []
         if not rows:

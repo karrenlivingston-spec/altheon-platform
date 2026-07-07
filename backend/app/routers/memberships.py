@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -81,13 +82,13 @@ class LogVisitRequest(BaseModel):
 @router.get("/membership-tiers")
 def list_membership_tiers(clinic_id: str = Query(...)):
     try:
-        resp = (
-            supabase.table("membership_tiers")
-            .select("*, membership_tier_services(treatment_type_id)")
-            .eq("clinic_id", clinic_id)
-            .order("name")
-            .execute()
-        )
+        resp = supabase_execute(
+                    lambda: supabase.table("membership_tiers")
+                    .select("*, membership_tier_services(treatment_type_id)")
+                    .eq("clinic_id", clinic_id)
+                    .order("name")
+                    .execute()
+                )
         _handle_supabase_error(resp)
     except HTTPException:
         raise
@@ -110,7 +111,9 @@ def create_membership_tier(body: TierCreate):
         "is_active": body.is_active,
     }
     try:
-        ins = supabase.table("membership_tiers").insert(row).execute()
+        ins = supabase_execute(
+                    lambda: supabase.table("membership_tiers").insert(row).execute()
+                )
         _handle_supabase_error(ins)
     except HTTPException:
         raise
@@ -128,7 +131,9 @@ def create_membership_tier(body: TierCreate):
             {"tier_id": tier_id, "treatment_type_id": tid} for tid in body.treatment_type_ids
         ]
         try:
-            link_ins = supabase.table("membership_tier_services").insert(links).execute()
+            link_ins = supabase_execute(
+                            lambda: supabase.table("membership_tier_services").insert(links).execute()
+                        )
             _handle_supabase_error(link_ins)
         except HTTPException:
             raise
@@ -137,13 +142,13 @@ def create_membership_tier(body: TierCreate):
             raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     try:
-        out = (
-            supabase.table("membership_tiers")
-            .select("*, membership_tier_services(treatment_type_id)")
-            .eq("id", tier_id)
-            .limit(1)
-            .execute()
-        )
+        out = supabase_execute(
+                    lambda: supabase.table("membership_tiers")
+                    .select("*, membership_tier_services(treatment_type_id)")
+                    .eq("id", tier_id)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(out)
     except HTTPException:
         raise
@@ -169,30 +174,34 @@ def update_membership_tier(tier_id: str, body: TierUpdate):
 
     try:
         if data:
-            upd = supabase.table("membership_tiers").update(data).eq("id", tier_id).execute()
+            upd = supabase_execute(
+                            lambda: supabase.table("membership_tiers").update(data).eq("id", tier_id).execute()
+                        )
             _handle_supabase_error(upd)
             if not (upd.data or []):
                 raise HTTPException(status_code=404, detail="Tier not found")
 
         if replace_services is not None:
-            delete_resp = (
-                supabase.table("membership_tier_services").delete().eq("tier_id", tier_id).execute()
-            )
+            delete_resp = supabase_execute(
+                            lambda: supabase.table("membership_tier_services").delete().eq("tier_id", tier_id).execute()
+                        )
             _handle_supabase_error(delete_resp)
             if replace_services:
                 links = [
                     {"tier_id": tier_id, "treatment_type_id": tid} for tid in replace_services
                 ]
-                link_ins = supabase.table("membership_tier_services").insert(links).execute()
+                link_ins = supabase_execute(
+                                    lambda: supabase.table("membership_tier_services").insert(links).execute()
+                                )
                 _handle_supabase_error(link_ins)
 
-        out = (
-            supabase.table("membership_tiers")
-            .select("*, membership_tier_services(treatment_type_id)")
-            .eq("id", tier_id)
-            .limit(1)
-            .execute()
-        )
+        out = supabase_execute(
+                    lambda: supabase.table("membership_tiers")
+                    .select("*, membership_tier_services(treatment_type_id)")
+                    .eq("id", tier_id)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(out)
     except HTTPException:
         raise
@@ -218,7 +227,9 @@ def list_memberships(clinic_id: str, patient_id: Optional[str] = None):
         )
         if patient_id:
             q = q.eq("patient_id", patient_id)
-        resp = q.order("created_at", desc=True).execute()
+        resp = supabase_execute(
+                    lambda: q.order("created_at", desc=True).execute()
+                )
         _handle_supabase_error(resp)
     except HTTPException:
         raise
@@ -235,15 +246,15 @@ def list_memberships(clinic_id: str, patient_id: Optional[str] = None):
 @router.post("/patient-memberships")
 def create_patient_membership(body: EnrollmentCreate):
     try:
-        existing = (
-            supabase.table("patient_memberships")
-            .select("id")
-            .eq("patient_id", body.patient_id)
-            .eq("clinic_id", body.clinic_id)
-            .eq("status", "active")
-            .limit(1)
-            .execute()
-        )
+        existing = supabase_execute(
+                    lambda: supabase.table("patient_memberships")
+                    .select("id")
+                    .eq("patient_id", body.patient_id)
+                    .eq("clinic_id", body.clinic_id)
+                    .eq("status", "active")
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(existing)
     except HTTPException:
         raise
@@ -258,14 +269,14 @@ def create_patient_membership(body: EnrollmentCreate):
         )
 
     try:
-        tier_r = (
-            supabase.table("membership_tiers")
-            .select("*")
-            .eq("id", body.tier_id)
-            .eq("clinic_id", body.clinic_id)
-            .limit(1)
-            .execute()
-        )
+        tier_r = supabase_execute(
+                    lambda: supabase.table("membership_tiers")
+                    .select("*")
+                    .eq("id", body.tier_id)
+                    .eq("clinic_id", body.clinic_id)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(tier_r)
     except HTTPException:
         raise
@@ -305,7 +316,9 @@ def create_patient_membership(body: EnrollmentCreate):
     }
 
     try:
-        ins = supabase.table("patient_memberships").insert(insert_row).execute()
+        ins = supabase_execute(
+                    lambda: supabase.table("patient_memberships").insert(insert_row).execute()
+                )
         _handle_supabase_error(ins)
     except HTTPException:
         raise
@@ -325,12 +338,12 @@ def update_patient_membership_status(membership_id: str, body: StatusUpdate):
         raise HTTPException(status_code=400, detail="Invalid status")
 
     try:
-        result = (
-            supabase.table("patient_memberships")
-            .update({"status": body.status})
-            .eq("id", membership_id)
-            .execute()
-        )
+        result = supabase_execute(
+                    lambda: supabase.table("patient_memberships")
+                    .update({"status": body.status})
+                    .eq("id", membership_id)
+                    .execute()
+                )
         _handle_supabase_error(result)
     except HTTPException:
         raise
@@ -347,13 +360,13 @@ def update_patient_membership_status(membership_id: str, body: StatusUpdate):
 @router.patch("/patient-memberships/{membership_id}/tier")
 def change_patient_membership_tier(membership_id: str, body: TierChangeRequest):
     try:
-        mem_r = (
-            supabase.table("patient_memberships")
-            .select("*")
-            .eq("id", membership_id)
-            .limit(1)
-            .execute()
-        )
+        mem_r = supabase_execute(
+                    lambda: supabase.table("patient_memberships")
+                    .select("*")
+                    .eq("id", membership_id)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(mem_r)
     except HTTPException:
         raise
@@ -367,22 +380,22 @@ def change_patient_membership_tier(membership_id: str, body: TierChangeRequest):
     mem = mem_rows[0]
 
     try:
-        new_tier_r = (
-            supabase.table("membership_tiers")
-            .select("*")
-            .eq("id", body.new_tier_id)
-            .eq("clinic_id", mem["clinic_id"])
-            .limit(1)
-            .execute()
-        )
+        new_tier_r = supabase_execute(
+                    lambda: supabase.table("membership_tiers")
+                    .select("*")
+                    .eq("id", body.new_tier_id)
+                    .eq("clinic_id", mem["clinic_id"])
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(new_tier_r)
-        cur_tier_r = (
-            supabase.table("membership_tiers")
-            .select("price_cents, visits_included")
-            .eq("id", mem["tier_id"])
-            .limit(1)
-            .execute()
-        )
+        cur_tier_r = supabase_execute(
+                    lambda: supabase.table("membership_tiers")
+                    .select("price_cents, visits_included")
+                    .eq("id", mem["tier_id"])
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(cur_tier_r)
     except HTTPException:
         raise
@@ -409,26 +422,26 @@ def change_patient_membership_tier(membership_id: str, body: TierChangeRequest):
                     status_code=403,
                     detail="Downgrade requires at least 3 completed billing cycles",
                 )
-            result = (
-                supabase.table("patient_memberships")
-                .update({"pending_tier_change_id": body.new_tier_id})
-                .eq("id", membership_id)
-                .execute()
-            )
+            result = supabase_execute(
+                            lambda: supabase.table("patient_memberships")
+                            .update({"pending_tier_change_id": body.new_tier_id})
+                            .eq("id", membership_id)
+                            .execute()
+                        )
         else:
-            result = (
-                supabase.table("patient_memberships")
-                .update(
-                    {
-                        "tier_id": body.new_tier_id,
-                        "pending_tier_change_id": None,
-                        "visits_used": 0,
-                        "visits_remaining": new_tier["visits_included"],
-                    }
-                )
-                .eq("id", membership_id)
-                .execute()
-            )
+            result = supabase_execute(
+                            lambda: supabase.table("patient_memberships")
+                            .update(
+                                {
+                                    "tier_id": body.new_tier_id,
+                                    "pending_tier_change_id": None,
+                                    "visits_used": 0,
+                                    "visits_remaining": new_tier["visits_included"],
+                                }
+                            )
+                            .eq("id", membership_id)
+                            .execute()
+                        )
         _handle_supabase_error(result)
     except HTTPException:
         raise
@@ -445,13 +458,13 @@ def change_patient_membership_tier(membership_id: str, body: TierChangeRequest):
 @router.post("/membership-visits")
 def log_membership_visit(body: LogVisitRequest):
     try:
-        mem_r = (
-            supabase.table("patient_memberships")
-            .select("id, visits_remaining, visits_used")
-            .eq("id", body.membership_id)
-            .limit(1)
-            .execute()
-        )
+        mem_r = supabase_execute(
+                    lambda: supabase.table("patient_memberships")
+                    .select("id, visits_remaining, visits_used")
+                    .eq("id", body.membership_id)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(mem_r)
     except HTTPException:
         raise
@@ -476,7 +489,9 @@ def log_membership_visit(body: LogVisitRequest):
         log_row["notes"] = body.notes
 
     try:
-        ins = supabase.table("membership_visit_log").insert(log_row).execute()
+        ins = supabase_execute(
+                    lambda: supabase.table("membership_visit_log").insert(log_row).execute()
+                )
         _handle_supabase_error(ins)
     except HTTPException:
         raise
@@ -488,12 +503,12 @@ def log_membership_visit(body: LogVisitRequest):
     new_rem = int(mem["visits_remaining"]) - 1
 
     try:
-        upd = (
-            supabase.table("patient_memberships")
-            .update({"visits_used": new_used, "visits_remaining": new_rem})
-            .eq("id", body.membership_id)
-            .execute()
-        )
+        upd = supabase_execute(
+                    lambda: supabase.table("patient_memberships")
+                    .update({"visits_used": new_used, "visits_remaining": new_rem})
+                    .eq("id", body.membership_id)
+                    .execute()
+                )
         _handle_supabase_error(upd)
     except HTTPException:
         raise

@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 
@@ -59,13 +60,13 @@ def _safe_float(value: Any) -> Optional[float]:
 
 
 def _fetch_cases_with_patients(clinic_id: str) -> list[dict[str, Any]]:
-    resp = (
-        supabase.table("pi_cases")
-        .select("*, patients(first_name, last_name, phone)")
-        .eq("clinic_id", clinic_id)
-        .order("updated_at", desc=True)
-        .execute()
-    )
+    resp = supabase_execute(
+            lambda: supabase.table("pi_cases")
+            .select("*, patients(first_name, last_name, phone)")
+            .eq("clinic_id", clinic_id)
+            .order("updated_at", desc=True)
+            .execute()
+        )
     _handle_supabase_error(resp)
     return [r for r in (resp.data or []) if isinstance(r, dict)]
 
@@ -238,14 +239,14 @@ def create_pi_case(body: CreatePiCaseBody):
         raise HTTPException(status_code=400, detail="insurance_carrier is required")
 
     try:
-        dup = (
-            supabase.table("pi_cases")
-            .select("id")
-            .eq("patient_id", patient_id)
-            .eq("clinic_id", clinic_id)
-            .limit(1)
-            .execute()
-        )
+        dup = supabase_execute(
+                    lambda: supabase.table("pi_cases")
+                    .select("id")
+                    .eq("patient_id", patient_id)
+                    .eq("clinic_id", clinic_id)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(dup)
     except HTTPException:
         raise
@@ -281,7 +282,9 @@ def create_pi_case(body: CreatePiCaseBody):
         row["estimated_settlement"] = body.estimated_settlement
 
     try:
-        ins = supabase.table("pi_cases").insert(row).execute()
+        ins = supabase_execute(
+                    lambda: supabase.table("pi_cases").insert(row).execute()
+                )
         _handle_supabase_error(ins)
     except HTTPException:
         raise
@@ -301,14 +304,14 @@ def get_patient_pi_case(patient_id: str):
         raise HTTPException(status_code=400, detail="Invalid patient_id")
 
     try:
-        resp = (
-            supabase.table("pi_cases")
-            .select("*")
-            .eq("patient_id", pid)
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
+        resp = supabase_execute(
+                    lambda: supabase.table("pi_cases")
+                    .select("*")
+                    .eq("patient_id", pid)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(resp)
     except HTTPException:
         raise
@@ -325,13 +328,13 @@ def get_patient_pi_case(patient_id: str):
         raise HTTPException(status_code=500, detail="Invalid case record")
 
     try:
-        rresp = (
-            supabase.table("pi_referrals")
-            .select("*")
-            .eq("pi_case_id", case_id)
-            .order("created_at", desc=False)
-            .execute()
-        )
+        rresp = supabase_execute(
+                    lambda: supabase.table("pi_referrals")
+                    .select("*")
+                    .eq("pi_case_id", case_id)
+                    .order("created_at", desc=False)
+                    .execute()
+                )
         _handle_supabase_error(rresp)
     except HTTPException:
         raise
@@ -378,7 +381,9 @@ def patch_pi_case_api(case_id: str, body: PatchPiCaseBody):
     data["updated_at"] = _now_iso()
 
     try:
-        upd = supabase.table("pi_cases").update(data).eq("id", case_id).execute()
+        upd = supabase_execute(
+                    lambda: supabase.table("pi_cases").update(data).eq("id", case_id).execute()
+                )
         _handle_supabase_error(upd)
     except HTTPException:
         raise
@@ -394,13 +399,13 @@ def patch_pi_case_api(case_id: str, body: PatchPiCaseBody):
 @router.post("/pi-cases/{case_id}/referrals")
 def create_referral(case_id: str, body: CreateReferralBody):
     try:
-        cresp = (
-            supabase.table("pi_cases")
-            .select("id, patient_id, clinic_id")
-            .eq("id", case_id)
-            .limit(1)
-            .execute()
-        )
+        cresp = supabase_execute(
+                    lambda: supabase.table("pi_cases")
+                    .select("id, patient_id, clinic_id")
+                    .eq("id", case_id)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(cresp)
     except HTTPException:
         raise
@@ -435,7 +440,9 @@ def create_referral(case_id: str, body: CreateReferralBody):
         row["notes"] = body.notes
 
     try:
-        ins = supabase.table("pi_referrals").insert(row).execute()
+        ins = supabase_execute(
+                    lambda: supabase.table("pi_referrals").insert(row).execute()
+                )
         _handle_supabase_error(ins)
     except HTTPException:
         raise
@@ -475,12 +482,12 @@ def patch_referral(referral_id: str, body: PatchReferralBody):
     data["updated_at"] = _now_iso()
 
     try:
-        upd = (
-            supabase.table("pi_referrals")
-            .update(data)
-            .eq("id", referral_id)
-            .execute()
-        )
+        upd = supabase_execute(
+                    lambda: supabase.table("pi_referrals")
+                    .update(data)
+                    .eq("id", referral_id)
+                    .execute()
+                )
         _handle_supabase_error(upd)
     except HTTPException:
         raise
@@ -496,12 +503,12 @@ def patch_referral(referral_id: str, body: PatchReferralBody):
 @router.delete("/pi-referrals/{referral_id}", status_code=204)
 def delete_referral(referral_id: str):
     try:
-        dele = (
-            supabase.table("pi_referrals")
-            .delete()
-            .eq("id", referral_id)
-            .execute()
-        )
+        dele = supabase_execute(
+                    lambda: supabase.table("pi_referrals")
+                    .delete()
+                    .eq("id", referral_id)
+                    .execute()
+                )
         _handle_supabase_error(dele)
     except HTTPException:
         raise
@@ -513,12 +520,12 @@ def delete_referral(referral_id: str):
 @router.get("/clinics/{clinic_id}/pi-alerts")
 def list_pi_alerts(clinic_id: str):
     try:
-        cases_resp = (
-            supabase.table("pi_cases")
-            .select("*")
-            .eq("clinic_id", clinic_id)
-            .execute()
-        )
+        cases_resp = supabase_execute(
+                    lambda: supabase.table("pi_cases")
+                    .select("*")
+                    .eq("clinic_id", clinic_id)
+                    .execute()
+                )
         _handle_supabase_error(cases_resp)
     except HTTPException:
         raise
@@ -537,12 +544,12 @@ def list_pi_alerts(clinic_id: str):
     refs_by_case: dict[str, list[dict[str, Any]]] = {cid: [] for cid in case_ids}
     try:
         if case_ids:
-            rresp = (
-                supabase.table("pi_referrals")
-                .select("*")
-                .eq("clinic_id", clinic_id)
-                .execute()
-            )
+            rresp = supabase_execute(
+                            lambda: supabase.table("pi_referrals")
+                            .select("*")
+                            .eq("clinic_id", clinic_id)
+                            .execute()
+                        )
             _handle_supabase_error(rresp)
             for r in rresp.data or []:
                 if not isinstance(r, dict):
@@ -558,12 +565,12 @@ def list_pi_alerts(clinic_id: str):
     patients_by_id: dict[str, dict[str, Any]] = {}
     try:
         if patient_ids:
-            presp = (
-                supabase.table("patients")
-                .select("id, first_name, last_name")
-                .in_("id", patient_ids)
-                .execute()
-            )
+            presp = supabase_execute(
+                            lambda: supabase.table("patients")
+                            .select("id, first_name, last_name")
+                            .in_("id", patient_ids)
+                            .execute()
+                        )
             _handle_supabase_error(presp)
             for pr in presp.data or []:
                 if isinstance(pr, dict) and pr.get("id"):
@@ -772,7 +779,9 @@ def list_pi_cases_api(
         )
         if patient_id and patient_id.strip():
             q = q.eq("patient_id", patient_id.strip())
-        resp = q.execute()
+        resp = supabase_execute(
+                    lambda: q.execute()
+                )
         _handle_supabase_error(resp)
         rows = [_shape_board_case(r, today) for r in (resp.data or [])]
         if search and search.strip():

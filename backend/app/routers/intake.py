@@ -50,6 +50,7 @@ from pydantic import BaseModel, Field, model_validator
 from zoneinfo import ZoneInfo
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.services.system_tasks import (
     TASK_INCOMPLETE_INTAKE,
     ensure_incomplete_intake_task,
@@ -165,25 +166,25 @@ def _maybe_send_questionnaire_sms_after_intake(
         if not questionnaire_type:
             return
 
-        existing = (
-            supabase.table("questionnaire_tokens")
-            .select("id")
-            .eq("appointment_id", appointment_id.strip())
-            .eq("questionnaire_type", questionnaire_type.strip())
-            .eq("used", False)
-            .limit(1)
-            .execute()
-        )
+        existing = supabase_execute(
+                    lambda: supabase.table("questionnaire_tokens")
+                    .select("id")
+                    .eq("appointment_id", appointment_id.strip())
+                    .eq("questionnaire_type", questionnaire_type.strip())
+                    .eq("used", False)
+                    .limit(1)
+                    .execute()
+                )
         if existing.data:
             return
 
-        pt_resp = (
-            supabase.table("patients")
-            .select("first_name, phone")
-            .eq("id", patient_id.strip())
-            .limit(1)
-            .execute()
-        )
+        pt_resp = supabase_execute(
+                    lambda: supabase.table("patients")
+                    .select("first_name, phone")
+                    .eq("id", patient_id.strip())
+                    .limit(1)
+                    .execute()
+                )
         pt_rows = pt_resp.data or []
         if not pt_rows:
             return
@@ -196,20 +197,20 @@ def _maybe_send_questionnaire_sms_after_intake(
         _clinic_name = _fetch_clinic_display_name(clinic_id)
 
         token = secrets.token_hex(32)
-        ins = (
-            supabase.table("questionnaire_tokens")
-            .insert(
-                {
-                    "token": token,
-                    "patient_id": patient_id.strip(),
-                    "appointment_id": appointment_id.strip(),
-                    "clinic_id": clinic_id.strip(),
-                    "questionnaire_type": questionnaire_type,
-                    "used": False,
-                }
-            )
-            .execute()
-        )
+        ins = supabase_execute(
+                    lambda: supabase.table("questionnaire_tokens")
+                    .insert(
+                        {
+                            "token": token,
+                            "patient_id": patient_id.strip(),
+                            "appointment_id": appointment_id.strip(),
+                            "clinic_id": clinic_id.strip(),
+                            "questionnaire_type": questionnaire_type,
+                            "used": False,
+                        }
+                    )
+                    .execute()
+                )
         if getattr(ins, "error", None):
             return
 
@@ -329,13 +330,13 @@ def _fetch_clinic_display_name(clinic_id: str) -> str:
     if not cid:
         return ""
     try:
-        resp = (
-            supabase.table("clinics")
-            .select("name, brand_name")
-            .eq("id", cid)
-            .limit(1)
-            .execute()
-        )
+        resp = supabase_execute(
+                    lambda: supabase.table("clinics")
+                    .select("name, brand_name")
+                    .eq("id", cid)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(resp)
         rows = resp.data or []
         if not rows:
@@ -367,13 +368,13 @@ def _get_intake_token_for_appointment(appointment_id: str) -> Optional[dict[str,
     if not aid:
         return None
     try:
-        q = (
-            supabase.table("intake_tokens")
-            .select("id, token, used, expires_at")
-            .eq("appointment_id", aid)
-            .limit(1)
-            .execute()
-        )
+        q = supabase_execute(
+                    lambda: supabase.table("intake_tokens")
+                    .select("id, token, used, expires_at")
+                    .eq("appointment_id", aid)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(q)
         rows = q.data or []
         return rows[0] if rows and isinstance(rows[0], dict) else None
@@ -390,13 +391,13 @@ def _fetch_clinic_timezone(clinic_id: str, cache: dict[str, str]) -> str:
         return cache[cid]
     tz_raw = ""
     try:
-        resp = (
-            supabase.table("clinic_settings")
-            .select("timezone")
-            .eq("clinic_id", cid)
-            .limit(1)
-            .execute()
-        )
+        resp = supabase_execute(
+                    lambda: supabase.table("clinic_settings")
+                    .select("timezone")
+                    .eq("clinic_id", cid)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(resp)
         rows = resp.data or []
         if rows and isinstance(rows[0], dict):
@@ -433,13 +434,13 @@ def _appointments_in_hours_window(hours_lo: float, hours_hi: float) -> list[dict
     start_utc = now + timedelta(hours=hours_lo)
     end_utc = now + timedelta(hours=hours_hi)
     try:
-        apq = (
-            supabase.table("appointments")
-            .select("id, patient_id, clinic_id, start_time, status")
-            .gte("start_time", start_utc.isoformat())
-            .lt("start_time", end_utc.isoformat())
-            .execute()
-        )
+        apq = supabase_execute(
+                    lambda: supabase.table("appointments")
+                    .select("id, patient_id, clinic_id, start_time, status")
+                    .gte("start_time", start_utc.isoformat())
+                    .lt("start_time", end_utc.isoformat())
+                    .execute()
+                )
         _handle_supabase_error(apq)
         return [r for r in (apq.data or []) if isinstance(r, dict)]
     except Exception:
@@ -454,14 +455,14 @@ def _intake_sms_sent(appointment_id: str, message_type: str) -> bool:
     if not aid:
         return False
     try:
-        resp = (
-            supabase.table("sms_logs")
-            .select("id")
-            .eq("appointment_id", aid)
-            .eq("message_type", message_type)
-            .limit(1)
-            .execute()
-        )
+        resp = supabase_execute(
+                    lambda: supabase.table("sms_logs")
+                    .select("id")
+                    .eq("appointment_id", aid)
+                    .eq("message_type", message_type)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(resp)
         return bool(resp.data)
     except Exception:
@@ -493,20 +494,20 @@ def _ensure_intake_token(
     token = secrets.token_urlsafe(32)
     start_dt = _parse_start_dt(start_time)
     expires_dt = _token_expires_at_utc(start_dt, clinic_tz)
-    ins = (
-        supabase.table("intake_tokens")
-        .insert(
-            {
-                "patient_id": patient_id,
-                "appointment_id": appointment_id,
-                "clinic_id": clinic_id,
-                "token": token,
-                "expires_at": expires_dt.isoformat(),
-                "used": False,
-            }
+    ins = supabase_execute(
+            lambda: supabase.table("intake_tokens")
+            .insert(
+                {
+                    "patient_id": patient_id,
+                    "appointment_id": appointment_id,
+                    "clinic_id": clinic_id,
+                    "token": token,
+                    "expires_at": expires_dt.isoformat(),
+                    "used": False,
+                }
+            )
+            .execute()
         )
-        .execute()
-    )
     _handle_supabase_error(ins)
     if not ins.data:
         return None
@@ -524,16 +525,16 @@ def _patient_has_prior_completed_appointment(
     if not pid or not cid or not aid:
         return False
     try:
-        resp = (
-            supabase.table("appointments")
-            .select("id")
-            .eq("patient_id", pid)
-            .eq("clinic_id", cid)
-            .eq("status", "completed")
-            .neq("id", aid)
-            .limit(1)
-            .execute()
-        )
+        resp = supabase_execute(
+                    lambda: supabase.table("appointments")
+                    .select("id")
+                    .eq("patient_id", pid)
+                    .eq("clinic_id", cid)
+                    .eq("status", "completed")
+                    .neq("id", aid)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(resp)
         return bool(resp.data)
     except Exception:
@@ -625,7 +626,9 @@ def submit_intake(
         return JSONResponse(status_code=404, content={"error": "Patient not found"})
 
     try:
-        patients_resp = supabase.table("patients").select("id, phone").execute()
+        patients_resp = supabase_execute(
+                    lambda: supabase.table("patients").select("id, phone").execute()
+                )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -646,16 +649,16 @@ def submit_intake(
 
     now_iso = datetime.now(timezone.utc).isoformat()
     try:
-        appt_resp = (
-            supabase.table("appointments")
-            .select("id, patient_id, clinic_id, start_time")
-            .eq("patient_id", patient_id)
-            .in_("status", ["scheduled", "confirmed"])
-            .gte("start_time", now_iso)
-            .order("start_time", desc=False)
-            .limit(1)
-            .execute()
-        )
+        appt_resp = supabase_execute(
+                    lambda: supabase.table("appointments")
+                    .select("id, patient_id, clinic_id, start_time")
+                    .eq("patient_id", patient_id)
+                    .in_("status", ["scheduled", "confirmed"])
+                    .gte("start_time", now_iso)
+                    .order("start_time", desc=False)
+                    .limit(1)
+                    .execute()
+                )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -699,7 +702,9 @@ def submit_intake(
         "completed_at": now_iso,
     }
 
-    ins = supabase.table("intake_forms").insert(insert_row).execute()
+    ins = supabase_execute(
+            lambda: supabase.table("intake_forms").insert(insert_row).execute()
+        )
     data = getattr(ins, "data", None) or []
     if not data:
         err = getattr(ins, "error", None)
@@ -711,7 +716,9 @@ def submit_intake(
     try:
         demo_updates = _patient_demographic_updates(body)
         if demo_updates:
-            supabase.table("patients").update(demo_updates).eq("id", patient_id).execute()
+            supabase_execute(
+                            lambda: supabase.table("patients").update(demo_updates).eq("id", patient_id).execute()
+                        )
     except Exception as exc:
         print(
             f"POST /intake: could not update patient {patient_id} demographics: {exc}",
@@ -719,9 +726,11 @@ def submit_intake(
         )
 
     try:
-        supabase.table("appointments").update({"status": "checked_in"}).eq(
-            "id", appointment_id
-        ).execute()
+        supabase_execute(
+                    lambda: supabase.table("appointments").update({"status": "checked_in"}).eq(
+                    "id", appointment_id
+                ).execute()
+                )
     except Exception as exc:
         print(
             f"POST /intake: could not set appointment {appointment_id} to checked_in: {exc}",
@@ -745,17 +754,17 @@ def list_intakes_for_patient(
     _resolve_bearer_user_id(authorization)
 
     try:
-        resp = (
-            supabase.table("intake_forms")
-            .select(
-                "id,appointment_id,patient_id,chief_complaint,pain_scale,"
-                "symptom_duration,aggravating_factors,relieving_factors,"
-                "medical_history_flags,allergies,other_conditions,goals,created_at"
-            )
-            .eq("patient_id", patient_id)
-            .order("created_at", desc=True)
-            .execute()
-        )
+        resp = supabase_execute(
+                    lambda: supabase.table("intake_forms")
+                    .select(
+                        "id,appointment_id,patient_id,chief_complaint,pain_scale,"
+                        "symptom_duration,aggravating_factors,relieving_factors,"
+                        "medical_history_flags,allergies,other_conditions,goals,created_at"
+                    )
+                    .eq("patient_id", patient_id)
+                    .order("created_at", desc=True)
+                    .execute()
+                )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
@@ -816,13 +825,13 @@ def send_intake_reminders():
                 errors += 1
                 continue
 
-            pt_resp = (
-                supabase.table("patients")
-                .select("phone, preferred_language")
-                .eq("id", patient_id)
-                .limit(1)
-                .execute()
-            )
+            pt_resp = supabase_execute(
+                            lambda: supabase.table("patients")
+                            .select("phone, preferred_language")
+                            .eq("id", patient_id)
+                            .limit(1)
+                            .execute()
+                        )
             _handle_supabase_error(pt_resp)
             prow = (pt_resp.data or [None])[0]
             if not isinstance(prow, dict) or not prow.get("phone"):
@@ -872,15 +881,15 @@ def _inspect_intake_token(token: str) -> tuple[str, Optional[dict]]:
     t = (token or "").strip()
     if not t:
         return "not_found", None
-    resp = (
-        supabase.table("intake_tokens")
-        .select(
-            "id, patient_id, appointment_id, clinic_id, token, expires_at, used"
+    resp = supabase_execute(
+            lambda: supabase.table("intake_tokens")
+            .select(
+                "id, patient_id, appointment_id, clinic_id, token, expires_at, used"
+            )
+            .eq("token", t)
+            .limit(1)
+            .execute()
         )
-        .eq("token", t)
-        .limit(1)
-        .execute()
-    )
     _handle_supabase_error(resp)
     rows = resp.data or []
     if not rows:
@@ -915,25 +924,25 @@ def get_intake_form_prefill(token: str):
         if not pid or not aid:
             raise HTTPException(status_code=500, detail="Invalid token row")
 
-        pt = (
-            supabase.table("patients")
-            .select("first_name, last_name, phone, preferred_language")
-            .eq("id", pid)
-            .limit(1)
-            .execute()
-        )
+        pt = supabase_execute(
+                    lambda: supabase.table("patients")
+                    .select("first_name, last_name, phone, preferred_language")
+                    .eq("id", pid)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(pt)
         pt_row = (pt.data or [None])[0]
         if not isinstance(pt_row, dict):
             raise HTTPException(status_code=404, detail="Patient not found")
 
-        ap = (
-            supabase.table("appointments")
-            .select("start_time, clinician_id")
-            .eq("id", aid)
-            .limit(1)
-            .execute()
-        )
+        ap = supabase_execute(
+                    lambda: supabase.table("appointments")
+                    .select("start_time, clinician_id")
+                    .eq("id", aid)
+                    .limit(1)
+                    .execute()
+                )
         _handle_supabase_error(ap)
         ap_row = (ap.data or [None])[0]
         if not isinstance(ap_row, dict):
@@ -943,13 +952,13 @@ def get_intake_form_prefill(token: str):
         start_dt = _parse_start_dt(start_raw)
         tz_name = _clinic_tz_name(None)
         try:
-            cs = (
-                supabase.table("clinic_settings")
-                .select("timezone")
-                .eq("clinic_id", str(row.get("clinic_id") or ""))
-                .limit(1)
-                .execute()
-            )
+            cs = supabase_execute(
+                            lambda: supabase.table("clinic_settings")
+                            .select("timezone")
+                            .eq("clinic_id", str(row.get("clinic_id") or ""))
+                            .limit(1)
+                            .execute()
+                        )
             _handle_supabase_error(cs)
             crows = cs.data or []
             if crows and crows[0].get("timezone"):
@@ -1040,12 +1049,12 @@ def submit_intake_token_form(body: IntakeTokenSubmitBody):
             patient_updates["email"] = str(body.email).strip()
 
         if patient_updates:
-            upd = (
-                supabase.table("patients")
-                .update(patient_updates)
-                .eq("id", pid)
-                .execute()
-            )
+            upd = supabase_execute(
+                            lambda: supabase.table("patients")
+                            .update(patient_updates)
+                            .eq("id", pid)
+                            .execute()
+                        )
             _handle_supabase_error(upd)
 
         intake_row: dict[str, Any] = {
@@ -1068,17 +1077,19 @@ def submit_intake_token_form(body: IntakeTokenSubmitBody):
 
         intake_row["completed_at"] = datetime.now(timezone.utc).isoformat()
 
-        ins = supabase.table("intake_forms").insert(intake_row).execute()
+        ins = supabase_execute(
+                    lambda: supabase.table("intake_forms").insert(intake_row).execute()
+                )
         _handle_supabase_error(ins)
         if not ins.data:
             raise HTTPException(status_code=500, detail="Failed to save intake form")
 
-        mark = (
-            supabase.table("intake_tokens")
-            .update({"used": True})
-            .eq("id", tok_id)
-            .execute()
-        )
+        mark = supabase_execute(
+                    lambda: supabase.table("intake_tokens")
+                    .update({"used": True})
+                    .eq("id", tok_id)
+                    .execute()
+                )
         _handle_supabase_error(mark)
 
         try:
@@ -1108,18 +1119,18 @@ def get_intake_for_appointment(
     _resolve_bearer_user_id(authorization)
 
     try:
-        resp = (
-            supabase.table("intake_forms")
-            .select(
-                "id,appointment_id,patient_id,chief_complaint,pain_scale,"
-                "symptom_duration,aggravating_factors,relieving_factors,"
-                "medical_history_flags,allergies,other_conditions,goals,created_at"
-            )
-            .eq("appointment_id", appointment_id)
-            .order("created_at", desc=True)
-            .limit(1)
-            .execute()
-        )
+        resp = supabase_execute(
+                    lambda: supabase.table("intake_forms")
+                    .select(
+                        "id,appointment_id,patient_id,chief_complaint,pain_scale,"
+                        "symptom_duration,aggravating_factors,relieving_factors,"
+                        "medical_history_flags,allergies,other_conditions,goals,created_at"
+                    )
+                    .eq("appointment_id", appointment_id)
+                    .order("created_at", desc=True)
+                    .limit(1)
+                    .execute()
+                )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
