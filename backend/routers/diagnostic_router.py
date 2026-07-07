@@ -24,6 +24,7 @@ from fastapi import (
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.sms import send_sms
 from routers.diagnostic_ocr import ALLOWED_MIME, MAX_BYTES, extract_text_from_bytes
 from routers.fee_schedule import ClinicUserDep
@@ -103,13 +104,15 @@ def _now_iso() -> str:
 
 
 def _assert_patient_in_clinic(patient_id: str, clinic_id: str) -> None:
-    access = (
-        supabase.table("patient_clinic_access")
-        .select("id")
-        .eq("patient_id", patient_id)
-        .eq("clinic_id", clinic_id)
-        .limit(1)
-        .execute()
+    access = supabase_execute(
+        lambda: (
+            supabase.table("patient_clinic_access")
+            .select("id")
+            .eq("patient_id", patient_id)
+            .eq("clinic_id", clinic_id)
+            .limit(1)
+            .execute()
+        )
     )
     _handle_supabase_error(access)
     if not access.data:
@@ -117,13 +120,15 @@ def _assert_patient_in_clinic(patient_id: str, clinic_id: str) -> None:
 
 
 def _resolve_clinic_user_pk(user_id: str, clinic_id: str) -> Optional[str]:
-    resp = (
-        supabase.table("clinic_users")
-        .select("id")
-        .eq("user_id", user_id)
-        .eq("clinic_id", clinic_id)
-        .limit(1)
-        .execute()
+    resp = supabase_execute(
+        lambda: (
+            supabase.table("clinic_users")
+            .select("id")
+            .eq("user_id", user_id)
+            .eq("clinic_id", clinic_id)
+            .limit(1)
+            .execute()
+        )
     )
     _handle_supabase_error(resp)
     rows = resp.data or []
@@ -264,12 +269,14 @@ def _match_insurance_claim(
     date_of_service: Optional[str],
     cpt_codes: Any,
 ) -> Optional[str]:
-    resp = (
-        supabase.table("insurance_claims")
-        .select("id, first_treatment_date, cpt_codes")
-        .eq("patient_id", patient_id)
-        .eq("clinic_id", clinic_id)
-        .execute()
+    resp = supabase_execute(
+        lambda: (
+            supabase.table("insurance_claims")
+            .select("id, first_treatment_date, cpt_codes")
+            .eq("patient_id", patient_id)
+            .eq("clinic_id", clinic_id)
+            .execute()
+        )
     )
     _handle_supabase_error(resp)
     claims = resp.data or []
@@ -333,21 +340,23 @@ def _create_eob_resubmission_task(
         f"EOB received for {patient_name} from {insurance_company}. "
         f"Denial reasons: {reasons}. Missing: {missing}."
     )
-    ins = (
-        supabase.table("clinic_tasks")
-        .insert(
-            {
-                "clinic_id": clinic_id,
-                "patient_id": patient_id,
-                "claim_id": claim_id,
-                "task_type": "eob_resubmission",
-                "title": "EOB Resubmission Required",
-                "description": description,
-                "priority": "high",
-                "status": "open",
-            }
+    ins = supabase_execute(
+        lambda: (
+            supabase.table("clinic_tasks")
+            .insert(
+                {
+                    "clinic_id": clinic_id,
+                    "patient_id": patient_id,
+                    "claim_id": claim_id,
+                    "task_type": "eob_resubmission",
+                    "title": "EOB Resubmission Required",
+                    "description": description,
+                    "priority": "high",
+                    "status": "open",
+                }
+            )
+            .execute()
         )
-        .execute()
     )
     _handle_supabase_error(ins)
     rows = ins.data or []
@@ -388,9 +397,11 @@ def _run_eob_extraction(
         if claim_id:
             new_status = _claim_status_from_eob(ai)
             if new_status:
-                supabase.table("insurance_claims").update(
-                    {"status": new_status, "updated_at": _now_iso()}
-                ).eq("id", claim_id).execute()
+                supabase_execute(
+                    lambda: supabase.table("insurance_claims").update(
+                        {"status": new_status, "updated_at": _now_iso()}
+                    ).eq("id", claim_id).execute()
+                )
 
         task_id: Optional[str] = None
         if needs_resubmission:
@@ -406,7 +417,12 @@ def _run_eob_extraction(
                 missing_information=missing_information,
             )
 
-        supabase.table("eob_extractions").delete().eq("document_id", document_id).execute()
+        supabase_execute(
+            lambda: supabase.table("eob_extractions")
+            .delete()
+            .eq("document_id", document_id)
+            .execute()
+        )
 
         row = {
             "clinic_id": clinic_id,
@@ -429,7 +445,9 @@ def _run_eob_extraction(
             "missing_information": missing_information,
             "raw_extraction": ai,
         }
-        supabase.table("eob_extractions").insert(row).execute()
+        supabase_execute(
+            lambda: supabase.table("eob_extractions").insert(row).execute()
+        )
     except Exception:
         traceback.print_exc()
 
@@ -537,24 +555,26 @@ def _run_document_analysis(
         imaging_date = _parse_imaging_date(ai.get("imaging_date"))
         status = "pending" if red_flags else "analyzed"
 
-        ins = (
-            supabase.table("diagnostic_analyses")
-            .insert(
-                {
-                    "patient_id": patient_id,
-                    "clinic_id": clinic_id,
-                    "document_id": document_id,
-                    "clinician_summary": str(ai.get("clinician_summary") or "").strip(),
-                    "patient_explanation": str(ai.get("patient_explanation") or "").strip(),
-                    "red_flags": red_flags,
-                    "soap_suggestions": soap,
-                    "imaging_date": imaging_date,
-                    "body_part": str(ai.get("body_part") or "").strip() or None,
-                    "modality": str(ai.get("modality") or "").strip() or None,
-                    "status": status,
-                }
+        ins = supabase_execute(
+            lambda: (
+                supabase.table("diagnostic_analyses")
+                .insert(
+                    {
+                        "patient_id": patient_id,
+                        "clinic_id": clinic_id,
+                        "document_id": document_id,
+                        "clinician_summary": str(ai.get("clinician_summary") or "").strip(),
+                        "patient_explanation": str(ai.get("patient_explanation") or "").strip(),
+                        "red_flags": red_flags,
+                        "soap_suggestions": soap,
+                        "imaging_date": imaging_date,
+                        "body_part": str(ai.get("body_part") or "").strip() or None,
+                        "modality": str(ai.get("modality") or "").strip() or None,
+                        "status": status,
+                    }
+                )
+                .execute()
             )
-            .execute()
         )
         _handle_supabase_error(ins)
         rows = ins.data or []
@@ -566,15 +586,17 @@ def _run_document_analysis(
         if len(summary) > 200:
             summary = summary[:197] + "..."
 
-        supabase.table("imaging_timeline").insert(
-            {
-                "patient_id": patient_id,
-                "clinic_id": clinic_id,
-                "analysis_id": analysis_id,
-                "event_date": event_date,
-                "summary": summary or "Diagnostic analysis completed",
-            }
-        ).execute()
+        supabase_execute(
+            lambda: supabase.table("imaging_timeline").insert(
+                {
+                    "patient_id": patient_id,
+                    "clinic_id": clinic_id,
+                    "analysis_id": analysis_id,
+                    "event_date": event_date,
+                    "summary": summary or "Diagnostic analysis completed",
+                }
+            ).execute()
+        )
     except Exception:
         traceback.print_exc()
 
@@ -589,20 +611,22 @@ def _create_document_record(
     storage_path: str,
     upload_source: str,
 ) -> dict[str, Any]:
-    ins = (
-        supabase.table("patient_documents")
-        .insert(
-            {
-                "patient_id": patient_id,
-                "clinic_id": clinic_id,
-                "uploaded_by": uploaded_by,
-                "document_type": document_type,
-                "file_name": file_name,
-                "file_url": storage_path,
-                "upload_source": upload_source,
-            }
+    ins = supabase_execute(
+        lambda: (
+            supabase.table("patient_documents")
+            .insert(
+                {
+                    "patient_id": patient_id,
+                    "clinic_id": clinic_id,
+                    "uploaded_by": uploaded_by,
+                    "document_type": document_type,
+                    "file_name": file_name,
+                    "file_url": storage_path,
+                    "upload_source": upload_source,
+                }
+            )
+            .execute()
         )
-        .execute()
     )
     _handle_supabase_error(ins)
     rows = ins.data or []
@@ -686,13 +710,15 @@ def list_patient_documents(
     cid = user.clinic_id
     _assert_patient_in_clinic(pid, cid)
 
-    resp = (
-        supabase.table("patient_documents")
-        .select("*")
-        .eq("patient_id", pid)
-        .eq("clinic_id", cid)
-        .order("created_at", desc=True)
-        .execute()
+    resp = supabase_execute(
+        lambda: (
+            supabase.table("patient_documents")
+            .select("*")
+            .eq("patient_id", pid)
+            .eq("clinic_id", cid)
+            .order("created_at", desc=True)
+            .execute()
+        )
     )
     _handle_supabase_error(resp)
     out = []
@@ -717,14 +743,16 @@ def analyze_patient_document(
     cid = user.clinic_id
     _assert_patient_in_clinic(pid, cid)
 
-    doc_resp = (
-        supabase.table("patient_documents")
-        .select("*")
-        .eq("id", did)
-        .eq("patient_id", pid)
-        .eq("clinic_id", cid)
-        .limit(1)
-        .execute()
+    doc_resp = supabase_execute(
+        lambda: (
+            supabase.table("patient_documents")
+            .select("*")
+            .eq("id", did)
+            .eq("patient_id", pid)
+            .eq("clinic_id", cid)
+            .limit(1)
+            .execute()
+        )
     )
     _handle_supabase_error(doc_resp)
     rows = doc_resp.data or []
@@ -758,14 +786,16 @@ def delete_patient_document(
     cid = user.clinic_id
     _assert_patient_in_clinic(pid, cid)
 
-    doc_resp = (
-        supabase.table("patient_documents")
-        .select("*")
-        .eq("id", did)
-        .eq("patient_id", pid)
-        .eq("clinic_id", cid)
-        .limit(1)
-        .execute()
+    doc_resp = supabase_execute(
+        lambda: (
+            supabase.table("patient_documents")
+            .select("*")
+            .eq("id", did)
+            .eq("patient_id", pid)
+            .eq("clinic_id", cid)
+            .limit(1)
+            .execute()
+        )
     )
     _handle_supabase_error(doc_resp)
     rows = doc_resp.data or []
@@ -780,15 +810,27 @@ def delete_patient_document(
         except Exception:
             traceback.print_exc()
 
-    supabase.table("eob_extractions").delete().eq("document_id", did).execute()
-    supabase.table("diagnostic_analyses").delete().eq("document_id", did).execute()
-    dele = (
-        supabase.table("patient_documents")
+    supabase_execute(
+        lambda: supabase.table("eob_extractions")
         .delete()
-        .eq("id", did)
-        .eq("patient_id", pid)
-        .eq("clinic_id", cid)
+        .eq("document_id", did)
         .execute()
+    )
+    supabase_execute(
+        lambda: supabase.table("diagnostic_analyses")
+        .delete()
+        .eq("document_id", did)
+        .execute()
+    )
+    dele = supabase_execute(
+        lambda: (
+            supabase.table("patient_documents")
+            .delete()
+            .eq("id", did)
+            .eq("patient_id", pid)
+            .eq("clinic_id", cid)
+            .execute()
+        )
     )
     _handle_supabase_error(dele)
     return {"success": True, "document_id": did}
@@ -803,13 +845,15 @@ def list_eob_extractions(
     cid = user.clinic_id
     _assert_patient_in_clinic(pid, cid)
 
-    resp = (
-        supabase.table("eob_extractions")
-        .select("*, patient_documents(file_name, document_type, created_at)")
-        .eq("patient_id", pid)
-        .eq("clinic_id", cid)
-        .order("created_at", desc=True)
-        .execute()
+    resp = supabase_execute(
+        lambda: (
+            supabase.table("eob_extractions")
+            .select("*, patient_documents(file_name, document_type, created_at)")
+            .eq("patient_id", pid)
+            .eq("clinic_id", cid)
+            .order("created_at", desc=True)
+            .execute()
+        )
     )
     _handle_supabase_error(resp)
     return resp.data or []
@@ -824,13 +868,15 @@ def list_patient_diagnostics(
     cid = user.clinic_id
     _assert_patient_in_clinic(pid, cid)
 
-    resp = (
-        supabase.table("diagnostic_analyses")
-        .select("*, patient_documents(file_name, document_type, created_at)")
-        .eq("patient_id", pid)
-        .eq("clinic_id", cid)
-        .order("created_at", desc=True)
-        .execute()
+    resp = supabase_execute(
+        lambda: (
+            supabase.table("diagnostic_analyses")
+            .select("*, patient_documents(file_name, document_type, created_at)")
+            .eq("patient_id", pid)
+            .eq("clinic_id", cid)
+            .order("created_at", desc=True)
+            .execute()
+        )
     )
     _handle_supabase_error(resp)
     return resp.data or []
@@ -845,13 +891,15 @@ def get_imaging_timeline(
     cid = user.clinic_id
     _assert_patient_in_clinic(pid, cid)
 
-    resp = (
-        supabase.table("imaging_timeline")
-        .select("*, diagnostic_analyses(modality, body_part, status)")
-        .eq("patient_id", pid)
-        .eq("clinic_id", cid)
-        .order("event_date", desc=True)
-        .execute()
+    resp = supabase_execute(
+        lambda: (
+            supabase.table("imaging_timeline")
+            .select("*, diagnostic_analyses(modality, body_part, status)")
+            .eq("patient_id", pid)
+            .eq("clinic_id", cid)
+            .order("event_date", desc=True)
+            .execute()
+        )
     )
     _handle_supabase_error(resp)
     return resp.data or []
@@ -872,19 +920,21 @@ def review_diagnostic_analysis(
     cid = user.clinic_id
     _assert_patient_in_clinic(pid, cid)
 
-    upd = (
-        supabase.table("diagnostic_analyses")
-        .update(
-            {
-                "status": "reviewed",
-                "reviewed_by": user.user_id,
-                "reviewed_at": _now_iso(),
-            }
+    upd = supabase_execute(
+        lambda: (
+            supabase.table("diagnostic_analyses")
+            .update(
+                {
+                    "status": "reviewed",
+                    "reviewed_by": user.user_id,
+                    "reviewed_at": _now_iso(),
+                }
+            )
+            .eq("id", aid)
+            .eq("patient_id", pid)
+            .eq("clinic_id", cid)
+            .execute()
         )
-        .eq("id", aid)
-        .eq("patient_id", pid)
-        .eq("clinic_id", cid)
-        .execute()
     )
     _handle_supabase_error(upd)
     rows = upd.data or []
@@ -896,14 +946,16 @@ def review_diagnostic_analysis(
 def _create_upload_token(patient_id: str, clinic_id: str) -> str:
     token = secrets.token_urlsafe(32)
     expires = datetime.now(timezone.utc) + timedelta(hours=_TOKEN_TTL_HOURS)
-    supabase.table("document_upload_tokens").insert(
-        {
-            "token": token,
-            "patient_id": patient_id,
-            "clinic_id": clinic_id,
-            "expires_at": expires.isoformat(),
-        }
-    ).execute()
+    supabase_execute(
+        lambda: supabase.table("document_upload_tokens").insert(
+            {
+                "token": token,
+                "patient_id": patient_id,
+                "clinic_id": clinic_id,
+                "expires_at": expires.isoformat(),
+            }
+        ).execute()
+    )
     return token
 
 
@@ -912,12 +964,14 @@ def _validate_upload_token(token: str) -> dict[str, str]:
     if not tok:
         raise HTTPException(status_code=400, detail="Invalid token")
 
-    resp = (
-        supabase.table("document_upload_tokens")
-        .select("*")
-        .eq("token", tok)
-        .limit(1)
-        .execute()
+    resp = supabase_execute(
+        lambda: (
+            supabase.table("document_upload_tokens")
+            .select("*")
+            .eq("token", tok)
+            .limit(1)
+            .execute()
+        )
     )
     _handle_supabase_error(resp)
     rows = resp.data or []
@@ -953,12 +1007,14 @@ def send_document_upload_link(
     cid = user.clinic_id
     _assert_patient_in_clinic(pid, cid)
 
-    pt = (
-        supabase.table("patients")
-        .select("id, first_name, phone")
-        .eq("id", pid)
-        .limit(1)
-        .execute()
+    pt = supabase_execute(
+        lambda: (
+            supabase.table("patients")
+            .select("id, first_name, phone")
+            .eq("id", pid)
+            .limit(1)
+            .execute()
+        )
     )
     _handle_supabase_error(pt)
     prow = (pt.data or [{}])[0]
@@ -988,12 +1044,14 @@ def send_document_upload_link(
 @router.get("/public/document-upload/{token}")
 def public_upload_info(token: str):
     ctx = _validate_upload_token(token)
-    pt = (
-        supabase.table("patients")
-        .select("first_name")
-        .eq("id", ctx["patient_id"])
-        .limit(1)
-        .execute()
+    pt = supabase_execute(
+        lambda: (
+            supabase.table("patients")
+            .select("first_name")
+            .eq("id", ctx["patient_id"])
+            .limit(1)
+            .execute()
+        )
     )
     _handle_supabase_error(pt)
     first = ""
@@ -1002,12 +1060,14 @@ def public_upload_info(token: str):
 
     clinic_name = "Your clinic"
     try:
-        clinic_resp = (
-            supabase.table("clinics")
-            .select("brand_name, name")
-            .eq("id", ctx["clinic_id"])
-            .limit(1)
-            .execute()
+        clinic_resp = supabase_execute(
+            lambda: (
+                supabase.table("clinics")
+                .select("brand_name, name")
+                .eq("id", ctx["clinic_id"])
+                .limit(1)
+                .execute()
+            )
         )
         _handle_supabase_error(clinic_resp)
         if clinic_resp.data:
@@ -1068,9 +1128,11 @@ async def public_upload_document(
     )
     document_id = str(row["id"])
 
-    supabase.table("document_upload_tokens").update(
-        {"used_at": _now_iso()}
-    ).eq("token", ctx["token"]).execute()
+    supabase_execute(
+        lambda: supabase.table("document_upload_tokens").update(
+            {"used_at": _now_iso()}
+        ).eq("token", ctx["token"]).execute()
+    )
 
     _schedule_document_processing(
         background_tasks,
@@ -1101,12 +1163,14 @@ def aria_send_upload_link(
     cid = clinic_id.strip()
     _assert_patient_in_clinic(pid, cid)
 
-    pt = (
-        supabase.table("patients")
-        .select("id, first_name, phone")
-        .eq("id", pid)
-        .limit(1)
-        .execute()
+    pt = supabase_execute(
+        lambda: (
+            supabase.table("patients")
+            .select("id, first_name, phone")
+            .eq("id", pid)
+            .limit(1)
+            .execute()
+        )
     )
     _handle_supabase_error(pt)
     prow = (pt.data or [{}])[0]
