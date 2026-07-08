@@ -19,7 +19,7 @@ _MAX_TOKENS = 8192
 _CLAUDE_TIMEOUT_SEC = 120.0
 
 ALLOWED_TEST_TYPES = frozenset(
-    {"CMJ", "SJ", "SLCMJ", "DJ", "SLDJ", "RJT", "MULTIPLE_JUMPS"}
+    {"CMJ", "SJ", "SLCMJ", "DJ", "SLDJ", "RJT", "MULTIPLE_JUMPS", "K_PUSH"}
 )
 ALLOWED_METRIC_NAMES = frozenset(
     {
@@ -36,18 +36,34 @@ ALLOWED_METRIC_NAMES = frozenset(
         "fatigue_index",
         "pace",
         "average_power",
+        "grip_strength",
+        "shoulder_er_rom_0abd",
+        "shoulder_ir_rom_90flex",
+        "prone_knee_flexion_strength",
+        "shoulder_er_strength_r1",
+        "shoulder_ir_strength_r1",
+        "hip_ir_strength",
+        "knee_extension_strength_90",
+        "hip_flexion_strength",
+        "hip_extension_strength",
     }
 )
 
 _EXTRACTION_SYSTEM = """You extract structured jump-test data from Kinvent Smart Mode (K-Deltas) \
 force-plate report images for a physical therapy clinic APS module.
 
+You also extract structured isometric strength and ROM data from Kinvent K-Push device cards \
+on the same report pages.
+
 Return ONLY valid JSON — no markdown fences, no preamble, no commentary.
 
 Read numeric values exactly as printed. Do not round, estimate, or infer missing values.
 Distinguish Left-labeled values from Right-labeled values from combined/total values.
 Include asymmetry_pct ONLY when the card explicitly shows a percentage labeled as asymmetry \
-(e.g. "82.4% Asymmetry"). If uncertain about any value, omit that metric entirely rather than guessing."""
+(e.g. "82.4% Asymmetry"). If uncertain about any value, omit that metric entirely rather than guessing.
+
+K-Push (K_PUSH) cards report Peak Force (lbs) or Max Angle (degrees) per side, with an explicit \
+asymmetry percentage when shown — same left/right split pattern as jump-test metrics."""
 
 _USER_EXTRACTION_PROMPT = """Extract all test cards from these Kinvent report page images.
 
@@ -74,12 +90,38 @@ Return JSON with exactly this shape:
   "unparsed_sections": []
 }
 
-test_type must be one of: CMJ, SJ, SLCMJ, DJ, SLDJ, RJT, MULTIPLE_JUMPS
+test_type must be one of: CMJ, SJ, SLCMJ, DJ, SLDJ, RJT, MULTIPLE_JUMPS, K_PUSH
 metric_name must be one of: jump_height, peak_force_relative, peak_power_relative, braking_rfd, \
-propulsive_rfd, rsi, peak_rfd, number_of_jumps, height_average, duration, fatigue_index, pace, average_power
+propulsive_rfd, rsi, peak_rfd, number_of_jumps, height_average, duration, fatigue_index, pace, \
+average_power, grip_strength, shoulder_er_rom_0abd, shoulder_ir_rom_90flex, \
+prone_knee_flexion_strength, shoulder_er_strength_r1, shoulder_ir_strength_r1, hip_ir_strength, \
+knee_extension_strength_90, hip_flexion_strength, hip_extension_strength
 
 Use combined_value only for aggregate metrics without Left/Right split (e.g. Multiple Jumps, RJT).
-Put any content you cannot confidently map into unparsed_sections as short text descriptions."""
+Put any content you cannot confidently map into unparsed_sections as short text descriptions.
+
+Jump-test cards (force plate): use test_type CMJ, SJ, SLCMJ, DJ, SLDJ, RJT, or MULTIPLE_JUMPS \
+and the jump metric_name values listed above — unchanged from prior Kinvent jump extraction rules.
+
+K-Push cards (isometric strength / ROM): use test_type K_PUSH for every K-Push device card. \
+Each card maps to exactly one metric_name below. Read Left and Right values from the card; use \
+unit "lbs" for Peak Force and "degrees" for Max Angle. Include asymmetry_pct when the card \
+shows an explicit asymmetry percentage.
+
+K_PUSH card label → metric_name mapping:
+- "Grip Strength" (Peak Force) → grip_strength
+- "Sitting External Rotator @0° Abduction (R1)" (Max Angle) → shoulder_er_rom_0abd
+- "Sitting Internal Rotators @90° Flexion" (Max Angle) → shoulder_ir_rom_90flex
+- "Prone Knee Flexion 90° Flexion" (Peak Force) → prone_knee_flexion_strength
+- "External Rotators R1" (Peak Force) → shoulder_er_strength_r1
+- "Internal Rotators R1" (Peak Force) → shoulder_ir_strength_r1
+- "Sitting Internal Hip Rotation" (Peak Force) → hip_ir_strength
+- "Sitting Knee Extension 90° Flexion" (Peak Force) → knee_extension_strength_90
+- "Hip Flexion" (Peak Force) → hip_flexion_strength
+- "Hip Extension" (Peak Force) → hip_extension_strength
+
+Leave unmapped sections (e.g. Single-Leg Balance, Squat Analysis, Body Weight) in \
+unparsed_sections — do not invent test_type or metric_name values for them."""
 
 
 class ApsParseError(Exception):
