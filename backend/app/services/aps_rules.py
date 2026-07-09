@@ -40,6 +40,22 @@ LOW_CONFIDENCE_PREFIX = (
     "Findings are inconsistent across tests — repeat testing before proceeding. "
 )
 
+# Metrics whose NEXT_TEST_BY_METRIC entry recommends K-Push (maps to test_type K_PUSH).
+_K_PUSH_RECOMMENDING_METRICS = frozenset(
+    {
+        "braking_rfd",
+        "propulsive_rfd",
+        "peak_power_relative",
+        "peak_force_relative",
+        "peak_rfd",
+    }
+)
+
+_PRIOR_K_PUSH_RECOMMENDATION = (
+    "K-Push testing for this region has already been performed in a prior "
+    "session — review those findings rather than repeating this test."
+)
+
 _DOMINANT_SIDE_K_PUSH: dict[str, str] = {
     "left": "left hip extensors/knee extensors",
     "right": "right hip extensors/knee extensors",
@@ -237,10 +253,13 @@ def _recommendation_for_metric(
     is_outlier: bool,
     dominant_count: int,
     total_notable: int,
+    prior_test_types: frozenset[str] = frozenset(),
 ) -> Optional[str]:
     base = NEXT_TEST_BY_METRIC.get(metric_name)
     if not base:
         return None
+    if "K_PUSH" in prior_test_types and metric_name in _K_PUSH_RECOMMENDING_METRICS:
+        base = _PRIOR_K_PUSH_RECOMMENDATION
     if confidence_tier == "low":
         return LOW_CONFIDENCE_PREFIX + base
     if confidence_tier == "high" and dominant_side:
@@ -251,7 +270,11 @@ def _recommendation_for_metric(
     return base
 
 
-def apply_aps_rules(findings: list[dict[str, Any]]) -> dict[str, Any]:
+def apply_aps_rules(
+    findings: list[dict[str, Any]],
+    *,
+    prior_test_types: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
     """
     Score findings and return findings plus structured session_summary.
     """
@@ -295,6 +318,7 @@ def apply_aps_rules(findings: list[dict[str, Any]]) -> dict[str, Any]:
             is_outlier=_finding_key(row) in outlier_keys,
             dominant_count=dominant_count,
             total_notable=total_notable,
+            prior_test_types=prior_test_types,
         )
 
     return {"findings": out, "session_summary": session_summary}

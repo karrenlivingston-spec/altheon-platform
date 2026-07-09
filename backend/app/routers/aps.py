@@ -65,6 +65,32 @@ def _assert_patient_in_clinic(patient_id: str, clinic_id: str) -> None:
         raise HTTPException(status_code=404, detail="Patient not found in clinic")
 
 
+def _fetch_prior_test_types(patient_id: str, clinic_id: str) -> frozenset[str]:
+    """Distinct test_type values from the patient's APS findings in prior sessions."""
+    try:
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("aps_findings")
+                .select("test_type, aps_sessions!inner(patient_id, clinic_id)")
+                .eq("aps_sessions.patient_id", patient_id)
+                .eq("aps_sessions.clinic_id", clinic_id)
+                .execute()
+            )
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    types: set[str] = set()
+    for row in resp.data or []:
+        test_type = str(row.get("test_type") or "").strip().upper()
+        if test_type:
+            types.add(test_type)
+    return frozenset(types)
+
+
 def _resolve_clinician_id_optional(
     authorization: Optional[str],
     clinic_id: str,
@@ -413,7 +439,8 @@ async def upload_aps_session(
         )
 
     finding_rows = flatten_findings(parsed)
-    rules_result = apply_aps_rules(finding_rows)
+    prior_test_types = _fetch_prior_test_types(pid, cid)
+    rules_result = apply_aps_rules(finding_rows, prior_test_types=prior_test_types)
     scored = rules_result["findings"]
     session_summary = rules_result["session_summary"]
 
