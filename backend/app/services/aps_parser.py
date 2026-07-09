@@ -101,7 +101,10 @@ Use combined_value only for aggregate metrics without Left/Right split (e.g. Mul
 Put any content you cannot confidently map into unparsed_sections as short text descriptions.
 
 Jump-test cards (force plate): use test_type CMJ, SJ, SLCMJ, DJ, SLDJ, RJT, or MULTIPLE_JUMPS \
-and the jump metric_name values listed above — unchanged from prior Kinvent jump extraction rules.
+and the jump metric_name values listed above — unchanged from prior Kinvent jump extraction rules. \
+Triple Hop Test cards report Total Distance per side with an asymmetry percentage — map these to \
+test_type RJT, metric_name jump_height, unit inches, using the Left/Right distance values and the \
+shown asymmetry_pct.
 
 K-Push cards (isometric strength / ROM): use test_type K_PUSH for every K-Push device card. \
 Each card maps to exactly one metric_name below. Read Left and Right values from the card; use \
