@@ -32,6 +32,7 @@ import {
   type MeasurementModuleHandle,
 } from "@/components/clinical-notes/MeasurementModule";
 import { SpecialTestsSection } from "@/components/clinical-notes/SpecialTestsSection";
+import { NeuroExamSection } from "@/components/clinical-notes/NeuroExamSection";
 import { QuestionnaireResultsSection } from "@/components/clinical-notes/QuestionnaireResultsSection";
 import CptDetectionPanel, {
   type CptCode,
@@ -202,9 +203,10 @@ const EDITOR_TABS = [
   { id: 1, label: "Capture" },
   { id: 2, label: "SOAP Review" },
   { id: 3, label: "Special Tests" },
-  { id: 4, label: "Billing" },
-  { id: 5, label: "AI Review" },
-  { id: 6, label: "Sign & Submit" },
+  { id: 4, label: "Neuro Exam" },
+  { id: 5, label: "Billing" },
+  { id: 6, label: "AI Review" },
+  { id: 7, label: "Sign & Submit" },
 ] as const;
 
 function truncateSummary(text: string, max = 120): string {
@@ -1818,6 +1820,16 @@ export default function AdminClinicalNotesPage() {
 
               {editorTab === 4 ? (
                 <div className="space-y-4">
+                  <NeuroExamSection
+                    noteId={editingId}
+                    clinicId={clinicId}
+                    onSaved={(m) => setToast(m)}
+                  />
+                </div>
+              ) : null}
+
+              {editorTab === 5 ? (
+                <div className="space-y-4">
                   <PayerOptimizerPanel
                     clinicId={clinicId}
                     appointmentId={draftAppointmentId.trim()}
@@ -1885,7 +1897,7 @@ export default function AdminClinicalNotesPage() {
                 </div>
               ) : null}
 
-              {editorTab === 5 ? (
+              {editorTab === 6 ? (
                 <div className="space-y-4">
                   {draftNoteStatus === "ai_flagged" ? (
                     <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
@@ -1925,7 +1937,7 @@ export default function AdminClinicalNotesPage() {
                 </div>
               ) : null}
 
-              {editorTab === 6 ? (
+              {editorTab === 7 ? (
                 <div className="space-y-4">
                   <div className="rounded-xl border border-gray-200 bg-gray-50/80 p-4 text-sm">
                     <h3 className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500">
@@ -2000,7 +2012,7 @@ export default function AdminClinicalNotesPage() {
                   Cancel
                 </button>
                 <div className="flex flex-wrap gap-2">
-                  {editorTab === 5 &&
+                  {editorTab === 6 &&
                   draftNoteStatus !== "ai_flagged" ? (
                     <button
                       type="button"
@@ -2011,7 +2023,7 @@ export default function AdminClinicalNotesPage() {
                       {editorBusy ? "Working…" : "Submit for AI Review"}
                     </button>
                   ) : null}
-                  {editorTab === 6 && canEditNote(draftNoteStatus) ? (
+                  {editorTab === 7 && canEditNote(draftNoteStatus) ? (
                     <button
                       type="button"
                       disabled={editorBusy}
@@ -2174,6 +2186,11 @@ export default function AdminClinicalNotesPage() {
                   readOnly
                 />
               ) : null}
+              <NeuroExamSection
+                noteId={viewNote.id}
+                clinicId={clinicId}
+                readOnly
+              />
               <CptDetectionPanel
                 noteId={viewNote.id}
                 clinicId={clinicId}
