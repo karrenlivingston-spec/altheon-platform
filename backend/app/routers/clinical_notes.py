@@ -1449,6 +1449,187 @@ def get_note_special_tests(
     return {"results": results}
 
 
+_NEURO_EXAM_SIDES = frozenset({"left", "right", "bilateral"})
+
+
+class NeuroExamResultIn(BaseModel):
+    item_id: str = Field(..., min_length=1)
+    side: str = Field(..., min_length=1)
+    result: Optional[str] = None
+    clinician_notes: Optional[str] = None
+
+
+class SaveNeuroExamBody(BaseModel):
+    results: list[NeuroExamResultIn] = Field(default_factory=list)
+
+
+# Catalog endpoint (reference data, grouped like orthopedic special tests).
+@router.get("/neuro-exam-items", dependencies=[Depends(require_clinical_notes_read())])
+def list_neuro_exam_items():
+    """All neuro exam reference items grouped by category, then region."""
+    try:
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("neuro_exam_items")
+                .select("id,name,category,region,sort_order")
+                .order("sort_order")
+                .execute()
+            )
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    categories: list[dict[str, Any]] = []
+    category_index: dict[str, dict[str, Any]] = {}
+
+    for row in resp.data or []:
+        category = str(row.get("category") or "").strip()
+        region = str(row.get("region") or "").strip()
+        if not category or not region:
+            continue
+
+        category_entry = category_index.get(category)
+        if category_entry is None:
+            category_entry = {"category": category, "regions": [], "_idx": {}}
+            category_index[category] = category_entry
+            categories.append(category_entry)
+
+        region_entry = category_entry["_idx"].get(region)
+        if region_entry is None:
+            region_entry = {"region": region, "items": []}
+            category_entry["_idx"][region] = region_entry
+            category_entry["regions"].append(region_entry)
+
+        region_entry["items"].append(
+            {
+                "id": str(row.get("id") or ""),
+                "name": str(row.get("name") or ""),
+                "sort_order": int(row.get("sort_order") or 0),
+            }
+        )
+
+    for category_entry in categories:
+        category_entry.pop("_idx", None)
+
+    return {"categories": categories}
+
+
+@router.post(
+    "/clinical-notes/{note_id}/neuro-exam",
+    dependencies=[Depends(require_role(*CLINICAL_ROLES))],
+)
+def save_note_neuro_exam(
+    note_id: str,
+    body: SaveNeuroExamBody,
+    clinic_id: str = Query(..., min_length=1),
+):
+    _fetch_note_for_clinic(note_id, clinic_id)
+
+    nid = note_id.strip()
+    rows: list[dict[str, Any]] = []
+    for item in body.results:
+        side = (item.side or "").strip().lower()
+        if side not in _NEURO_EXAM_SIDES:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Invalid side '{side}'; "
+                    f"allowed: {sorted(_NEURO_EXAM_SIDES)}"
+                ),
+            )
+        result = (item.result or "").strip() or None
+        notes = (item.clinician_notes or "").strip() or None
+        rows.append(
+            {
+                "note_id": nid,
+                "item_id": item.item_id.strip(),
+                "side": side,
+                "result": result,
+                "clinician_notes": notes,
+                "updated_at": _now_iso(),
+            }
+        )
+
+    if not rows:
+        return {"saved": True, "count": 0}
+
+    try:
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("note_neuro_exam_results")
+                .upsert(rows, on_conflict="note_id,item_id,side")
+                .execute()
+            )
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    return {"saved": True, "count": len(resp.data or rows)}
+
+
+@router.get(
+    "/clinical-notes/{note_id}/neuro-exam",
+    dependencies=[Depends(require_clinical_notes_read())],
+)
+def get_note_neuro_exam(
+    note_id: str,
+    clinic_id: str = Query(..., min_length=1),
+):
+    _fetch_note_for_clinic(note_id, clinic_id)
+
+    try:
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("note_neuro_exam_results")
+                .select(
+                    "item_id,side,result,clinician_notes,"
+                    "neuro_exam_items(name,category,region,sort_order)"
+                )
+                .eq("note_id", note_id.strip())
+                .execute()
+            )
+        )
+        _handle_supabase_error(resp)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    results: list[dict[str, Any]] = []
+    for row in resp.data or []:
+        item = row.get("neuro_exam_items") or {}
+        if not isinstance(item, dict):
+            item = {}
+        results.append(
+            {
+                "item_id": str(row.get("item_id") or ""),
+                "name": str(item.get("name") or ""),
+                "category": str(item.get("category") or ""),
+                "region": str(item.get("region") or ""),
+                "sort_order": int(item.get("sort_order") or 0),
+                "side": str(row.get("side") or ""),
+                "result": str(row.get("result") or ""),
+                "clinician_notes": str(row.get("clinician_notes") or ""),
+            }
+        )
+
+    results.sort(
+        key=lambda r: (
+            int(r.get("sort_order") or 0),
+            str(r.get("name") or ""),
+            str(r.get("side") or ""),
+        )
+    )
+
+    return {"results": results}
+
+
 _GOAL_TYPES = frozenset({"short_term", "long_term"})
 
 _SUGGEST_GOALS_SYSTEM = """You are a physical therapy documentation assistant. Based on the \
