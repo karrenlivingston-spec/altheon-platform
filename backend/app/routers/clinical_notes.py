@@ -2331,6 +2331,9 @@ def request_correction(note_id: str, body: RequestCorrectionBody):
         status=str(saved.get("status") or ""),
     )
     return saved
+
+
+def _author_id_for_clinical_notes_filter(clinic_id: str, author_id: str) -> str:
     """clinical_notes.author_id stores clinicians.id; accept auth user_id / clinic_users.id too."""
     key = author_id.strip()
     cid = clinic_id.strip()
