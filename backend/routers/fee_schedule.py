@@ -131,8 +131,16 @@ def _shape_fee_schedule_row(
         "description": cpt.get("description"),
         "category": cpt.get("category"),
         "charge": row.get("charge"),
+        "pi_charge": row.get("pi_charge"),
         "modifiers": row.get("modifiers") or [],
         "is_active": row.get("is_active"),
+    }
+
+
+def _shape_pi_rate_row(row: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "cpt_code": row.get("cpt_code"),
+        "pi_charge": row.get("pi_charge"),
     }
 
 
@@ -228,11 +236,13 @@ def _upsert_fee_schedule(
     charge: float,
     modifiers: list[str],
     description: Optional[str] = None,
+    pi_charge: Optional[float] = None,
+    update_pi_charge: bool = False,
 ) -> dict[str, Any]:
     code = cpt_code.strip().upper()
-    cpt = _ensure_cpt_code(code, description)
+    _ensure_cpt_code(code, description)
 
-    payload = {
+    payload: dict[str, Any] = {
         "clinic_id": clinic_id,
         "cpt_code": code,
         "charge": charge,
@@ -256,6 +266,8 @@ def _upsert_fee_schedule(
 
     if rows:
         row_id = str(rows[0]["id"])
+        if update_pi_charge:
+            payload["pi_charge"] = pi_charge
 
         def _update():
             return (
@@ -271,6 +283,7 @@ def _upsert_fee_schedule(
         saved = upd.data[0]
     else:
         payload["created_at"] = _now_iso()
+        payload["pi_charge"] = pi_charge if update_pi_charge else None
 
         def _insert():
             return supabase.table("clinic_fee_schedules").insert(payload).execute()
@@ -287,6 +300,7 @@ def _upsert_fee_schedule(
 class FeeScheduleUpsertBody(BaseModel):
     cpt_code: str = Field(min_length=1, max_length=10)
     charge: float = Field(gt=0)
+    pi_charge: Optional[float] = Field(default=None, gt=0)
     description: Optional[str] = None
     modifiers: list[str] = Field(default_factory=list)
 
@@ -294,6 +308,7 @@ class FeeScheduleUpsertBody(BaseModel):
 class FeeScheduleBulkItem(BaseModel):
     cpt_code: str = Field(min_length=1, max_length=10)
     charge: float = Field(gt=0)
+    pi_charge: Optional[float] = Field(default=None, gt=0)
     modifiers: list[str] = Field(default_factory=list)
 
 
@@ -303,6 +318,7 @@ class FeeScheduleBulkBody(BaseModel):
 
 class FeeSchedulePatchBody(BaseModel):
     charge: Optional[float] = Field(default=None, gt=0)
+    pi_charge: Optional[float] = Field(default=None, gt=0)
     description: Optional[str] = None
     modifiers: Optional[list[str]] = None
     is_active: Optional[bool] = None
@@ -343,12 +359,33 @@ def list_modifier_rules():
     return resp.data or []
 
 
+@router.get("/fee-schedule/pi")
+def list_clinic_pi_fee_schedule(clinic: ClinicUserDep):
+    """Minimal PI rate lookup for billing modals — active rows with pi_charge set."""
+
+    def _run():
+        return (
+            supabase.table("clinic_fee_schedules")
+            .select("cpt_code, pi_charge")
+            .eq("clinic_id", clinic.clinic_id)
+            .eq("is_active", True)
+            .not_.is_("pi_charge", "null")
+            .execute()
+        )
+
+    resp = _supabase_execute(_run, table="clinic_fee_schedules")
+    rows = resp.data or []
+    shaped = [_shape_pi_rate_row(r) for r in rows if isinstance(r, dict)]
+    shaped.sort(key=lambda x: str(x.get("cpt_code") or ""))
+    return shaped
+
+
 @router.get("/fee-schedule")
 def list_clinic_fee_schedule(clinic: ClinicUserDep):
     def _run():
         return (
             supabase.table("clinic_fee_schedules")
-            .select("id, cpt_code, charge, modifiers, is_active")
+            .select("id, cpt_code, charge, pi_charge, modifiers, is_active")
             .eq("clinic_id", clinic.clinic_id)
             .eq("is_active", True)
             .execute()
@@ -364,12 +401,15 @@ def list_clinic_fee_schedule(clinic: ClinicUserDep):
 
 @router.post("/fee-schedule")
 def upsert_fee_schedule(body: FeeScheduleUpsertBody, clinic: ClinicUserDep):
+    fields_set = body.model_fields_set
     return _upsert_fee_schedule(
         clinic_id=clinic.clinic_id,
         cpt_code=body.cpt_code,
         charge=body.charge,
         modifiers=body.modifiers,
         description=body.description,
+        pi_charge=body.pi_charge,
+        update_pi_charge="pi_charge" in fields_set,
     )
 
 
@@ -379,11 +419,14 @@ def bulk_upsert_fee_schedule(body: FeeScheduleBulkBody, clinic: ClinicUserDep):
     errors: list[str] = []
     for idx, item in enumerate(body.items):
         try:
+            item_fields = item.model_fields_set
             _upsert_fee_schedule(
                 clinic_id=clinic.clinic_id,
                 cpt_code=item.cpt_code,
                 charge=item.charge,
                 modifiers=item.modifiers,
+                pi_charge=item.pi_charge,
+                update_pi_charge="pi_charge" in item_fields,
             )
             saved += 1
         except HTTPException as exc:
@@ -406,9 +449,12 @@ def patch_fee_schedule(
     if body.description is not None:
         _ensure_cpt_code(cpt_code, body.description)
 
+    patch_fields = body.model_dump(exclude_unset=True)
     update_data: dict[str, Any] = {"updated_at": _now_iso()}
-    if body.charge is not None:
+    if "charge" in patch_fields:
         update_data["charge"] = body.charge
+    if "pi_charge" in patch_fields:
+        update_data["pi_charge"] = body.pi_charge
     if body.modifiers is not None:
         update_data["modifiers"] = body.modifiers
     if body.is_active is not None:
