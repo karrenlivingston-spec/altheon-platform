@@ -7,6 +7,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from routers.fee_schedule import _resolve_bearer_user_id
 
 router = APIRouter()
@@ -19,17 +20,28 @@ def _handle_supabase_error(response: Any) -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 def _assert_user_has_clinic_access(user_id: str, clinic_id: str) -> None:
     try:
-        access = (
-            supabase.table("clinic_users")
+        access = _sb_execute(
+            lambda: supabase.table("clinic_users")
             .select("user_id")
             .eq("user_id", user_id)
             .eq("clinic_id", clinic_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(access)
     except HTTPException:
         raise
     except Exception as exc:
@@ -46,14 +58,13 @@ def _require_auth_and_clinic(authorization: Optional[str], clinic_id: str) -> st
 
 def _clinician_row(clinician_id: str) -> dict[str, Any]:
     try:
-        resp = (
-            supabase.table("clinicians")
+        resp = _sb_execute(
+            lambda: supabase.table("clinicians")
             .select("id,clinic_id,is_active,first_name,last_name")
             .eq("id", clinician_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -123,8 +134,8 @@ def list_clinicians(
 ):
     _require_auth_and_clinic(authorization, clinic_id)
     try:
-        resp = (
-            supabase.table("clinicians")
+        resp = _sb_execute(
+            lambda: supabase.table("clinicians")
             .select("id,first_name,last_name,title,email,color,is_active,clinic_id")
             .eq("clinic_id", clinic_id)
             .eq("is_active", True)
@@ -132,7 +143,6 @@ def list_clinicians(
             .order("first_name")
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -151,8 +161,8 @@ def list_treatment_types(
         print("treatment-types query table=treatment_types")
         print("treatment-types selecting columns=id,name,duration_minutes,requires_evaluation")
         print("treatment-types filter=clinic_id only")
-        resp = (
-            supabase.table("treatment_types")
+        resp = _sb_execute(
+            lambda: supabase.table("treatment_types")
             .select("id,name,duration_minutes,requires_evaluation")
             .eq("clinic_id", clinic_id)
             .order("name")
@@ -166,7 +176,6 @@ def list_treatment_types(
                 "count": len(resp.data or []),
             },
         )
-        _handle_supabase_error(resp)
         return resp.data or []
     except Exception as e:
         print(f"treatment-types error: {e}")
@@ -184,14 +193,13 @@ def get_clinician_availability(
         clinician = _clinician_row(clinician_uuid)
         clinic_id = str(clinician.get("clinic_id") or "").strip()
         _require_auth_and_clinic(authorization, clinic_id)
-        response = (
-            supabase.table("availability_rules")
+        response = _sb_execute(
+            lambda: supabase.table("availability_rules")
             .select("*")
             .eq("clinician_id", clinician_uuid)
             .order("day_of_week")
             .execute()
         )
-        _handle_supabase_error(response)
         rows = response.data or []
         out: list[dict[str, Any]] = []
         for row in rows:
@@ -245,24 +253,25 @@ def replace_clinician_availability(
         )
 
     try:
-        del_resp = (
-            supabase.table("availability_rules")
+        del_resp = _sb_execute(
+            lambda: supabase.table("availability_rules")
             .delete()
             .eq("clinician_id", clinician_id)
             .execute()
         )
-        _handle_supabase_error(del_resp)
         if insert_rows:
             print(f"Inserting rows: {insert_rows}")
-            ins_resp = supabase.table("availability_rules").insert(insert_rows).execute()
-            _handle_supabase_error(ins_resp)
-        verify = (
-            supabase.table("availability_rules")
+            ins_resp = _sb_execute(
+                lambda: supabase.table("availability_rules")
+                .insert(insert_rows)
+                .execute()
+            )
+        verify = _sb_execute(
+            lambda: supabase.table("availability_rules")
             .select("day_of_week, is_active")
             .eq("clinician_id", clinician_id)
             .execute()
         )
-        _handle_supabase_error(verify)
         print(f"Verification after save: {verify.data}")
         return verify.data or []
     except HTTPException:
@@ -298,8 +307,7 @@ def get_blocked_time(
         )
         if to_date:
             query = query.lte("start_time", f"{to_date}T23:59:59")
-        response = query.order("start_time").execute()
-        _handle_supabase_error(response)
+        response = _sb_execute(lambda: query.order("start_time").execute())
         return [_shape_blocked_row(row) for row in (response.data or [])]
     except HTTPException:
         raise
@@ -371,8 +379,9 @@ def _insert_blocked_time(
     )
 
     try:
-        ins = supabase.table("blocked_time").insert(insert_rows).execute()
-        _handle_supabase_error(ins)
+        ins = _sb_execute(
+            lambda: supabase.table("blocked_time").insert(insert_rows).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -416,14 +425,13 @@ def delete_blocked_time(
     authorization: Optional[str] = Header(default=None, alias="Authorization"),
 ):
     try:
-        existing = (
-            supabase.table("blocked_time")
+        existing = _sb_execute(
+            lambda: supabase.table("blocked_time")
             .select("id,clinic_id")
             .eq("id", blocked_time_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(existing)
     except HTTPException:
         raise
     except Exception as exc:
@@ -435,8 +443,12 @@ def delete_blocked_time(
     _require_auth_and_clinic(authorization, clinic_id)
 
     try:
-        resp = supabase.table("blocked_time").delete().eq("id", blocked_time_id).execute()
-        _handle_supabase_error(resp)
+        resp = _sb_execute(
+            lambda: supabase.table("blocked_time")
+            .delete()
+            .eq("id", blocked_time_id)
+            .execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:

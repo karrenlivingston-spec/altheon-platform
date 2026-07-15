@@ -7,6 +7,7 @@ from datetime import datetime, time, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
+from app.retry_utils import supabase_execute
 from app.sms import send_sms
 
 _DEFAULT_CLINIC_TZ = "America/New_York"
@@ -39,8 +40,8 @@ def _parse_time_value(value: Any) -> Optional[time]:
 
 def _clinic_timezone(supabase: Any, clinic_id: str) -> ZoneInfo:
     try:
-        resp = (
-            supabase.table("locations")
+        resp = supabase_execute(
+            lambda: supabase.table("locations")
             .select("timezone")
             .eq("clinic_id", clinic_id.strip())
             .eq("is_active", True)
@@ -118,8 +119,8 @@ async def check_waitlist_matches(
         window_start = start_local.time()
         window_end = end_local.time()
 
-        resp = (
-            supabase.table("appointment_waitlist")
+        resp = supabase_execute(
+            lambda: supabase.table("appointment_waitlist")
             .select(
                 "id, patient_id, requested_time, provider_id, notes, created_at"
             )
@@ -167,8 +168,8 @@ async def notify_waitlist_matches(
 
     clinic_phone = ""
     try:
-        clinic_resp = (
-            supabase.table("clinics")
+        clinic_resp = supabase_execute(
+            lambda: supabase.table("clinics")
             .select("phone")
             .eq("id", clinic_id.strip())
             .limit(1)
@@ -200,8 +201,8 @@ async def notify_waitlist_matches(
         if not entry_id or not patient_id:
             continue
         try:
-            patient_resp = (
-                supabase.table("patients")
+            patient_resp = supabase_execute(
+                lambda: supabase.table("patients")
                 .select("phone")
                 .eq("id", patient_id)
                 .limit(1)
@@ -229,9 +230,14 @@ async def notify_waitlist_matches(
                 continue
 
             now_iso = datetime.now(timezone.utc).isoformat()
-            supabase.table("appointment_waitlist").update(
-                {"status": "notified", "notified_at": now_iso, "updated_at": now_iso}
-            ).eq("id", entry_id).execute()
+            supabase_execute(
+                lambda: supabase.table("appointment_waitlist")
+                .update(
+                    {"status": "notified", "notified_at": now_iso, "updated_at": now_iso}
+                )
+                .eq("id", entry_id)
+                .execute()
+            )
         except Exception:
             traceback.print_exc()
 
@@ -241,8 +247,8 @@ async def resolve_clinician_name(supabase: Any, clinician_id: str) -> str:
     if not cid:
         return ""
     try:
-        resp = (
-            supabase.table("clinicians")
+        resp = supabase_execute(
+            lambda: supabase.table("clinicians")
             .select("first_name, last_name")
             .eq("id", cid)
             .limit(1)

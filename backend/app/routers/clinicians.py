@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.utils.auth_users import (
     get_email_from_token,
     get_user_email_by_id,
@@ -27,8 +28,8 @@ def get_my_clinician(request: Request):
     if not email:
         raise HTTPException(status_code=404, detail="Clinician not found")
 
-    resp = (
-        supabase.table("clinicians")
+    resp = supabase_execute(
+        lambda: supabase.table("clinicians")
         .select("id, first_name, last_name, email")
         .eq("email", email)
         .eq("is_active", True)

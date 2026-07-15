@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 import pytz
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.slot_blocked_time import (
     blocked_windows_for_clinician_date,
     slot_overlaps_blocked_window,
@@ -53,8 +54,8 @@ def get_slots_for_date(
     Returns a list of slot dicts: {start_time, end_time, label}
     """
     # Get clinic timezone from locations table
-    loc_resp = (
-        supabase.table("locations")
+    loc_resp = supabase_execute(
+        lambda: supabase.table("locations")
         .select("timezone")
         .eq("clinic_id", clinic_id)
         .eq("is_active", True)
@@ -79,7 +80,7 @@ def get_slots_for_date(
     if clinician_id:
         rules_query = rules_query.eq("clinician_id", clinician_id)
 
-    rules_resp = rules_query.execute()
+    rules_resp = supabase_execute(lambda: rules_query.execute())
     if not rules_resp.data:
         return []
 
@@ -95,7 +96,7 @@ def get_slots_for_date(
     if clinician_id:
         appts_query = appts_query.eq("clinician_id", clinician_id)
 
-    appts_resp = appts_query.execute()
+    appts_resp = supabase_execute(lambda: appts_query.execute())
     existing = appts_resp.data or []
     blocked_by_clinician: dict[str, list[tuple[datetime, datetime]]] = {}
     for rule in rules_resp.data:

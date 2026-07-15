@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 
@@ -85,7 +86,9 @@ async def list_waitlist(
         )
         if status and status.strip():
             query = query.eq("status", status.strip())
-        res = query.order("requested_date").order("created_at").execute()
+        res = supabase_execute(
+            lambda: query.order("requested_date").order("created_at").execute()
+        )
         rows = res.data or []
         out = []
         for row in rows:
@@ -112,7 +115,9 @@ async def create_waitlist_entry(body: WaitlistCreate):
             "notes": (body.notes or "").strip() or None,
             "status": "waiting",
         }
-        res = supabase.table("appointment_waitlist").insert(payload).execute()
+        res = supabase_execute(
+            lambda: supabase.table("appointment_waitlist").insert(payload).execute()
+        )
         rows = res.data or []
         if not rows:
             raise HTTPException(status_code=400, detail="Failed to create waitlist entry.")
@@ -142,8 +147,8 @@ async def update_waitlist_entry(entry_id: str, body: WaitlistUpdate):
         if not data:
             raise HTTPException(status_code=400, detail="No fields to update")
         data["updated_at"] = _now_iso()
-        res = (
-            supabase.table("appointment_waitlist")
+        res = supabase_execute(
+            lambda: supabase.table("appointment_waitlist")
             .update(data)
             .eq("id", entry_id.strip())
             .execute()
@@ -166,9 +171,12 @@ async def update_waitlist_entry(entry_id: str, body: WaitlistUpdate):
 @router.delete("/waitlist/{entry_id}")
 async def delete_waitlist_entry(entry_id: str):
     try:
-        supabase.table("appointment_waitlist").delete().eq(
-            "id", entry_id.strip()
-        ).execute()
+        supabase_execute(
+            lambda: supabase.table("appointment_waitlist")
+            .delete()
+            .eq("id", entry_id.strip())
+            .execute()
+        )
         return {"deleted": True}
     except Exception as e:
         traceback.print_exc()

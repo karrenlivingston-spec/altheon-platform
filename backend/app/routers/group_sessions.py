@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 
@@ -172,7 +173,7 @@ async def list_group_sessions(
         if lid:
             query = query.eq("location_id", lid)
 
-        res = query.order("start_time").execute()
+        res = supabase_execute(lambda: query.order("start_time").execute())
         rows = res.data or []
         return [
             _shape_session_row(r)
@@ -189,8 +190,8 @@ async def list_group_sessions(
 @router.get("/group-sessions/{session_id}")
 async def get_group_session(session_id: str):
     try:
-        res = (
-            supabase.table("group_sessions")
+        res = supabase_execute(
+            lambda: supabase.table("group_sessions")
             .select(_DETAIL_SELECT)
             .eq("id", session_id.strip())
             .limit(1)
@@ -233,7 +234,9 @@ async def create_group_session(body: GroupSessionCreate):
             "notes": (body.notes or "").strip() or None,
             "status": "scheduled",
         }
-        res = supabase.table("group_sessions").insert(payload).execute()
+        res = supabase_execute(
+            lambda: supabase.table("group_sessions").insert(payload).execute()
+        )
         rows = res.data or []
         if not rows:
             raise HTTPException(status_code=400, detail="Failed to create group session.")
@@ -244,7 +247,11 @@ async def create_group_session(body: GroupSessionCreate):
                 {"group_session_id": session["id"], "patient_id": pid}
                 for pid in patient_ids
             ]
-            supabase.table("group_session_attendees").insert(attendee_rows).execute()
+            supabase_execute(
+                lambda: supabase.table("group_session_attendees")
+                .insert(attendee_rows)
+                .execute()
+            )
 
         return session
     except HTTPException:
@@ -263,8 +270,8 @@ async def update_group_session(session_id: str, body: GroupSessionUpdate):
         if not data:
             raise HTTPException(status_code=400, detail="No fields to update")
         data["updated_at"] = _now_iso()
-        res = (
-            supabase.table("group_sessions")
+        res = supabase_execute(
+            lambda: supabase.table("group_sessions")
             .update(data)
             .eq("id", session_id.strip())
             .execute()
@@ -287,8 +294,8 @@ async def add_attendee(session_id: str, body: AddAttendeeBody):
         if not patient_id:
             raise HTTPException(status_code=400, detail="patient_id is required")
 
-        session_res = (
-            supabase.table("group_sessions")
+        session_res = supabase_execute(
+            lambda: supabase.table("group_sessions")
             .select("capacity")
             .eq("id", session_id.strip())
             .limit(1)
@@ -299,8 +306,8 @@ async def add_attendee(session_id: str, body: AddAttendeeBody):
             raise HTTPException(status_code=404, detail="Group session not found.")
         capacity = int(session_rows[0].get("capacity") or 6)
 
-        count_res = (
-            supabase.table("group_session_attendees")
+        count_res = supabase_execute(
+            lambda: supabase.table("group_session_attendees")
             .select("id", count="exact")
             .eq("group_session_id", session_id.strip())
             .neq("status", "cancelled")
@@ -309,8 +316,8 @@ async def add_attendee(session_id: str, body: AddAttendeeBody):
         if _count_exact(count_res) >= capacity:
             raise HTTPException(status_code=400, detail="Group session is at capacity.")
 
-        res = (
-            supabase.table("group_session_attendees")
+        res = supabase_execute(
+            lambda: supabase.table("group_session_attendees")
             .insert({"group_session_id": session_id.strip(), "patient_id": patient_id})
             .execute()
         )
@@ -340,8 +347,8 @@ async def update_attendee_status(
         if status not in _ATTENDEE_STATUSES:
             raise HTTPException(status_code=400, detail="Invalid attendee status")
 
-        res = (
-            supabase.table("group_session_attendees")
+        res = supabase_execute(
+            lambda: supabase.table("group_session_attendees")
             .update({"status": status})
             .eq("group_session_id", sid)
             .eq("patient_id", pid)
@@ -361,9 +368,13 @@ async def update_attendee_status(
 @router.delete("/group-sessions/{session_id}/attendees/{patient_id}")
 async def remove_attendee(session_id: str, patient_id: str):
     try:
-        supabase.table("group_session_attendees").delete().eq(
-            "group_session_id", session_id.strip()
-        ).eq("patient_id", patient_id.strip()).execute()
+        supabase_execute(
+            lambda: supabase.table("group_session_attendees")
+            .delete()
+            .eq("group_session_id", session_id.strip())
+            .eq("patient_id", patient_id.strip())
+            .execute()
+        )
         return {"deleted": True}
     except Exception as e:
         traceback.print_exc()

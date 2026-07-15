@@ -18,6 +18,7 @@ import re
 import pytz
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from routers.fee_schedule import _resolve_bearer_user_id
 from app.routers import (
     slots,
@@ -585,19 +586,21 @@ def _rollback_clinic_onboard(clinic_id: Optional[str], admin_user_id: Optional[s
             pass
     if admin_user_id:
         try:
-            supabase.auth.admin.delete_user(admin_user_id)
+            supabase_execute(lambda: supabase.auth.admin.delete_user(admin_user_id))
         except Exception:
             pass
 
 
 def _admin_create_user_id(email: str, password: str) -> str:
     try:
-        auth_res = supabase.auth.admin.create_user(
-            {
-                "email": email,
-                "password": password,
-                "email_confirm": True,
-            }
+        auth_res = supabase_execute(
+            lambda: supabase.auth.admin.create_user(
+                {
+                    "email": email,
+                    "password": password,
+                    "email_confirm": True,
+                }
+            )
         )
     except Exception as exc:
         raise HTTPException(

@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query
 from pydantic import BaseModel, EmailStr, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.utils.auth_users import get_user_email_by_id
 from app.dependencies.permissions import (
     ADMIN_ROLES,
@@ -387,12 +388,14 @@ def accept_staff_invite(body: AcceptInviteBody):
             )
 
         print(f"accept_staff_invite creating auth user email={email}")
-        auth_res = supabase.auth.admin.create_user(
-            {
-                "email": email,
-                "password": password,
-                "email_confirm": True,
-            }
+        auth_res = supabase_execute(
+            lambda: supabase.auth.admin.create_user(
+                {
+                    "email": email,
+                    "password": password,
+                    "email_confirm": True,
+                }
+            )
         )
         user_obj = getattr(auth_res, "user", None)
         if user_obj is None and isinstance(auth_res, dict):

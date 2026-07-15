@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException, Query
 import pytz
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.slot_blocked_time import (
     blocked_windows_for_clinician_date,
     slot_overlaps_blocked_window,
@@ -49,8 +50,8 @@ def get_slots(
     day_of_week = target_date.isoweekday() % 7
 
     try:
-        location_response = (
-            supabase.table("locations")
+        location_response = supabase_execute(
+            lambda: supabase.table("locations")
             .select("timezone")
             .eq("clinic_id", clinic_id)
             .eq("is_active", True)
@@ -74,8 +75,8 @@ def get_slots(
         raise HTTPException(status_code=500, detail=f"Invalid clinic timezone: {clinic_timezone_name}") from exc
 
     try:
-        availability_response = (
-            supabase.table("availability_rules")
+        availability_response = supabase_execute(
+            lambda: supabase.table("availability_rules")
             .select("start_time,end_time,buffer_minutes")
             .eq("clinic_id", clinic_id)
             .eq("clinician_id", clinician_id)
@@ -94,8 +95,8 @@ def get_slots(
         return []
 
     try:
-        appointments_response = (
-            supabase.table("appointments")
+        appointments_response = supabase_execute(
+            lambda: supabase.table("appointments")
             .select("start_time,end_time")
             .eq("clinic_id", clinic_id)
             .eq("clinician_id", clinician_id)

@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,7 @@ def _rollback(clinic_id: Optional[str], admin_user_id: Optional[str]) -> None:
             pass
     if admin_user_id:
         try:
-            supabase.auth.admin.delete_user(admin_user_id)
+            supabase_execute(lambda: supabase.auth.admin.delete_user(admin_user_id))
         except Exception:
             pass
 
@@ -50,16 +51,18 @@ def _admin_create_user_id(
     email: str, password: str, clinic_id: str
 ) -> str:
     try:
-        auth_res = supabase.auth.admin.create_user(
-            {
-                "email": email,
-                "password": password,
-                "email_confirm": True,
-                "user_metadata": {
-                    "clinic_id": clinic_id,
-                    "role": "admin",
-                },
-            }
+        auth_res = supabase_execute(
+            lambda: supabase.auth.admin.create_user(
+                {
+                    "email": email,
+                    "password": password,
+                    "email_confirm": True,
+                    "user_metadata": {
+                        "clinic_id": clinic_id,
+                        "role": "admin",
+                    },
+                }
+            )
         )
     except Exception as exc:
         raise HTTPException(
