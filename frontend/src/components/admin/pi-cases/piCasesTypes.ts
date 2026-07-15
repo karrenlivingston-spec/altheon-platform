@@ -60,11 +60,14 @@ export type PiCaseActivity = {
 
 export type PiCaseDeadline = {
   date: string;
+  date_iso?: string;
   label: string;
   subtitle: string;
   days_until: number;
   is_overdue: boolean;
   type: "records" | "hearing" | "ime";
+  case_id?: string;
+  patient_name?: string;
 };
 
 export type PiCaseTopAttorney = {

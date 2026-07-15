@@ -1,6 +1,7 @@
 "use client";
 
 import { DS_CARD } from "@/app/admin/designSystem";
+import { PiCaseDeadlineList } from "@/components/admin/pi-cases/PiCaseDeadlineList";
 import {
   PiCaseDeadline,
   PiCaseTopAttorney,
@@ -11,7 +12,7 @@ type PiCasesSidePanelsProps = {
   deadlines: PiCaseDeadline[];
   attorneys: PiCaseTopAttorney[];
   loading?: boolean;
-  onViewAll?: () => void;
+  onViewAllDeadlines?: () => void;
   onViewReport?: () => void;
 };
 
@@ -19,7 +20,7 @@ export default function PiCasesSidePanels({
   deadlines,
   attorneys,
   loading,
-  onViewAll,
+  onViewAllDeadlines,
   onViewReport,
 }: PiCasesSidePanelsProps) {
   const maxValue = Math.max(...attorneys.map((a) => a.total_value), 1);
@@ -29,43 +30,12 @@ export default function PiCasesSidePanels({
       <div className={DS_CARD}>
         <h3 className="text-sm font-semibold text-gray-900">Upcoming Deadlines</h3>
         <ul className="mt-3 space-y-3">
-          {loading ? (
-            <li className="text-sm text-gray-500">Loading…</li>
-          ) : deadlines.length === 0 ? (
-            <li className="text-sm text-gray-500">No upcoming deadlines.</li>
-          ) : (
-            deadlines.map((d, i) => {
-              const parts = d.date.split(" ");
-              return (
-                <li key={`${d.label}-${i}`} className="flex gap-3">
-                  <div
-                    className={`flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-lg text-center text-[10px] font-bold ${
-                      d.is_overdue ? "bg-red-100 text-red-700" : "bg-emerald-100 text-emerald-800"
-                    }`}
-                  >
-                    <span>{parts[0]?.toUpperCase()}</span>
-                    <span className="text-sm">{parts[1]}</span>
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900">{d.label}</p>
-                    <p className="text-xs text-gray-500">{d.subtitle}</p>
-                    <p
-                      className={`text-xs font-medium ${
-                        d.is_overdue ? "text-red-600" : "text-green-600"
-                      }`}
-                    >
-                      {d.is_overdue ? "Overdue" : `${d.days_until} days`}
-                    </p>
-                  </div>
-                </li>
-              );
-            })
-          )}
+          <PiCaseDeadlineList deadlines={deadlines} loading={loading} />
         </ul>
         <button
           type="button"
           className="mt-3 text-xs font-medium text-emerald-700 hover:underline"
-          onClick={onViewAll}
+          onClick={onViewAllDeadlines}
         >
           View All →
         </button>

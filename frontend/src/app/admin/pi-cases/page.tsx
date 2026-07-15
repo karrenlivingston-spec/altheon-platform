@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { Filter, Search } from "lucide-react";
 
 import {
@@ -65,6 +66,7 @@ function parseNum(s: string): number | null {
 
 export default function AdminPiCasesPage() {
   const { clinicId } = useClinic();
+  const router = useRouter();
   const [viewTab, setViewTab] = useState<ViewTab>("board");
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -91,10 +93,6 @@ export default function AdminPiCasesPage() {
     const t = window.setTimeout(() => setToast(null), 3000);
     return () => window.clearTimeout(t);
   }, [toast]);
-
-  function showComingSoon(message: string) {
-    setToast({ kind: "success", message });
-  }
 
   useEffect(() => {
     const t = window.setTimeout(() => setDebouncedSearch(search), 300);
@@ -319,7 +317,7 @@ export default function AdminPiCasesPage() {
           <button
             type="button"
             className={DS_SECONDARY_BTN}
-            onClick={() => showComingSoon("Reports are coming soon")}
+            onClick={() => router.push("/admin/pi-cases/reports")}
           >
             Reports
           </button>
@@ -401,8 +399,8 @@ export default function AdminPiCasesPage() {
                 deadlines={deadlines}
                 attorneys={attorneys}
                 loading={loading}
-                onViewAll={() => showComingSoon("This feature is coming soon")}
-                onViewReport={() => showComingSoon("Report viewing is coming soon")}
+                onViewAllDeadlines={() => router.push("/admin/pi-cases/deadlines")}
+                onViewReport={() => router.push("/admin/pi-cases/attorney-reports")}
               />
             </div>
           </div>
@@ -412,7 +410,7 @@ export default function AdminPiCasesPage() {
               <PiCasesActivityFeed
                 items={activity}
                 loading={loading}
-                onViewAll={() => showComingSoon("This feature is coming soon")}
+                onViewAll={() => router.push("/admin/pi-cases/activity")}
               />
             </div>
             <div className="lg:col-span-2">

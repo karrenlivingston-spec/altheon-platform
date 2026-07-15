@@ -59,6 +59,137 @@ def _safe_float(value: Any) -> Optional[float]:
         return None
 
 
+def _firm_bucket_name(row: dict[str, Any]) -> str:
+    """Display bucket for top-attorneys grouping and firm_name filtering."""
+    firm = str(row.get("firm_name") or row.get("attorney_name") or "Unknown").strip()
+    return firm or "Unknown"
+
+
+def _matches_firm_name(row: dict[str, Any], firm_query: str) -> bool:
+    # Known limitation: free-text firm_name fields are not normalized, so
+    # "Smith & Associates" and "Smith and Associates" remain separate buckets.
+    target = firm_query.strip().lower()
+    if not target:
+        return True
+    return _firm_bucket_name(row).lower() == target
+
+
+def _build_pi_case_activities(
+    rows: list[dict[str, Any]], today: date
+) -> list[dict[str, Any]]:
+    activities: list[dict[str, Any]] = []
+    for r in rows:
+        shaped = _shape_board_case(r, today)
+        name = shaped["patient_name"]
+        carrier = str(shaped.get("insurance_carrier") or "—")
+        updated = _parse_utc_dt(r.get("updated_at"))
+        ts_label = ""
+        if updated:
+            ts_label = updated.astimezone(timezone.utc).strftime("%b %d, %Y %I:%M %p")
+
+        if shaped.get("is_overdue"):
+            activities.append(
+                {
+                    "description": f"Records request overdue for {name}",
+                    "tag": carrier,
+                    "timestamp": ts_label,
+                    "type": "overdue",
+                    "sort_ts": updated,
+                }
+            )
+        elif shaped.get("attorney_request_pending"):
+            activities.append(
+                {
+                    "description": f"Attorney records request pending for {name}",
+                    "tag": carrier,
+                    "timestamp": ts_label,
+                    "type": "upload",
+                    "sort_ts": updated,
+                }
+            )
+        elif shaped["status"] == "closed_settled" and shaped.get("settled_amount"):
+            activities.append(
+                {
+                    "description": f"Case settled for {name}",
+                    "tag": carrier,
+                    "timestamp": ts_label,
+                    "type": "settlement",
+                    "sort_ts": updated,
+                }
+            )
+        elif shaped.get("hearing_date"):
+            activities.append(
+                {
+                    "description": f"Hearing scheduled for {name}",
+                    "tag": carrier,
+                    "timestamp": ts_label,
+                    "type": "hearing",
+                    "sort_ts": updated,
+                }
+            )
+        else:
+            activities.append(
+                {
+                    "description": f"Case updated — {shaped['status'].replace('_', ' ')}",
+                    "tag": carrier,
+                    "timestamp": ts_label,
+                    "type": "update",
+                    "sort_ts": updated,
+                }
+            )
+
+    activities.sort(
+        key=lambda x: x.get("sort_ts") or datetime.min.replace(tzinfo=timezone.utc),
+        reverse=True,
+    )
+    return activities
+
+
+def _build_pi_case_deadlines(
+    rows: list[dict[str, Any]],
+    today: date,
+    *,
+    horizon: Optional[date],
+    include_closed: bool = False,
+) -> list[dict[str, Any]]:
+    deadlines: list[dict[str, Any]] = []
+    for r in rows:
+        shaped = _shape_board_case(r, today)
+        if not include_closed and shaped["status"] in _CLOSED_STATUSES:
+            continue
+        name = shaped["patient_name"]
+        carrier = str(shaped.get("insurance_carrier") or "—")
+
+        for field, dtype, label_tpl in (
+            ("records_due_date", "records", "Records due for {name}"),
+            ("hearing_date", "hearing", "Hearing for {name}"),
+        ):
+            d = _parse_date_only(r.get(field))
+            if not d:
+                continue
+            if horizon is not None and d > horizon and d >= today:
+                continue
+            days_until = (d - today).days
+            is_overdue = d < today
+            deadlines.append(
+                {
+                    "date": d.strftime("%b %d").replace(" 0", " "),
+                    "date_iso": d.isoformat(),
+                    "label": label_tpl.format(name=name),
+                    "subtitle": carrier,
+                    "days_until": days_until,
+                    "is_overdue": is_overdue,
+                    "type": dtype,
+                    "case_id": shaped.get("id"),
+                    "patient_name": name,
+                    "sort_date": d,
+                }
+            )
+
+    deadlines.sort(key=lambda x: x["sort_date"])
+    return deadlines
+
+
 def _fetch_cases_with_patients(clinic_id: str) -> list[dict[str, Any]]:
     resp = supabase_execute(
             lambda: supabase.table("pi_cases")
@@ -767,6 +898,7 @@ def list_pi_cases_api(
     clinic_id: str = Query(..., min_length=1),
     patient_id: Optional[str] = Query(default=None),
     search: Optional[str] = Query(default=None),
+    firm_name: Optional[str] = Query(default=None),
 ):
     cid = clinic_id.strip()
     today = datetime.now(timezone.utc).date()
@@ -784,6 +916,8 @@ def list_pi_cases_api(
                 )
         _handle_supabase_error(resp)
         rows = [_shape_board_case(r, today) for r in (resp.data or [])]
+        if firm_name and firm_name.strip():
+            rows = [r for r in rows if _matches_firm_name(r, firm_name)]
         if search and search.strip():
             qstr = search.strip().lower()
             rows = [
@@ -804,82 +938,21 @@ def list_pi_cases_api(
 @router.get("/pi-cases/activity")
 def get_pi_cases_activity(
     clinic_id: str = Query(..., min_length=1),
-    limit: int = Query(default=10, ge=1, le=50),
+    limit: int = Query(default=10, ge=1),
+    offset: int = Query(default=0, ge=0),
+    view_all: bool = Query(default=False),
 ):
     cid = clinic_id.strip()
     today = datetime.now(timezone.utc).date()
+    if view_all:
+        effective_limit = min(limit if limit != 10 else 100, 500)
+    else:
+        effective_limit = min(limit, 50)
     try:
         rows = _fetch_cases_with_patients(cid)
-        activities: list[dict[str, Any]] = []
-        for r in rows:
-            shaped = _shape_board_case(r, today)
-            name = shaped["patient_name"]
-            carrier = str(shaped.get("insurance_carrier") or "—")
-            updated = _parse_utc_dt(r.get("updated_at"))
-            ts_label = ""
-            if updated:
-                ts_label = updated.astimezone(timezone.utc).strftime("%b %d, %Y %I:%M %p")
-
-            if shaped.get("is_overdue"):
-                activities.append(
-                    {
-                        "description": f"Records request overdue for {name}",
-                        "tag": carrier,
-                        "timestamp": ts_label,
-                        "type": "overdue",
-                        "sort_ts": updated,
-                    }
-                )
-            elif shaped.get("attorney_request_pending"):
-                activities.append(
-                    {
-                        "description": f"Attorney records request pending for {name}",
-                        "tag": carrier,
-                        "timestamp": ts_label,
-                        "type": "upload",
-                        "sort_ts": updated,
-                    }
-                )
-            elif shaped["status"] == "closed_settled" and shaped.get("settled_amount"):
-                activities.append(
-                    {
-                        "description": f"Case settled for {name}",
-                        "tag": carrier,
-                        "timestamp": ts_label,
-                        "type": "settlement",
-                        "sort_ts": updated,
-                    }
-                )
-            elif shaped.get("hearing_date"):
-                activities.append(
-                    {
-                        "description": f"Hearing scheduled for {name}",
-                        "tag": carrier,
-                        "timestamp": ts_label,
-                        "type": "hearing",
-                        "sort_ts": updated,
-                    }
-                )
-            else:
-                activities.append(
-                    {
-                        "description": f"Case updated — {shaped['status'].replace('_', ' ')}",
-                        "tag": carrier,
-                        "timestamp": ts_label,
-                        "type": "update",
-                        "sort_ts": updated,
-                    }
-                )
-
-        activities.sort(
-            key=lambda x: x.get("sort_ts") or datetime.min.replace(tzinfo=timezone.utc),
-            reverse=True,
-        )
-        out = []
-        for a in activities[:limit]:
-            item = {k: v for k, v in a.items() if k != "sort_ts"}
-            out.append(item)
-        return out
+        activities = _build_pi_case_activities(rows, today)
+        sliced = activities[offset : offset + effective_limit]
+        return [{k: v for k, v in a.items() if k != "sort_ts"} for a in sliced]
     except HTTPException:
         raise
     except Exception as exc:
@@ -889,48 +962,26 @@ def get_pi_cases_activity(
 @router.get("/pi-cases/deadlines")
 def get_pi_cases_deadlines(
     clinic_id: str = Query(..., min_length=1),
-    limit: int = Query(default=6, ge=1, le=30),
+    limit: int = Query(default=6, ge=1),
+    view_all: bool = Query(default=False),
+    horizon_days: Optional[int] = Query(default=None, ge=1, le=730),
 ):
     cid = clinic_id.strip()
     today = datetime.now(timezone.utc).date()
-    horizon = today + timedelta(days=30)
+    if view_all:
+        effective_limit = min(limit if limit != 6 else 200, 500)
+        days = horizon_days if horizon_days is not None else 365
+        horizon = today + timedelta(days=days)
+    else:
+        effective_limit = min(limit, 30)
+        days = horizon_days if horizon_days is not None else 30
+        horizon = today + timedelta(days=days)
     try:
         rows = _fetch_cases_with_patients(cid)
-        deadlines: list[dict[str, Any]] = []
-        for r in rows:
-            shaped = _shape_board_case(r, today)
-            if shaped["status"] in _CLOSED_STATUSES:
-                continue
-            name = shaped["patient_name"]
-            carrier = str(shaped.get("insurance_carrier") or "—")
-
-            for field, dtype, label_tpl in (
-                ("records_due_date", "records", "Records due for {name}"),
-                ("hearing_date", "hearing", "Hearing for {name}"),
-            ):
-                d = _parse_date_only(r.get(field))
-                if not d:
-                    continue
-                if d > horizon and d >= today:
-                    continue
-                days_until = (d - today).days
-                is_overdue = d < today
-                deadlines.append(
-                    {
-                        "date": d.strftime("%b %d").replace(" 0", " "),
-                        "label": label_tpl.format(name=name),
-                        "subtitle": carrier,
-                        "days_until": days_until,
-                        "is_overdue": is_overdue,
-                        "type": dtype,
-                        "sort_date": d,
-                    }
-                )
-
-        deadlines.sort(key=lambda x: x["sort_date"])
+        deadlines = _build_pi_case_deadlines(rows, today, horizon=horizon)
         return [
             {k: v for k, v in d.items() if k != "sort_date"}
-            for d in deadlines[:limit]
+            for d in deadlines[:effective_limit]
         ]
     except HTTPException:
         raise
@@ -948,9 +999,7 @@ def get_pi_cases_top_attorneys(
         rows = _fetch_cases_with_patients(cid)
         by_firm: dict[str, dict[str, Any]] = {}
         for r in rows:
-            firm = str(r.get("firm_name") or r.get("attorney_name") or "Unknown").strip()
-            if not firm:
-                firm = "Unknown"
+            firm = _firm_bucket_name(r)
             est = _safe_float(r.get("estimated_settlement")) or 0.0
             bucket = by_firm.setdefault(
                 firm, {"firm_name": firm, "case_count": 0, "total_value": 0.0}
