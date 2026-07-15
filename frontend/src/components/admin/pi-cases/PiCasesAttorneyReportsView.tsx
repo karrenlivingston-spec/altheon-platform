@@ -105,9 +105,15 @@ export default function PiCasesAttorneyReportsView() {
     setError(null);
     try {
       const h = await piCasesAuthHeaders();
-      const params = new URLSearchParams({ clinic_id: clinicId, limit: "50" });
+      const params = new URLSearchParams({ clinic_id: clinicId, limit: "20" });
       const res = await fetch(piCasesApiUrl("/top-attorneys", params), { headers: h });
-      setAttorneys(res.ok ? await res.json() : []);
+      if (!res.ok) {
+        setAttorneys([]);
+        setError(`Couldn't load attorney data (HTTP ${res.status})`);
+        return;
+      }
+      const data = await res.json();
+      setAttorneys(Array.isArray(data) ? data : []);
     } catch {
       setError("Could not load attorney list.");
     } finally {
@@ -206,7 +212,7 @@ export default function PiCasesAttorneyReportsView() {
           </p>
           {loadingList ? (
             <p className="text-sm text-gray-500">Loading firms…</p>
-          ) : attorneys.length === 0 ? (
+          ) : error ? null : attorneys.length === 0 ? (
             <p className="text-sm text-gray-500">No attorney data.</p>
           ) : (
             <ul className="divide-y divide-gray-100">
