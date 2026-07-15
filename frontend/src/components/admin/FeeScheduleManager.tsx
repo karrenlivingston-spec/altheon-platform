@@ -29,6 +29,7 @@ type FeeScheduleRow = {
   description?: string | null;
   category?: string | null;
   charge: number;
+  pi_charge?: number | null;
   modifiers: string[];
   is_active: boolean;
 };
@@ -51,6 +52,7 @@ type ParsedImportRow = {
   charge: number;
   modifiers: string[];
   description?: string;
+  pi_charge?: number;
 };
 
 function InlineSectionError({ message }: { message: string }) {
@@ -95,7 +97,14 @@ function parseSpreadsheetRow(row: Record<string, unknown>): ParsedImportRow | nu
   if (!code || charge == null) return null;
   const modifiers = parseModifiersRaw(map.modifiers ?? map.modifier);
   const description = String(map.description ?? "").trim() || undefined;
-  return { cpt_code: code, charge, modifiers, description };
+  const piRaw = map.pi_charge;
+  const pi_charge =
+    piRaw !== undefined && piRaw !== null && String(piRaw).trim() !== ""
+      ? parseCharge(piRaw)
+      : undefined;
+  const parsed: ParsedImportRow = { cpt_code: code, charge, modifiers, description };
+  if (pi_charge != null) parsed.pi_charge = pi_charge;
+  return parsed;
 }
 
 function formatMoney(n: number): string {
@@ -107,10 +116,11 @@ function formatMoney(n: number): string {
 
 function downloadCsvTemplate() {
   const lines = [
-    "CPT Code,Description,Charge,Modifiers",
-    "97110,Therapeutic exercises,150.00,GP",
-    "97140,Manual therapy,125.00,GP;59",
-    "20560,Dry needling 1-2 muscles,175.00,",
+    "# PI Charge column is optional — leave blank for CPTs without a PI rate",
+    "CPT Code,Description,Charge,PI Charge,Modifiers",
+    "97110,Therapeutic exercises,150.00,175.00,GP",
+    "97140,Manual therapy,125.00,,GP;59",
+    "20560,Dry needling 1-2 muscles,175.00,200.00,",
   ];
   const blob = new Blob([lines.join("\n")], { type: "text/csv;charset=utf-8" });
   const url = URL.createObjectURL(blob);
@@ -147,6 +157,8 @@ export function FeeScheduleManager({
   const [modifierRules, setModifierRules] = useState<ModifierRule[]>([]);
   const [editingChargeId, setEditingChargeId] = useState<string | null>(null);
   const [chargeDraft, setChargeDraft] = useState("");
+  const [editingPiChargeId, setEditingPiChargeId] = useState<string | null>(null);
+  const [piChargeDraft, setPiChargeDraft] = useState("");
   const [modifierMenuId, setModifierMenuId] = useState<string | null>(null);
 
   const [addOpen, setAddOpen] = useState(false);
@@ -155,6 +167,7 @@ export function FeeScheduleManager({
   const [cptSearchBusy, setCptSearchBusy] = useState(false);
   const [selectedCpt, setSelectedCpt] = useState<CptCodeOption | null>(null);
   const [addCharge, setAddCharge] = useState("");
+  const [addPiCharge, setAddPiCharge] = useState("");
   const [addModifiers, setAddModifiers] = useState<string[]>([]);
   const [addBusy, setAddBusy] = useState(false);
   const [rowBusyId, setRowBusyId] = useState<string | null>(null);
@@ -196,6 +209,10 @@ export function FeeScheduleManager({
           description: r.description as string | null | undefined,
           category: r.category as string | null | undefined,
           charge: Number(r.charge) || 0,
+          pi_charge:
+            r.pi_charge == null || r.pi_charge === ""
+              ? null
+              : Number(r.pi_charge) || null,
           modifiers: Array.isArray(r.modifiers)
             ? (r.modifiers as string[]).map((m) => String(m).toUpperCase())
             : [],
@@ -313,6 +330,8 @@ export function FeeScheduleManager({
         complete: (results) => {
           const parsed: ParsedImportRow[] = [];
           for (const row of results.data) {
+            const firstCell = Object.values(row)[0];
+            if (String(firstCell ?? "").trim().startsWith("#")) continue;
             const p = parseSpreadsheetRow(row);
             if (p) parsed.push(p);
           }
@@ -341,6 +360,8 @@ export function FeeScheduleManager({
           const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
           const parsed: ParsedImportRow[] = [];
           for (const row of json) {
+            const firstCell = Object.values(row)[0];
+            if (String(firstCell ?? "").trim().startsWith("#")) continue;
             const p = parseSpreadsheetRow(row);
             if (p) parsed.push(p);
           }
@@ -372,11 +393,15 @@ export function FeeScheduleManager({
           method: "POST",
           headers: authHeaders(),
           body: JSON.stringify({
-            items: previewRows.map((r) => ({
-              cpt_code: r.cpt_code,
-              charge: r.charge,
-              modifiers: r.modifiers,
-            })),
+            items: previewRows.map((r) => {
+              const item: Record<string, unknown> = {
+                cpt_code: r.cpt_code,
+                charge: r.charge,
+                modifiers: r.modifiers,
+              };
+              if (r.pi_charge != null) item.pi_charge = r.pi_charge;
+              return item;
+            }),
           }),
         },
       );
@@ -420,6 +445,30 @@ export function FeeScheduleManager({
     }
     const ok = await patchRow(row.id, { charge: n });
     if (ok) setEditingChargeId(null);
+  }
+
+  async function savePiChargeEdit(row: FeeScheduleRow) {
+    const trimmed = piChargeDraft.trim();
+    if (!trimmed) {
+      if (row.pi_charge == null) {
+        setEditingPiChargeId(null);
+        return;
+      }
+      const ok = await patchRow(row.id, { pi_charge: null });
+      if (ok) setEditingPiChargeId(null);
+      return;
+    }
+    const n = parseCharge(trimmed);
+    if (n == null) {
+      setEditingPiChargeId(null);
+      return;
+    }
+    if (n === row.pi_charge) {
+      setEditingPiChargeId(null);
+      return;
+    }
+    const ok = await patchRow(row.id, { pi_charge: n });
+    if (ok) setEditingPiChargeId(null);
   }
 
   function toggleModifier(row: FeeScheduleRow, code: string) {
@@ -469,16 +518,20 @@ export function FeeScheduleManager({
     setAddBusy(true);
     setSectionError(null);
     try {
+      const body: Record<string, unknown> = {
+        cpt_code: selectedCpt.code,
+        charge,
+        modifiers: addModifiers,
+      };
+      const piCharge = parseCharge(addPiCharge);
+      if (piCharge != null) body.pi_charge = piCharge;
+
       const res = await fetch(
         `${API_BASE}/api/fee-schedule?clinic_id=${encodeURIComponent(clinicId)}`,
         {
           method: "POST",
           headers: authHeaders(),
-          body: JSON.stringify({
-            cpt_code: selectedCpt.code,
-            charge,
-            modifiers: addModifiers,
-          }),
+          body: JSON.stringify(body),
         },
       );
       if (!res.ok) {
@@ -491,6 +544,7 @@ export function FeeScheduleManager({
       setSelectedCpt(null);
       setCptSearch("");
       setAddCharge("");
+      setAddPiCharge("");
       setAddModifiers([]);
       await loadSchedule();
       flashSuccess("Code added to fee schedule");
@@ -523,7 +577,7 @@ export function FeeScheduleManager({
           </h3>
           <p className="mt-1 text-sm text-gray-500">
             Upload a CSV or Excel file with columns: CPT Code, Charge, Modifiers
-            (optional)
+            (optional), PI Charge (optional)
           </p>
           <div className="mt-4 flex flex-wrap items-center gap-3">
             <input
@@ -556,6 +610,7 @@ export function FeeScheduleManager({
                     <tr>
                       <th className={DS_TH}>CPT</th>
                       <th className={DS_TH}>Charge</th>
+                      <th className={DS_TH}>PI Charge</th>
                       <th className={DS_TH}>Modifiers</th>
                     </tr>
                   </thead>
@@ -565,6 +620,9 @@ export function FeeScheduleManager({
                         <td className={DS_TD_PRIMARY}>{r.cpt_code}</td>
                         <td className={DS_TD_PRIMARY}>
                           {formatMoney(r.charge)}
+                        </td>
+                        <td className={DS_TD_PRIMARY}>
+                          {r.pi_charge != null ? formatMoney(r.pi_charge) : "—"}
                         </td>
                         <td className={DS_TD_PRIMARY}>
                           {r.modifiers.join(", ") || "—"}
@@ -633,6 +691,7 @@ export function FeeScheduleManager({
                     <th className={DS_TH}>CPT Code</th>
                     <th className={DS_TH}>Description</th>
                     <th className={DS_TH}>Charge</th>
+                    <th className={DS_TH}>PI Charge</th>
                     <th className={DS_TH}>Modifiers</th>
                     <th className={DS_TH}>Active</th>
                     {!readOnly ? <th className={DS_TH}>Actions</th> : null}
@@ -643,7 +702,7 @@ export function FeeScheduleManager({
                     <Fragment key={`cat-${category}`}>
                       <tr className="bg-gray-50/80">
                         <td
-                          colSpan={readOnly ? 6 : 7}
+                          colSpan={readOnly ? 7 : 8}
                           className="px-6 py-2 text-xs font-semibold uppercase tracking-wide text-gray-600"
                         >
                           {category}
@@ -689,10 +748,62 @@ export function FeeScheduleManager({
                                 disabled={rowBusyId === row.id}
                                 onClick={() => {
                                   setEditingChargeId(row.id);
+                                  setEditingPiChargeId(null);
                                   setChargeDraft(String(row.charge));
                                 }}
                               >
                                 {formatMoney(row.charge)}
+                              </button>
+                            )}
+                          </td>
+                          <td className={DS_TD_PRIMARY}>
+                            {readOnly ? (
+                              row.pi_charge != null ? (
+                                formatMoney(row.pi_charge)
+                              ) : (
+                                "—"
+                              )
+                            ) : editingPiChargeId === row.id ? (
+                              <input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                className={`w-28 ${DS_INPUT}`}
+                                value={piChargeDraft}
+                                autoFocus
+                                disabled={rowBusyId === row.id}
+                                placeholder="Optional"
+                                onChange={(e) => setPiChargeDraft(e.target.value)}
+                                onBlur={() => void savePiChargeEdit(row)}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault();
+                                    void savePiChargeEdit(row);
+                                  }
+                                  if (e.key === "Escape") {
+                                    setEditingPiChargeId(null);
+                                  }
+                                }}
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                className="rounded px-1 text-left font-medium tabular-nums hover:bg-gray-100"
+                                style={{ color: TEAL }}
+                                disabled={rowBusyId === row.id}
+                                onClick={() => {
+                                  setEditingPiChargeId(row.id);
+                                  setEditingChargeId(null);
+                                  setPiChargeDraft(
+                                    row.pi_charge != null
+                                      ? String(row.pi_charge)
+                                      : "",
+                                  );
+                                }}
+                              >
+                                {row.pi_charge != null
+                                  ? formatMoney(row.pi_charge)
+                                  : "—"}
                               </button>
                             )}
                           </td>
@@ -852,6 +963,18 @@ export function FeeScheduleManager({
                 className={`mt-1 ${DS_INPUT}`}
                 value={addCharge}
                 onChange={(e) => setAddCharge(e.target.value)}
+              />
+            </label>
+            <label className={`${LABEL_CLASS} mt-4`}>
+              PI Charge (optional)
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                className={`mt-1 ${DS_INPUT}`}
+                value={addPiCharge}
+                onChange={(e) => setAddPiCharge(e.target.value)}
+                placeholder="Leave blank if no PI rate"
               />
             </label>
             <div className="mt-4">

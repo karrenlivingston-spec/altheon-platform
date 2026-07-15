@@ -1560,6 +1560,7 @@ export function PatientDetailView({
         <InsuranceBenefitsLedger patientId={patientId} clinicId={clinicId} />
         <BillingRecordDetailModal
           recordId={billingDetailRecordId}
+          clinicId={clinicId}
           isOpen={billingDetailRecordId != null}
           onClose={() => setBillingDetailRecordId(null)}
           onRecordUpdated={() => void loadSecondaryResources(() => false)}

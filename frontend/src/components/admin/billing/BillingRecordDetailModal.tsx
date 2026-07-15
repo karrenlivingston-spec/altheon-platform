@@ -19,6 +19,7 @@ import PiBillingLineItemsField, {
   type LineItemDraft,
   validateLine,
 } from "@/components/admin/billing/PiBillingLineItemsField";
+import { usePiFeeSchedule } from "@/hooks/usePiFeeSchedule";
 import { supabase } from "@/lib/supabase";
 
 const API_BASE =
@@ -58,6 +59,7 @@ type SaveOp =
 
 export type BillingRecordDetailModalProps = {
   recordId: string | null;
+  clinicId: string | null;
   isOpen: boolean;
   onClose: () => void;
   onRecordUpdated?: () => void;
@@ -111,13 +113,18 @@ function lineLabel(line: LineItemDraft, index: number): string {
 
 function itemsToDrafts(items: BillingLineItem[]): LineItemDraft[] {
   if (items.length === 0) return [emptyLine()];
-  return items.map((item, index) => ({
-    id: `edit-${item.id ?? index}-${Math.random().toString(36).slice(2, 9)}`,
-    serverId: item.id,
-    cptCode: (item.cpt_code ?? "").trim(),
-    rate: rateCentsToInput(item.rate_cents),
-    units: String(item.units ?? 1),
-  }));
+  return items.map((item, index) => {
+    const rateCents = item.rate_cents;
+    const hasSavedRate = rateCents != null && Number(rateCents) > 0;
+    return {
+      id: `edit-${item.id ?? index}-${Math.random().toString(36).slice(2, 9)}`,
+      serverId: item.id,
+      cptCode: (item.cpt_code ?? "").trim(),
+      rate: rateCentsToInput(item.rate_cents),
+      units: String(item.units ?? 1),
+      rateSource: hasSavedRate ? "saved" : "auto",
+    };
+  });
 }
 
 function baselineById(items: BillingLineItem[]): Map<string, BillingLineItem> {
@@ -224,10 +231,12 @@ async function fetchBillingRecord(
 
 export default function BillingRecordDetailModal({
   recordId,
+  clinicId,
   isOpen,
   onClose,
   onRecordUpdated,
 }: BillingRecordDetailModalProps) {
+  const { piRates } = usePiFeeSchedule(isOpen ? clinicId : null);
   const [record, setRecord] = useState<BillingRecordDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -577,6 +586,7 @@ export default function BillingRecordDetailModal({
                   fieldErrors={fieldErrors}
                   submitAttempted={submitAttempted}
                   disabled={saveBusy}
+                  piRates={piRates}
                 />
               ) : (
                 <>
