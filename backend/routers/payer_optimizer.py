@@ -10,6 +10,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 
 from app.dependencies.permissions import BILLING_READ_ROLES, assert_clinic_role
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from routers.fee_schedule import _resolve_bearer_user_id
 
 router = APIRouter()
@@ -83,8 +84,8 @@ def _lookup_payer_rule(
     payer_or = _payer_match_or_filter(query_name)
 
     try:
-        clinic_resp = (
-            supabase.table("payer_coding_rules")
+        clinic_resp = supabase_execute(
+            lambda: supabase.table("payer_coding_rules")
             .select(select_cols)
             .eq("clinic_id", clinic_id)
             .eq("visit_type", visit_type)
@@ -99,8 +100,8 @@ def _lookup_payer_rule(
         traceback.print_exc()
 
     try:
-        global_resp = (
-            supabase.table("payer_coding_rules")
+        global_resp = supabase_execute(
+            lambda: supabase.table("payer_coding_rules")
             .select(select_cols)
             .is_("clinic_id", "null")
             .eq("visit_type", visit_type)
@@ -135,8 +136,8 @@ def _intersection_codes(primary: list[str], secondary: list[str]) -> list[str]:
 
 def _fetch_distinct_payers(clinic_id: Optional[str]) -> list[dict[str, str]]:
     try:
-        resp = (
-            supabase.table("payer_coding_rules")
+        resp = supabase_execute(
+            lambda: supabase.table("payer_coding_rules")
             .select("payer_name, payer_category, clinic_id")
             .execute()
         )

@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException, Query
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from routers.fee_schedule import ClinicUserDep
 
 router = APIRouter()
@@ -23,6 +24,18 @@ def _handle_supabase_error(response: Any) -> None:
     if error:
         detail = getattr(error, "message", None) or str(error)
         raise HTTPException(status_code=500, detail=detail)
+
+
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _int_cents(value: Any) -> int:
@@ -182,8 +195,8 @@ def billing_dashboard(
         else:
             lm_start, lm_end = _month_bounds(today.year, today.month - 1)
 
-        records_resp = (
-            supabase.table("insurance_claims")
+        records_resp = _sb_execute(
+            lambda: supabase.table("insurance_claims")
             .select(
                 "id, clinic_id, patient_id, appointment_id, "
                 "payer_name, first_treatment_date, status, total_amount, "
@@ -195,7 +208,6 @@ def billing_dashboard(
             .order("first_treatment_date", desc=True)
             .execute()
         )
-        _handle_supabase_error(records_resp)
         all_records = [
             _normalize_insurance_claim(r)
             for r in (records_resp.data or [])
@@ -255,8 +267,8 @@ def billing_dashboard(
                 time.min,
                 tzinfo=NY,
             ).astimezone(timezone.utc)
-            appt_resp = (
-                supabase.table("appointments")
+            appt_resp = _sb_execute(
+                lambda: supabase.table("appointments")
                 .select("id")
                 .eq("clinic_id", cid)
                 .eq("status", "completed")
@@ -264,7 +276,6 @@ def billing_dashboard(
                 .lte("start_time", end_of_today.isoformat())
                 .execute()
             )
-            _handle_supabase_error(appt_resp)
             for row in appt_resp.data or []:
                 aid = str(row.get("id") or "")
                 if aid and aid not in billed_appt_ids:
@@ -416,8 +427,8 @@ def billing_dashboard(
         recent_payments: list[dict[str, Any]] = []
         record_by_id = {str(r.get("id") or ""): r for r in all_records if r.get("id")}
         try:
-            pay_resp = (
-                supabase.table("billing_payments")
+            pay_resp = _sb_execute(
+                lambda: supabase.table("billing_payments")
                 .select(
                     "amount_cents, payment_date, payment_method, note, billing_record_id"
                 )
@@ -425,7 +436,6 @@ def billing_dashboard(
                 .limit(50)
                 .execute()
             )
-            _handle_supabase_error(pay_resp)
             for p in pay_resp.data or []:
                 rid = str(p.get("billing_record_id") or "")
                 rec = record_by_id.get(rid)

@@ -10,6 +10,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from routers.fee_schedule import ClinicUserDep
 
 router = APIRouter()
@@ -22,6 +23,18 @@ def _handle_supabase_error(response: Any) -> None:
     if error:
         detail = getattr(error, "message", None) or str(error)
         raise HTTPException(status_code=500, detail=detail)
+
+
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _int_cents(value: Any) -> int:
@@ -67,8 +80,8 @@ def get_benefits_ledger(patient_id: str, clinic: ClinicUserDep):
         if not pid:
             raise HTTPException(status_code=400, detail="Invalid patient_id")
 
-        patient_resp = (
-            supabase.table("patients")
+        patient_resp = _sb_execute(
+            lambda: supabase.table("patients")
             .select(
                 "id,clinic_id,insurance_carrier,insurance_policy_number,insurance_group_number"
             )
@@ -77,7 +90,6 @@ def get_benefits_ledger(patient_id: str, clinic: ClinicUserDep):
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(patient_resp)
         patient_rows = patient_resp.data or []
         if not patient_rows:
             raise HTTPException(status_code=404, detail="Patient not found")
@@ -90,8 +102,8 @@ def get_benefits_ledger(patient_id: str, clinic: ClinicUserDep):
         if not carrier_name:
             return {"plans": [], "no_insurance": True}
 
-        billing_resp = (
-            supabase.table("billing_records")
+        billing_resp = _sb_execute(
+            lambda: supabase.table("billing_records")
             .select(
                 "id,date_of_service,insurance_carrier,total_billed_cents,"
                 "total_paid_cents,amount_paid_cents,status"
@@ -100,7 +112,6 @@ def get_benefits_ledger(patient_id: str, clinic: ClinicUserDep):
             .eq("clinic_id", cid)
             .execute()
         )
-        _handle_supabase_error(billing_resp)
         billing_records = [
             r for r in (billing_resp.data or []) if isinstance(r, dict)
         ]
@@ -108,15 +119,14 @@ def get_benefits_ledger(patient_id: str, clinic: ClinicUserDep):
         record_ids = [str(r.get("id")) for r in billing_records if r.get("id")]
         line_items_by_record: dict[str, list[dict[str, Any]]] = defaultdict(list)
         if record_ids:
-            items_resp = (
-                supabase.table("billing_line_items")
+            items_resp = _sb_execute(
+                lambda: supabase.table("billing_line_items")
                 .select(
                     "billing_record_id,cpt_code,description,units,total_cents,modifiers"
                 )
                 .in_("billing_record_id", record_ids)
                 .execute()
             )
-            _handle_supabase_error(items_resp)
             for item in items_resp.data or []:
                 if not isinstance(item, dict):
                     continue
@@ -124,8 +134,8 @@ def get_benefits_ledger(patient_id: str, clinic: ClinicUserDep):
                 if rid:
                     line_items_by_record[rid].append(item)
 
-        claims_resp = (
-            supabase.table("insurance_claims")
+        claims_resp = _sb_execute(
+            lambda: supabase.table("insurance_claims")
             .select(
                 "payer_name,policy_number,cpt_codes,total_amount,status,submission_date"
             )
@@ -133,7 +143,6 @@ def get_benefits_ledger(patient_id: str, clinic: ClinicUserDep):
             .eq("clinic_id", cid)
             .execute()
         )
-        _handle_supabase_error(claims_resp)
         _ = claims_resp.data or []
 
         groups: dict[str, list[dict[str, Any]]] = defaultdict(list)

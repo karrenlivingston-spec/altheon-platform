@@ -6,6 +6,7 @@ from typing import Any
 from fastapi import APIRouter, Body, HTTPException, Query
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 
@@ -17,29 +18,39 @@ def _handle_supabase_error(response: Any) -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def recalculate_amount_paid_and_status(record_id: str) -> dict[str, Any]:
     """Sum billing_payments, set amount_paid_cents and status (paid/partial). Returns updated row."""
-    pay_resp = (
-        supabase.table("billing_payments")
+    pay_resp = _sb_execute(
+        lambda: supabase.table("billing_payments")
         .select("amount_cents")
         .eq("billing_record_id", record_id)
         .execute()
     )
-    _handle_supabase_error(pay_resp)
     paid_sum = sum(int(r.get("amount_cents") or 0) for r in (pay_resp.data or []))
 
-    rec_resp = (
-        supabase.table("billing_records")
+    rec_resp = _sb_execute(
+        lambda: supabase.table("billing_records")
         .select("id,total_billed_cents,status")
         .eq("id", record_id)
         .limit(1)
         .execute()
     )
-    _handle_supabase_error(rec_resp)
     rows = rec_resp.data or []
     if not rows:
         raise HTTPException(status_code=404, detail="Billing record not found")
@@ -57,13 +68,12 @@ def recalculate_amount_paid_and_status(record_id: str) -> dict[str, Any]:
         elif paid_sum > 0 and paid_sum < billed:
             upd["status"] = "partial"
 
-    upd_resp = (
-        supabase.table("billing_records")
+    upd_resp = _sb_execute(
+        lambda: supabase.table("billing_records")
         .update(upd)
         .eq("id", record_id)
         .execute()
     )
-    _handle_supabase_error(upd_resp)
     out_rows = upd_resp.data or []
     if not out_rows:
         raise HTTPException(status_code=500, detail="Failed to update billing record")
@@ -71,15 +81,14 @@ def recalculate_amount_paid_and_status(record_id: str) -> dict[str, Any]:
 
 
 def _assert_record_in_clinic(record_id: str, clinic_id: str) -> None:
-    chk = (
-        supabase.table("billing_records")
+    chk = _sb_execute(
+        lambda: supabase.table("billing_records")
         .select("id")
         .eq("id", record_id)
         .eq("clinic_id", clinic_id)
         .limit(1)
         .execute()
     )
-    _handle_supabase_error(chk)
     if not chk.data:
         raise HTTPException(status_code=404, detail="Billing record not found")
 
@@ -114,8 +123,7 @@ def create_billing_payment(
         "note": body.get("note"),
     }
     try:
-        ins = supabase.table("billing_payments").insert(row).execute()
-        _handle_supabase_error(ins)
+        ins = _sb_execute(lambda: supabase.table("billing_payments").insert(row).execute())
     except HTTPException:
         raise
     except Exception as exc:
@@ -124,14 +132,13 @@ def create_billing_payment(
         raise HTTPException(status_code=500, detail="Failed to insert payment")
 
     recalculate_amount_paid_and_status(record_id)
-    full = (
-        supabase.table("billing_records")
+    full = _sb_execute(
+        lambda: supabase.table("billing_records")
         .select("*")
         .eq("id", record_id)
         .limit(1)
         .execute()
     )
-    _handle_supabase_error(full)
     fr = full.data or []
     if not fr:
         raise HTTPException(status_code=500, detail="Billing record not found after payment")
@@ -145,14 +152,13 @@ def list_billing_payments(
 ):
     _assert_record_in_clinic(record_id, clinic_id)
     try:
-        resp = (
-            supabase.table("billing_payments")
+        resp = _sb_execute(
+            lambda: supabase.table("billing_payments")
             .select("*")
             .eq("billing_record_id", record_id)
             .order("payment_date", desc=True)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
