@@ -7,6 +7,7 @@ import os
 from typing import Any, Optional
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +36,7 @@ def _log_sms_row(
         "status": status,
     }
     try:
-        supabase.table("sms_logs").insert(row).execute()
+        supabase_execute(lambda: supabase.table("sms_logs").insert(row).execute())
     except Exception:
         logger.exception(
             "sms_logs insert failed message_type=%s to=%s status=%s",
@@ -52,8 +53,8 @@ def _fetch_clinic_sms_config(clinic_id: str) -> tuple[str, str]:
         return "Clinic", (_DEFAULT_MESSAGING_SERVICE_SID or "").strip()
 
     try:
-        resp = (
-            supabase.table("clinics")
+        resp = supabase_execute(
+            lambda: supabase.table("clinics")
             .select("sms_display_name, brand_name, name, messaging_service_sid")
             .eq("id", cid)
             .limit(1)

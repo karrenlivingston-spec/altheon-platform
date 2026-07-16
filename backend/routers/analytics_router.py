@@ -13,6 +13,7 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from routers.fee_schedule import _resolve_bearer_user_id
 
 router = APIRouter()
@@ -125,8 +126,8 @@ def _require_platform_analytics_admin(
 ) -> None:
     user_id = _resolve_bearer_user_id(authorization)
     try:
-        resp = (
-            supabase.table("clinic_users")
+        resp = supabase_execute(
+            lambda: supabase.table("clinic_users")
             .select("role")
             .eq("user_id", user_id)
             .execute()
@@ -268,8 +269,8 @@ def _load_source_maps() -> tuple[
     this_month = _month_start(today)
     last_month = _prev_month_start(today)
 
-    clinics_resp = (
-        supabase.table("clinics")
+    clinics_resp = supabase_execute(
+        lambda: supabase.table("clinics")
         .select("id,name,brand_name,status")
         .order("name")
         .execute()
@@ -280,7 +281,9 @@ def _load_source_maps() -> tuple[
 
     patients_by_clinic: dict[str, set[str]] = {}
     try:
-        p_resp = supabase.table("patients").select("id,clinic_id").execute()
+        p_resp = supabase_execute(
+            lambda: supabase.table("patients").select("id,clinic_id").execute()
+        )
         for row in p_resp.data or []:
             if not isinstance(row, dict):
                 continue
@@ -293,8 +296,8 @@ def _load_source_maps() -> tuple[
 
     appts_by_clinic: dict[str, list[str]] = {}
     try:
-        a_resp = (
-            supabase.table("appointments")
+        a_resp = supabase_execute(
+            lambda: supabase.table("appointments")
             .select("clinic_id,start_time")
             .execute()
         )
@@ -310,8 +313,8 @@ def _load_source_maps() -> tuple[
 
     claims_by_clinic: dict[str, list[dict[str, Any]]] = {}
     try:
-        c_resp = (
-            supabase.table("insurance_claims")
+        c_resp = supabase_execute(
+            lambda: supabase.table("insurance_claims")
             .select("clinic_id,total_amount,status,created_at")
             .execute()
         )
@@ -326,8 +329,8 @@ def _load_source_maps() -> tuple[
 
     active_clinicians_by_clinic: dict[str, int] = {}
     try:
-        cl_resp = (
-            supabase.table("clinicians")
+        cl_resp = supabase_execute(
+            lambda: supabase.table("clinicians")
             .select("clinic_id,is_active")
             .eq("is_active", True)
             .execute()
@@ -434,8 +437,8 @@ def _load_clinic_trend(clinic_id: str, period: str) -> list[dict[str, Any]]:
     revenue_by_day: dict[str, float] = {}
 
     try:
-        appt_resp = (
-            supabase.table("appointments")
+        appt_resp = supabase_execute(
+            lambda: supabase.table("appointments")
             .select("start_time")
             .eq("clinic_id", clinic_id)
             .execute()
@@ -456,8 +459,8 @@ def _load_clinic_trend(clinic_id: str, period: str) -> list[dict[str, Any]]:
         traceback.print_exc()
 
     try:
-        claim_resp = (
-            supabase.table("insurance_claims")
+        claim_resp = supabase_execute(
+            lambda: supabase.table("insurance_claims")
             .select("total_amount,status,created_at")
             .eq("clinic_id", clinic_id)
             .execute()
@@ -571,7 +574,7 @@ def _clinicians_trend_period_range(period: str) -> tuple[date, date]:
 
 def _safe_supabase_count(build_query) -> int:
     try:
-        resp = build_query().limit(1).execute()
+        resp = supabase_execute(lambda: build_query().limit(1).execute())
         return int(getattr(resp, "count", None) or 0)
     except Exception:
         traceback.print_exc()
@@ -658,8 +661,8 @@ def _load_clinic_clinicians(clinic_id: str) -> list[dict[str, Any]]:
         month_start_iso, month_end_iso = _current_month_utc_bounds()
         days_elapsed = _days_elapsed_this_month()
 
-        cl_resp = (
-            supabase.table("clinicians")
+        cl_resp = supabase_execute(
+            lambda: supabase.table("clinicians")
             .select("id,first_name,last_name,title")
             .eq("clinic_id", clinic_id)
             .eq("is_active", True)
@@ -702,8 +705,8 @@ def _load_clinic_clinicians_trend(clinic_id: str, period: str) -> dict[str, Any]
         start, end = _clinicians_trend_period_range(p)
         start_utc, end_utc = _period_utc_bounds(start, end)
 
-        cl_resp = (
-            supabase.table("clinicians")
+        cl_resp = supabase_execute(
+            lambda: supabase.table("clinicians")
             .select("id,first_name,last_name,title")
             .eq("clinic_id", clinic_id)
             .eq("is_active", True)
@@ -711,8 +714,8 @@ def _load_clinic_clinicians_trend(clinic_id: str, period: str) -> dict[str, Any]
         )
         clinicians = [r for r in (cl_resp.data or []) if isinstance(r, dict)]
 
-        appt_resp = (
-            supabase.table("appointments")
+        appt_resp = supabase_execute(
+            lambda: supabase.table("appointments")
             .select("clinician_id,start_time")
             .eq("clinic_id", clinic_id)
             .gte("start_time", start_utc)
