@@ -12,6 +12,7 @@ import requests as req_lib
 from fastapi import APIRouter, File, Form, Header, HTTPException, UploadFile
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.dependencies.permissions import CLINICAL_ROLES, enforce_clinic_role_from_auth_header
 
 router = APIRouter(prefix="/visits", tags=["virtual_visit_transcription"])
@@ -32,9 +33,12 @@ def _parse_soap_json(raw: str) -> dict[str, Any]:
 
 def _mark_visit_failed(visit_id: str) -> None:
     try:
-        supabase.table("virtual_visits").update(
-            {"transcript_status": "failed"}
-        ).eq("id", visit_id).execute()
+        supabase_execute(
+            lambda vid=visit_id: supabase.table("virtual_visits")
+            .update({"transcript_status": "failed"})
+            .eq("id", vid)
+            .execute()
+        )
     except Exception:
         pass
 
@@ -50,8 +54,8 @@ def _resolve_transcribe_author_id(clinic_id: str, auth_user_id: str) -> Optional
         return None
 
     try:
-        resp = (
-            supabase.table("clinic_users")
+        resp = supabase_execute(
+            lambda: supabase.table("clinic_users")
             .select("id")
             .eq("clinic_id", cid)
             .eq("user_id", auth_uid)
@@ -93,8 +97,8 @@ async def transcribe_and_generate(
 
     v: dict[str, Any] | None = None
     try:
-        visit = (
-            supabase.table("virtual_visits")
+        visit = supabase_execute(
+            lambda: supabase.table("virtual_visits")
             .select("id, appointment_id, clinic_id, patient_id, clinician_id")
             .eq("room_id", room_id)
             .limit(1)
@@ -109,9 +113,12 @@ async def transcribe_and_generate(
         if visit_clinic and visit_clinic != cid:
             raise HTTPException(status_code=403, detail="Visit does not belong to this clinic")
 
-        supabase.table("virtual_visits").update(
-            {"transcript_status": "processing"}
-        ).eq("id", v["id"]).execute()
+        supabase_execute(
+            lambda vid=v["id"]: supabase.table("virtual_visits")
+            .update({"transcript_status": "processing"})
+            .eq("id", vid)
+            .execute()
+        )
 
         audio_bytes = await audio.read()
         logger.info(
@@ -152,12 +159,17 @@ async def transcribe_and_generate(
             _mark_visit_failed(str(v["id"]))
             raise HTTPException(status_code=400, detail="No transcript returned from Scribe")
 
-        supabase.table("virtual_visits").update(
-            {
-                "transcript": transcript,
-                "transcript_status": "processing",
-            }
-        ).eq("id", v["id"]).execute()
+        supabase_execute(
+            lambda vid=v["id"]: supabase.table("virtual_visits")
+            .update(
+                {
+                    "transcript": transcript,
+                    "transcript_status": "processing",
+                }
+            )
+            .eq("id", vid)
+            .execute()
+        )
 
         ai_client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
         prompt = f"""You are a physical therapy clinical documentation assistant.
@@ -186,18 +198,23 @@ If a section has limited information from the transcript, document what is avail
 
         soap = _parse_soap_json(message.content[0].text)
 
-        supabase.table("virtual_visits").update(
-            {
-                "soap_draft": soap,
-                "transcript_status": "complete",
-            }
-        ).eq("id", v["id"]).execute()
+        supabase_execute(
+            lambda vid=v["id"]: supabase.table("virtual_visits")
+            .update(
+                {
+                    "soap_draft": soap,
+                    "transcript_status": "complete",
+                }
+            )
+            .eq("id", vid)
+            .execute()
+        )
 
         note_id = None
         appointment_id = v.get("appointment_id")
         if appointment_id:
-            existing = (
-                supabase.table("clinical_notes")
+            existing = supabase_execute(
+                lambda: supabase.table("clinical_notes")
                 .select("id, status")
                 .eq("appointment_id", appointment_id)
                 .limit(1)
@@ -216,9 +233,14 @@ If a section has limited information from the transcript, document what is avail
                 existing_row = existing.data[0]
                 note_id = existing_row.get("id")
                 if str(existing_row.get("status") or "") != "signed":
-                    supabase.table("clinical_notes").update(note_data).eq(
-                        "id", existing_row["id"]
-                    ).execute()
+                    supabase_execute(
+                        lambda eid=existing_row["id"], nd=note_data: supabase.table(
+                            "clinical_notes"
+                        )
+                        .update(nd)
+                        .eq("id", eid)
+                        .execute()
+                    )
             else:
                 patient_id = str(v.get("patient_id") or "").strip()
                 author_id = _resolve_transcribe_author_id(
@@ -226,17 +248,23 @@ If a section has limited information from the transcript, document what is avail
                     actor.user_id,
                 )
                 if patient_id and author_id:
-                    new_note = supabase.table("clinical_notes").insert(
-                        {
-                            **note_data,
-                            "appointment_id": appointment_id,
-                            "clinic_id": v["clinic_id"],
-                            "patient_id": patient_id,
-                            "author_id": author_id,
-                            "note_type": "progress_note",
-                            "status": "draft",
-                        }
-                    ).execute()
+                    new_note = supabase_execute(
+                        lambda nd=note_data, appt_id=appointment_id, vc=v["clinic_id"], pt_id=patient_id, auth_id=author_id: supabase.table(
+                            "clinical_notes"
+                        )
+                        .insert(
+                            {
+                                **nd,
+                                "appointment_id": appt_id,
+                                "clinic_id": vc,
+                                "patient_id": pt_id,
+                                "author_id": auth_id,
+                                "note_type": "progress_note",
+                                "status": "draft",
+                            }
+                        )
+                        .execute()
+                    )
                     if new_note.data:
                         note_id = new_note.data[0]["id"]
 
@@ -278,8 +306,8 @@ async def generate_soap_from_transcript(
 ):
     """Fallback: regenerate SOAP from existing transcript without re-uploading audio."""
     try:
-        visit = (
-            supabase.table("virtual_visits")
+        visit = supabase_execute(
+            lambda: supabase.table("virtual_visits")
             .select(
                 "id, transcript, appointment_id, clinic_id, patient_id, clinician_id"
             )
@@ -327,12 +355,17 @@ TRANSCRIPT:
 
         soap = _parse_soap_json(message.content[0].text)
 
-        supabase.table("virtual_visits").update(
-            {
-                "soap_draft": soap,
-                "transcript_status": "complete",
-            }
-        ).eq("id", v["id"]).execute()
+        supabase_execute(
+            lambda vid=v["id"]: supabase.table("virtual_visits")
+            .update(
+                {
+                    "soap_draft": soap,
+                    "transcript_status": "complete",
+                }
+            )
+            .eq("id", vid)
+            .execute()
+        )
 
         return {"soap": soap, "appointment_id": v.get("appointment_id")}
 

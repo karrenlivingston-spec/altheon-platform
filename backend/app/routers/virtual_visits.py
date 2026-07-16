@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.sms import send_sms
 from app.utils.email import send_email
 from routers.fee_schedule import ClinicUserDep
@@ -30,6 +31,18 @@ def _handle_supabase_error(response: Any) -> None:
     if error:
         detail = getattr(error, "message", None) or str(error)
         raise HTTPException(status_code=500, detail=detail)
+
+
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _to_e164_us(phone: str) -> str:
@@ -59,14 +72,13 @@ def _fetch_visit_by_room(room_id: str) -> dict[str, Any]:
     if not rid:
         raise HTTPException(status_code=404, detail="Visit not found")
     try:
-        resp = (
-            supabase.table("virtual_visits")
+        resp = _sb_execute(
+            lambda: supabase.table("virtual_visits")
             .select("*")
             .eq("room_id", rid)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -97,8 +109,8 @@ def _fetch_clinic_branding(clinic_id: str) -> dict[str, str | None]:
     if not cid:
         return defaults
     try:
-        resp = (
-            supabase.table("clinics")
+        resp = supabase_execute(
+            lambda: supabase.table("clinics")
             .select("name, brand_name, email_from, email_from_name")
             .eq("id", cid)
             .limit(1)
@@ -129,8 +141,8 @@ def _fetch_patient_email(patient_id: str) -> str | None:
     if not pid:
         return None
     try:
-        resp = (
-            supabase.table("patients")
+        resp = supabase_execute(
+            lambda: supabase.table("patients")
             .select("email")
             .eq("id", pid)
             .limit(1)
@@ -153,8 +165,8 @@ def _patient_first_name(patient_name: str, patient_id: str) -> str:
     if not pid:
         return "there"
     try:
-        resp = (
-            supabase.table("patients")
+        resp = supabase_execute(
+            lambda: supabase.table("patients")
             .select("first_name")
             .eq("id", pid)
             .limit(1)
@@ -175,8 +187,8 @@ def _format_appointment_datetime(appointment_id: str) -> str:
     if not aid:
         return "your scheduled time"
     try:
-        resp = (
-            supabase.table("appointments")
+        resp = supabase_execute(
+            lambda: supabase.table("appointments")
             .select("start_time")
             .eq("id", aid)
             .limit(1)
@@ -274,8 +286,8 @@ def create_virtual_visit(body: CreateVisitBody, clinic: ClinicUserDep):
     }
 
     try:
-        insert_resp = (
-            supabase.table("virtual_visits")
+        insert_resp = _sb_execute(
+            lambda: supabase.table("virtual_visits")
             .insert(
                 {
                     "appointment_id": body.appointment_id.strip(),
@@ -288,7 +300,6 @@ def create_virtual_visit(body: CreateVisitBody, clinic: ClinicUserDep):
             )
             .execute()
         )
-        _handle_supabase_error(insert_resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -436,13 +447,12 @@ def clinician_ready(
         update_payload["status"] = "pending"
 
     try:
-        upd = (
-            supabase.table("virtual_visits")
+        upd = _sb_execute(
+            lambda: supabase.table("virtual_visits")
             .update(update_payload)
             .eq("room_id", room_id.strip())
             .execute()
         )
-        _handle_supabase_error(upd)
     except HTTPException:
         raise
     except Exception as exc:
@@ -471,15 +481,14 @@ def clinician_ready(
 @router.get("/clinician/active")
 def list_active_clinician_visits(clinic: ClinicUserDep):
     try:
-        resp = (
-            supabase.table("virtual_visits")
+        resp = _sb_execute(
+            lambda: supabase.table("virtual_visits")
             .select("*")
             .eq("clinic_id", clinic.clinic_id)
             .in_("status", ["waiting", "pending", "active"])
             .order("started_at", desc=True)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -557,13 +566,12 @@ def join_visit(room_id: str, body: JoinVisitBody):
         update_payload["started_at"] = joined_at
 
     try:
-        upd = (
-            supabase.table("virtual_visits")
+        upd = _sb_execute(
+            lambda: supabase.table("virtual_visits")
             .update(update_payload)
             .eq("room_id", room_id.strip())
             .execute()
         )
-        _handle_supabase_error(upd)
     except HTTPException:
         raise
     except Exception as exc:
@@ -601,8 +609,8 @@ def end_visit(room_id: str, clinic: ClinicUserDep):
     meta["ended_at"] = ended_at
 
     try:
-        upd = (
-            supabase.table("virtual_visits")
+        upd = _sb_execute(
+            lambda: supabase.table("virtual_visits")
             .update(
                 {
                     "status": "completed",
@@ -613,7 +621,6 @@ def end_visit(room_id: str, clinic: ClinicUserDep):
             .eq("room_id", room_id.strip())
             .execute()
         )
-        _handle_supabase_error(upd)
     except HTTPException:
         raise
     except Exception as exc:
