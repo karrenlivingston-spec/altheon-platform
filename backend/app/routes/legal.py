@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 
@@ -84,8 +85,8 @@ def create_legal_request(payload: LegalRequestPayload):
     }
 
     try:
-        insert_resp = (
-            supabase.table("legal_requests")
+        insert_resp = supabase_execute(
+            lambda: supabase.table("legal_requests")
             .insert(insert_payload)
             .execute()
         )

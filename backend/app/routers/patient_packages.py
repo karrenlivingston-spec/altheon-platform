@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -18,6 +19,18 @@ def _handle_supabase_error(response: Any) -> None:
     if error:
         detail = getattr(error, "message", None) or str(error)
         raise HTTPException(status_code=500, detail=detail)
+
+
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 class PackageCreate(BaseModel):
@@ -42,15 +55,14 @@ def list_patient_packages(
     patient_id: str = Query(...),
 ):
     try:
-        resp = (
-            supabase.table("patient_packages")
+        resp = _sb_execute(
+            lambda: supabase.table("patient_packages")
             .select("*")
             .eq("clinic_id", clinic_id)
             .eq("patient_id", patient_id)
             .order("purchase_date", desc=True)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -77,8 +89,9 @@ def create_patient_package(body: PackageCreate):
         "notes": body.notes,
     }
     try:
-        ins = supabase.table("patient_packages").insert(insert_row).execute()
-        _handle_supabase_error(ins)
+        ins = _sb_execute(
+            lambda: supabase.table("patient_packages").insert(insert_row).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -103,13 +116,12 @@ def update_patient_package(package_id: str, body: PackageUpdate):
     data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     try:
-        result = (
-            supabase.table("patient_packages")
+        result = _sb_execute(
+            lambda: supabase.table("patient_packages")
             .update(data)
             .eq("id", package_id)
             .execute()
         )
-        _handle_supabase_error(result)
     except HTTPException:
         raise
     except Exception as exc:

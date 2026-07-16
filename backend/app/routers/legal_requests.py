@@ -9,6 +9,7 @@ from fastapi import APIRouter, Body, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.services.system_tasks import (
     TASK_LEGAL_REQUEST,
     LEGAL_TERMINAL_STATUSES,
@@ -33,6 +34,18 @@ def _handle_supabase_error(response: Any) -> None:
     if error:
         detail = getattr(error, "message", None) or str(error)
         raise HTTPException(status_code=500, detail=detail)
+
+
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _now_iso() -> str:
@@ -111,14 +124,13 @@ class LegalRequestPatch(BaseModel):
 def get_legal_requests_stats(clinic_id: str = Query(..., min_length=1)):
     cid = clinic_id.strip()
     try:
-        resp = (
-            supabase.table("legal_requests")
+        resp = _sb_execute(
+            lambda: supabase.table("legal_requests")
             .select("id, status, request_date")
             .eq("clinic_id", cid)
             .neq("status", "archived")
             .execute()
         )
-        _handle_supabase_error(resp)
         rows = [r for r in (resp.data or []) if isinstance(r, dict)]
         today = date.today()
         overdue_cutoff = today - timedelta(days=30)
@@ -175,8 +187,7 @@ def list_legal_requests(
         else:
             q = q.neq("status", "archived")
 
-        resp = q.execute()
-        _handle_supabase_error(resp)
+        resp = _sb_execute(lambda: q.execute())
         rows = [_normalize_row(r) for r in (resp.data or []) if isinstance(r, dict)]
 
         if search and str(search).strip():
@@ -219,8 +230,9 @@ def create_legal_request(body: LegalRequestCreate):
     }
 
     try:
-        resp = supabase.table("legal_requests").insert(payload).execute()
-        _handle_supabase_error(resp)
+        resp = _sb_execute(
+            lambda: supabase.table("legal_requests").insert(payload).execute()
+        )
         rows = resp.data or []
         if not rows:
             raise HTTPException(status_code=500, detail="Failed to create legal request")
@@ -260,20 +272,19 @@ def update_legal_request(request_id: str, body: LegalRequestPatch):
     patch["updated_at"] = _now_iso()
 
     try:
-        resp = (
-            supabase.table("legal_requests")
+        resp = _sb_execute(
+            lambda: supabase.table("legal_requests")
             .update(patch)
             .eq("id", rid)
             .execute()
         )
-        _handle_supabase_error(resp)
         rows = resp.data or []
         if not rows:
             raise HTTPException(status_code=404, detail="Legal request not found")
         row = rows[0]
         if row.get("patient_id"):
-            patient_resp = (
-                supabase.table("patients")
+            patient_resp = _sb_execute(
+                lambda: supabase.table("patients")
                 .select("date_of_birth, phone")
                 .eq("id", row["patient_id"])
                 .limit(1)
@@ -313,13 +324,12 @@ def archive_legal_request(request_id: str):
         raise HTTPException(status_code=400, detail="request_id is required")
 
     try:
-        resp = (
-            supabase.table("legal_requests")
+        resp = _sb_execute(
+            lambda: supabase.table("legal_requests")
             .update({"status": "archived", "updated_at": _now_iso()})
             .eq("id", rid)
             .execute()
         )
-        _handle_supabase_error(resp)
         if not resp.data:
             raise HTTPException(status_code=404, detail="Legal request not found")
         resolve_system_task(
