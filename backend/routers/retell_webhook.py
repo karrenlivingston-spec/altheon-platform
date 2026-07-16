@@ -11,6 +11,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.sms import send_sms
 
 router = APIRouter()
@@ -95,6 +96,13 @@ def _handle_supabase_error(response: Any) -> None:
         raise RuntimeError(detail)
 
 
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    resp = supabase_execute(fn)
+    _handle_supabase_error(resp)
+    return resp
+
+
 def _to_e164_us(phone: str) -> str:
     d = "".join(c for c in (phone or "") if c.isdigit())
     if len(d) == 10:
@@ -147,14 +155,13 @@ def _parse_appointment_datetime(date_raw: str, time_raw: str) -> Optional[dateti
 
 def _duration_minutes(treatment_type_id: str) -> int:
     try:
-        resp = (
-            supabase.table("treatment_types")
+        resp = _sb_execute(
+            lambda: supabase.table("treatment_types")
             .select("duration_minutes")
             .eq("id", treatment_type_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(resp)
         rows = resp.data or []
         if rows:
             return int(rows[0].get("duration_minutes") or 60)
@@ -171,14 +178,13 @@ def _resolve_or_create_patient(
     dob: str,
 ) -> str:
     phone_norm = _to_e164_us(phone)
-    lookup = (
-        supabase.table("patients")
+    lookup = _sb_execute(
+        lambda: supabase.table("patients")
         .select("id")
         .eq("phone", phone_norm)
         .limit(1)
         .execute()
     )
-    _handle_supabase_error(lookup)
     rows = lookup.data or []
     if rows:
         patient_id = str(rows[0]["id"])
@@ -191,26 +197,26 @@ def _resolve_or_create_patient(
         }
         if dob:
             row["date_of_birth"] = dob
-        ins = supabase.table("patients").insert(row).execute()
-        _handle_supabase_error(ins)
+        ins = _sb_execute(lambda: supabase.table("patients").insert(row).execute())
         ins_rows = ins.data or []
         if not ins_rows:
             raise RuntimeError("Failed to create patient")
         patient_id = str(ins_rows[0]["id"])
 
-    access = (
-        supabase.table("patient_clinic_access")
+    access = _sb_execute(
+        lambda: supabase.table("patient_clinic_access")
         .select("id")
         .eq("patient_id", patient_id)
         .eq("clinic_id", VITALITY_CLINIC_ID)
         .limit(1)
         .execute()
     )
-    _handle_supabase_error(access)
     if not (access.data or []):
-        supabase.table("patient_clinic_access").insert(
-            {"patient_id": patient_id, "clinic_id": VITALITY_CLINIC_ID}
-        ).execute()
+        supabase_execute(
+            lambda pid=patient_id: supabase.table("patient_clinic_access")
+            .insert({"patient_id": pid, "clinic_id": VITALITY_CLINIC_ID})
+            .execute()
+        )
 
     return patient_id
 
@@ -271,8 +277,8 @@ def _book_appointment(fields: dict[str, str]) -> Optional[str]:
         dob=fields.get("patient_dob", "").strip(),
     )
 
-    ins = (
-        supabase.table("appointments")
+    ins = _sb_execute(
+        lambda: supabase.table("appointments")
         .insert(
             {
                 "clinic_id": VITALITY_CLINIC_ID,
@@ -289,7 +295,6 @@ def _book_appointment(fields: dict[str, str]) -> Optional[str]:
         )
         .execute()
     )
-    _handle_supabase_error(ins)
     rows = ins.data or []
     if not rows:
         raise RuntimeError("Appointment insert returned no row")

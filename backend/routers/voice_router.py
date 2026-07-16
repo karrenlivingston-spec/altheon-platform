@@ -13,6 +13,7 @@ from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from routers.fee_schedule import _resolve_bearer_user_id
 
 try:
@@ -111,8 +112,8 @@ def _require_platform_voice_admin(
 ) -> None:
     user_id = _resolve_bearer_user_id(authorization)
     try:
-        resp = (
-            supabase.table("clinic_users")
+        resp = supabase_execute(
+            lambda: supabase.table("clinic_users")
             .select("role")
             .eq("user_id", user_id)
             .execute()
@@ -138,8 +139,8 @@ def _clinic_id_for_agent(agent_id: Optional[str]) -> Optional[str]:
     agent = str(agent_id or "").strip()
     if agent:
         try:
-            resp = (
-                supabase.table("clinics")
+            resp = supabase_execute(
+                lambda: supabase.table("clinics")
                 .select("id")
                 .eq("elevenlabs_agent_id", agent)
                 .limit(1)
@@ -340,8 +341,8 @@ async def elevenlabs_post_call_webhook(request: Request):
             return JSONResponse(status_code=200, content={"status": "ok"})
 
         row = _build_call_log_row(event)
-        resp = (
-            supabase.table("call_logs")
+        resp = supabase_execute(
+            lambda: supabase.table("call_logs")
             .upsert(row, on_conflict="conversation_id")
             .execute()
         )
@@ -401,11 +402,11 @@ def list_clinic_calls(
             count_q = count_q.gte("started_at", start_iso).lt("started_at", end_iso)
             data_q = data_q.gte("started_at", start_iso).lt("started_at", end_iso)
 
-        count_resp = count_q.limit(1).execute()
+        count_resp = supabase_execute(lambda: count_q.limit(1).execute())
         total = int(getattr(count_resp, "count", None) or 0)
 
-        data_resp = (
-            data_q.order("started_at", desc=True)
+        data_resp = supabase_execute(
+            lambda: data_q.order("started_at", desc=True)
             .range(offset, offset + size - 1)
             .execute()
         )
@@ -441,8 +442,8 @@ def get_call_transcript(
     call_pk = call_id.strip()
 
     try:
-        resp = (
-            supabase.table("call_logs")
+        resp = supabase_execute(
+            lambda: supabase.table("call_logs")
             .select("conversation_id, transcript")
             .eq("id", call_pk)
             .eq("clinic_id", cid)
@@ -480,8 +481,8 @@ def clinic_outcomes_report(
             _parse_date_param(date_to),
         )
 
-        resp = (
-            supabase.table("call_logs")
+        resp = supabase_execute(
+            lambda: supabase.table("call_logs")
             .select(
                 "outcome, appointment_booked, intake_completed, "
                 "duration_seconds, started_at"

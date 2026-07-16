@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Query
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from routers.fee_schedule import ClinicUserDep
 
 router = APIRouter()
@@ -97,8 +98,8 @@ def _fetch_period_logs(
     end_utc: datetime,
 ) -> list[dict[str, Any]]:
     try:
-        resp = (
-            supabase.table("voice_interaction_logs")
+        resp = supabase_execute(
+            lambda: supabase.table("voice_interaction_logs")
             .select(
                 "id, caller_name, caller_phone, outcome, duration_seconds, "
                 "success_flag, intent_detected, created_at, appointment_id"
