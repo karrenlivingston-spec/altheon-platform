@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, Response
 from pydantic import BaseModel
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 patients_groups_router = APIRouter()
@@ -24,6 +25,18 @@ def _handle_supabase_error(response: Any) -> None:
     if error:
         detail = getattr(error, "message", None) or str(error)
         raise HTTPException(status_code=500, detail=detail)
+
+
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _shape_group(row: dict[str, Any]) -> dict[str, Any]:
@@ -68,14 +81,13 @@ def _shape_patient_group(row: dict[str, Any]) -> dict[str, Any]:
 
 def _fetch_group(group_id: str) -> dict[str, Any]:
     try:
-        resp = (
-            supabase.table("groups")
+        resp = _sb_execute(
+            lambda: supabase.table("groups")
             .select(_GROUP_COLUMNS)
             .eq("id", group_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -112,14 +124,13 @@ class AddMemberBody(BaseModel):
 @router.get("")
 def list_groups(clinic_id: str = Query(...)):
     try:
-        resp = (
-            supabase.table("groups")
+        resp = _sb_execute(
+            lambda: supabase.table("groups")
             .select(_GROUP_COLUMNS)
             .eq("clinic_id", clinic_id)
             .order("name")
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -140,8 +151,7 @@ def create_group(body: GroupCreate):
         "is_active": True,
     }
     try:
-        ins = supabase.table("groups").insert(row).execute()
-        _handle_supabase_error(ins)
+        ins = _sb_execute(lambda: supabase.table("groups").insert(row).execute())
     except HTTPException:
         raise
     except Exception as exc:
@@ -161,8 +171,9 @@ def update_group(group_id: str, body: GroupUpdate):
         raise HTTPException(status_code=400, detail="No fields to update")
 
     try:
-        upd = supabase.table("groups").update(data).eq("id", group_id).execute()
-        _handle_supabase_error(upd)
+        upd = _sb_execute(
+            lambda: supabase.table("groups").update(data).eq("id", group_id).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -178,8 +189,9 @@ def update_group(group_id: str, body: GroupUpdate):
 @router.delete("/{group_id}", status_code=204)
 def delete_group(group_id: str):
     try:
-        dele = supabase.table("groups").delete().eq("id", group_id).execute()
-        _handle_supabase_error(dele)
+        dele = _sb_execute(
+            lambda: supabase.table("groups").delete().eq("id", group_id).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -192,14 +204,13 @@ def delete_group(group_id: str):
 def list_group_members(group_id: str):
     _fetch_group(group_id)
     try:
-        resp = (
-            supabase.table("patient_group_memberships")
+        resp = _sb_execute(
+            lambda: supabase.table("patient_group_memberships")
             .select("id, patient_id, created_at, patients(first_name, last_name)")
             .eq("group_id", group_id)
             .order("created_at")
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -221,15 +232,14 @@ def add_group_member(group_id: str, body: AddMemberBody):
         )
 
     try:
-        existing = (
-            supabase.table("patient_group_memberships")
+        existing = _sb_execute(
+            lambda: supabase.table("patient_group_memberships")
             .select("id, patient_id, group_id, clinic_id, created_at")
             .eq("group_id", group_id)
             .eq("patient_id", patient_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(existing)
     except HTTPException:
         raise
     except Exception as exc:
@@ -245,22 +255,22 @@ def add_group_member(group_id: str, body: AddMemberBody):
         "clinic_id": clinic_id,
     }
     try:
-        ins = supabase.table("patient_group_memberships").insert(row).execute()
-        _handle_supabase_error(ins)
+        ins = _sb_execute(
+            lambda: supabase.table("patient_group_memberships").insert(row).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
         err = str(exc).lower()
         if "duplicate" in err or "unique" in err or "23505" in err:
-            dup = (
-                supabase.table("patient_group_memberships")
+            dup = _sb_execute(
+                lambda: supabase.table("patient_group_memberships")
                 .select("id, patient_id, group_id, clinic_id, created_at")
                 .eq("group_id", group_id)
                 .eq("patient_id", patient_id)
                 .limit(1)
                 .execute()
             )
-            _handle_supabase_error(dup)
             if dup.data:
                 return dup.data[0]
         logger.exception("add_group_member insert failed group_id=%s", group_id)
@@ -275,14 +285,13 @@ def add_group_member(group_id: str, body: AddMemberBody):
 @router.delete("/{group_id}/members/{patient_id}", status_code=204)
 def remove_group_member(group_id: str, patient_id: str):
     try:
-        dele = (
-            supabase.table("patient_group_memberships")
+        dele = _sb_execute(
+            lambda: supabase.table("patient_group_memberships")
             .delete()
             .eq("group_id", group_id)
             .eq("patient_id", patient_id)
             .execute()
         )
-        _handle_supabase_error(dele)
     except HTTPException:
         raise
     except Exception as exc:
@@ -301,14 +310,13 @@ def list_patient_groups(
     clinic_id: str = Query(...),
 ):
     try:
-        resp = (
-            supabase.table("patient_group_memberships")
+        resp = _sb_execute(
+            lambda: supabase.table("patient_group_memberships")
             .select("groups(id, name, color, priority_flag)")
             .eq("patient_id", patient_id)
             .eq("clinic_id", clinic_id)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:

@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Query
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 
@@ -28,8 +29,8 @@ def _empty_stats() -> dict[str, Any]:
 @router.get("/memberships/stats")
 async def memberships_stats(clinic_id: str = Query(...)):
     try:
-        active = (
-            supabase.table("patient_memberships")
+        active = supabase_execute(
+            lambda: supabase.table("patient_memberships")
             .select("id", count="exact")
             .eq("clinic_id", clinic_id)
             .eq("status", "active")
@@ -40,8 +41,8 @@ async def memberships_stats(clinic_id: str = Query(...)):
         if active_count == 0 and active.data:
             active_count = len(active.data)
 
-        enrollments = (
-            supabase.table("patient_memberships")
+        enrollments = supabase_execute(
+            lambda: supabase.table("patient_memberships")
             .select(
                 "membership_tiers!patient_memberships_tier_id_fkey(price_cents)"
             )
@@ -54,8 +55,8 @@ async def memberships_stats(clinic_id: str = Query(...)):
             for r in (enrollments.data or [])
         )
 
-        renew = (
-            supabase.table("patient_memberships")
+        renew = supabase_execute(
+            lambda: supabase.table("patient_memberships")
             .select("auto_renew")
             .eq("clinic_id", clinic_id)
             .eq("status", "active")
@@ -68,8 +69,8 @@ async def memberships_stats(clinic_id: str = Query(...)):
             else 0
         )
 
-        visits = (
-            supabase.table("patient_memberships")
+        visits = supabase_execute(
+            lambda: supabase.table("patient_memberships")
             .select("visits_remaining")
             .eq("clinic_id", clinic_id)
             .eq("status", "active")
@@ -96,8 +97,8 @@ async def memberships_stats(clinic_id: str = Query(...)):
 @router.get("/memberships/revenue-chart")
 async def memberships_revenue_chart(clinic_id: str = Query(...)):
     try:
-        rows = (
-            supabase.table("patient_memberships")
+        rows = supabase_execute(
+            lambda: supabase.table("patient_memberships")
             .select(
                 "created_at, membership_tiers!patient_memberships_tier_id_fkey(price_cents)"
             )
@@ -135,8 +136,8 @@ async def memberships_revenue_chart(clinic_id: str = Query(...)):
 @router.get("/memberships/utilization")
 async def memberships_utilization(clinic_id: str = Query(...)):
     try:
-        rows = (
-            supabase.table("patient_memberships")
+        rows = supabase_execute(
+            lambda: supabase.table("patient_memberships")
             .select(
                 "visits_used, visits_remaining, "
                 "membership_tiers!patient_memberships_tier_id_fkey(visits_included)"
@@ -187,8 +188,8 @@ async def memberships_utilization(clinic_id: str = Query(...)):
 @router.get("/memberships/tier-stats")
 async def memberships_tier_stats(clinic_id: str = Query(...)):
     try:
-        rows = (
-            supabase.table("patient_memberships")
+        rows = supabase_execute(
+            lambda: supabase.table("patient_memberships")
             .select(
                 "tier_id, visits_used, "
                 "membership_tiers!patient_memberships_tier_id_fkey(name, price_cents, visits_included)"
@@ -242,8 +243,8 @@ async def memberships_tier_stats(clinic_id: str = Query(...)):
 @router.get("/memberships/recent-enrollments")
 async def memberships_recent_enrollments(clinic_id: str = Query(...)):
     try:
-        rows = (
-            supabase.table("patient_memberships")
+        rows = supabase_execute(
+            lambda: supabase.table("patient_memberships")
             .select(
                 "id, created_at, "
                 "membership_tiers!patient_memberships_tier_id_fkey(name, price_cents), "
@@ -280,8 +281,8 @@ async def memberships_recent_enrollments(clinic_id: str = Query(...)):
 @router.get("/memberships/activity-feed")
 async def memberships_activity_feed(clinic_id: str = Query(...)):
     try:
-        rows = (
-            supabase.table("patient_memberships")
+        rows = supabase_execute(
+            lambda: supabase.table("patient_memberships")
             .select(
                 "id, status, created_at, updated_at, "
                 "membership_tiers!patient_memberships_tier_id_fkey(name), "
@@ -331,8 +332,8 @@ async def memberships_activity_feed(clinic_id: str = Query(...)):
 @router.get("/memberships/visits-overview")
 async def memberships_visits_overview(clinic_id: str = Query(...)):
     try:
-        rows = (
-            supabase.table("patient_memberships")
+        rows = supabase_execute(
+            lambda: supabase.table("patient_memberships")
             .select(
                 "visits_used, visits_remaining, "
                 "membership_tiers!patient_memberships_tier_id_fkey(name, visits_included)"

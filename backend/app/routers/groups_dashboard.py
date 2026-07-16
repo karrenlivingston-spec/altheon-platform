@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Query
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 
@@ -50,8 +51,8 @@ def _sum_revenue_mtd_cents(
     if not patient_ids:
         return 0
     try:
-        br_resp = (
-            supabase.table("billing_records")
+        br_resp = supabase_execute(
+            lambda: supabase.table("billing_records")
             .select("id")
             .eq("clinic_id", clinic_id)
             .in_("patient_id", patient_ids)
@@ -62,8 +63,8 @@ def _sum_revenue_mtd_cents(
         ]
         if not record_ids:
             return 0
-        pay_resp = (
-            supabase.table("billing_payments")
+        pay_resp = supabase_execute(
+            lambda: supabase.table("billing_payments")
             .select("amount_cents")
             .in_("billing_record_id", record_ids)
             .gte("payment_date", month_start)
@@ -84,8 +85,8 @@ def _count_appts_mtd(
     if not patient_ids:
         return 0
     try:
-        appts_res = (
-            supabase.table("appointments")
+        appts_res = supabase_execute(
+            lambda: supabase.table("appointments")
             .select("id", count="exact")
             .eq("clinic_id", clinic_id)
             .in_("patient_id", patient_ids)
@@ -111,8 +112,8 @@ def _empty_stats() -> dict[str, Any]:
 async def _fetch_group_cards(clinic_id: str) -> list[dict[str, Any]]:
     month_start, month_start_iso = _month_start_iso()
 
-    groups_res = (
-        supabase.table("groups")
+    groups_res = supabase_execute(
+        lambda: supabase.table("groups")
         .select("id, name, description, color, priority_flag, is_active")
         .eq("clinic_id", clinic_id)
         .execute()
@@ -123,10 +124,10 @@ async def _fetch_group_cards(clinic_id: str) -> list[dict[str, Any]]:
     for g in groups:
         if not isinstance(g, dict):
             continue
-        members_res = (
-            supabase.table("patient_group_memberships")
+        members_res = supabase_execute(
+            lambda gid=g["id"]: supabase.table("patient_group_memberships")
             .select("patient_id")
-            .eq("group_id", g["id"])
+            .eq("group_id", gid)
             .execute()
         )
         patient_ids = [
@@ -159,8 +160,8 @@ async def _fetch_group_cards(clinic_id: str) -> list[dict[str, Any]]:
 @router.get("/groups/stats")
 async def groups_stats(clinic_id: str = Query(...)):
     try:
-        groups_res = (
-            supabase.table("groups")
+        groups_res = supabase_execute(
+            lambda: supabase.table("groups")
             .select("id, is_active")
             .eq("clinic_id", clinic_id)
             .execute()
@@ -171,8 +172,8 @@ async def groups_stats(clinic_id: str = Query(...)):
 
         unique_patients: set[str] = set()
         if group_ids:
-            members_res = (
-                supabase.table("patient_group_memberships")
+            members_res = supabase_execute(
+                lambda: supabase.table("patient_group_memberships")
                 .select("patient_id")
                 .in_("group_id", group_ids)
                 .execute()
@@ -287,8 +288,8 @@ async def groups_distribution(clinic_id: str = Query(...)):
 @router.get("/groups/activity")
 async def groups_activity(clinic_id: str = Query(...)):
     try:
-        groups_res = (
-            supabase.table("groups")
+        groups_res = supabase_execute(
+            lambda: supabase.table("groups")
             .select("id, name, color")
             .eq("clinic_id", clinic_id)
             .execute()
@@ -303,8 +304,8 @@ async def groups_activity(clinic_id: str = Query(...)):
         if not group_ids:
             return []
 
-        members_res = (
-            supabase.table("patient_group_memberships")
+        members_res = supabase_execute(
+            lambda: supabase.table("patient_group_memberships")
             .select(
                 "group_id, patient_id, created_at, patients(first_name, last_name)"
             )
