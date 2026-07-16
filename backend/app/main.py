@@ -232,6 +232,26 @@ app.include_router(
 app.include_router(clinic_documents_router, tags=["Clinic Documents"])
 
 
+
+def _handle_supabase_error(response: Any) -> None:
+    error = getattr(response, "error", None)
+    if error:
+        detail = getattr(error, "message", None) or str(error)
+        raise HTTPException(status_code=500, detail=detail)
+
+
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 @app.get("/")
 def root():
     return {"status": "Altheon API is running"}
@@ -239,7 +259,9 @@ def root():
 
 @app.get("/health")
 def health():
-    supabase.table("clinics").select("id").limit(1).execute()
+    _sb_execute(
+        lambda: supabase.table("clinics").select("id").limit(1).execute()
+    )
     return {"status": "ok", "supabase": "connected"}
 
 
@@ -260,17 +282,18 @@ def me(authorization: Optional[str] = Header(default=None, alias="Authorization"
     user_id = _resolve_bearer_user_id(authorization)
 
     try:
-        cu_resp = (
-            supabase.table("clinic_users")
-            .select(
-                "id,user_id,role,billing_only,clinic_id,"
-                "clinics:clinic_id(id,slug,brand_name,logo_url,primary_color,agent_name)"
+        cu_resp = _sb_execute(
+            lambda: (
+supabase.table("clinic_users")
+.select(
+    "id,user_id,role,billing_only,clinic_id,"
+    "clinics:clinic_id(id,slug,brand_name,logo_url,primary_color,agent_name)"
+)
+.eq("user_id", user_id)
+.limit(1)
+.execute()
             )
-            .eq("user_id", user_id)
-            .limit(1)
-            .execute()
         )
-        _handle_supabase_error(cu_resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -299,13 +322,14 @@ def me(authorization: Optional[str] = Header(default=None, alias="Authorization"
 
     if role == "super_admin":
         try:
-            clinics_resp = (
-                supabase.table("clinics")
-                .select("id,slug,brand_name,logo_url,primary_color,agent_name")
-                .order("brand_name")
-                .execute()
+            clinics_resp = _sb_execute(
+                lambda: (
+supabase.table("clinics")
+.select("id,slug,brand_name,logo_url,primary_color,agent_name")
+.order("brand_name")
+.execute()
+                )
             )
-            _handle_supabase_error(clinics_resp)
         except HTTPException:
             raise
         except Exception as exc:
@@ -324,10 +348,12 @@ def patient_lookup(phone: str, clinic_id: str):
         normalized_phone = re.sub(r"\D", "", phone)
 
         try:
-            rpc_resp = supabase.rpc(
-                "find_patient_by_clinic_phone",
-                {"p_clinic_id": clinic_id, "p_phone": normalized_phone}
-            ).execute()
+            rpc_resp = _sb_execute(
+                lambda: supabase.rpc(
+                    "find_patient_by_clinic_phone",
+                    {"p_clinic_id": clinic_id, "p_phone": normalized_phone},
+                ).execute()
+            )
             rpc_rows = rpc_resp.data or []
         except Exception:
             rpc_rows = []
@@ -341,23 +367,27 @@ def patient_lookup(phone: str, clinic_id: str):
         normalized_stored = re.sub(r"\D", "", stored_phone)
         if stored_phone != normalized_stored:
             try:
-                supabase.table("patients").update({"phone": normalized_stored}).eq(
-                    "id", patient["id"]
-                ).execute()
+                _sb_execute(
+                    lambda: supabase.table("patients")
+                    .update({"phone": normalized_stored})
+                    .eq("id", patient["id"])
+                    .execute()
+                )
                 patient["phone"] = normalized_stored
             except Exception:
                 pass
 
         patient_id = patient["id"]
         appt_resp = (
-            supabase.table("appointments")
+            _sb_execute(
+                lambda: supabase.table("appointments")
             .select("start_time")
             .eq("patient_id", patient_id)
             .eq("clinic_id", clinic_id)
             .in_("status", ["scheduled", "confirmed"])
             .order("start_time", desc=True)
-            .limit(1)
-            .execute()
+            .limit(1).execute()
+            )
         )
         appointments = appt_resp.data or []
         last_visit = None
@@ -370,15 +400,16 @@ def patient_lookup(phone: str, clinic_id: str):
         upcoming_appointment = None
         try:
             upcoming_resp = (
-                supabase.table("appointments")
+                _sb_execute(
+                    lambda: supabase.table("appointments")
                 .select("id, start_time, clinician_id, treatment_type_id, status")
                 .eq("patient_id", patient_id)
                 .eq("clinic_id", clinic_id)
                 .in_("status", ["scheduled", "confirmed"])
                 .gte("start_time", now_iso)
                 .order("start_time", desc=False)
-                .limit(1)
-                .execute()
+                .limit(1).execute()
+                )
             )
             upcoming_rows = upcoming_resp.data or []
             if upcoming_rows:
@@ -448,13 +479,17 @@ def cancel_appointment(payload: dict):
 
     try:
         if appointment_id:
-            result = supabase.table("appointments")\
-                .update({"status": "cancelled", "updated_at": datetime.now(timezone.utc).isoformat()})\
-                .eq("id", appointment_id)\
-                .eq("clinic_id", clinic_id)\
+            result = _sb_execute(
+                lambda: supabase.table("appointments")
+                .update({"status": "cancelled", "updated_at": datetime.now(timezone.utc).isoformat()})
+                .eq("id", appointment_id)
+                .eq("clinic_id", clinic_id)
                 .execute()
+            )
         else:
-            all_patients = supabase.table("patients").select("id, phone").execute()
+            all_patients = _sb_execute(
+                lambda: supabase.table("patients").select("id, phone").execute()
+            )
             patient = next(
                 (p for p in (all_patients.data or [])
                  if re.sub(r"\D", "", str(p.get("phone") or "")) == patient_phone),
@@ -464,31 +499,37 @@ def cancel_appointment(payload: dict):
                 raise HTTPException(status_code=404, detail="Patient not found")
 
             now_iso = datetime.now(timezone.utc).isoformat()
-            upcoming = supabase.table("appointments")\
-                .select("id")\
-                .eq("patient_id", patient["id"])\
-                .eq("clinic_id", clinic_id)\
-                .in_("status", ["scheduled", "confirmed"])\
-                .gte("start_time", now_iso)\
-                .order("start_time", desc=False)\
-                .limit(1)\
+            upcoming = _sb_execute(
+                lambda: supabase.table("appointments")
+                .select("id")
+                .eq("patient_id", patient["id"])
+                .eq("clinic_id", clinic_id)
+                .in_("status", ["scheduled", "confirmed"])
+                .gte("start_time", now_iso)
+                .order("start_time", desc=False)
+                .limit(1)
                 .execute()
+            )
 
             upcoming_rows = upcoming.data or []
             if not upcoming_rows:
                 raise HTTPException(status_code=404, detail="No upcoming appointment found")
 
             appt_id = upcoming_rows[0]["id"]
-            result = supabase.table("appointments")\
-                .update({"status": "cancelled", "updated_at": datetime.now(timezone.utc).isoformat()})\
-                .eq("id", appt_id)\
-                .eq("clinic_id", clinic_id)\
+            result = _sb_execute(
+                lambda: supabase.table("appointments")
+                .update({"status": "cancelled", "updated_at": datetime.now(timezone.utc).isoformat()})
+                .eq("id", appt_id)
+                .eq("clinic_id", clinic_id)
                 .execute()
+            )
 
         try:
-            patient_resp = supabase.table("patients")\
-                .select("phone, first_name, preferred_language")\
+            patient_resp = _sb_execute(
+                lambda: supabase.table("patients")
+                .select("phone, first_name, preferred_language")
                 .execute()
+            )
             pt = next(
                 (p for p in (patient_resp.data or [])
                  if re.sub(r"\D", "", str(p.get("phone") or "")) == patient_phone),
@@ -534,25 +575,19 @@ def cancel_appointment(payload: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def _handle_supabase_error(response: Any) -> None:
-    error = getattr(response, "error", None)
-    if error:
-        detail = getattr(error, "message", None) or str(error)
-        raise HTTPException(status_code=500, detail=detail)
-
-
 def _require_super_admin(authorization: Optional[str]) -> None:
     user_id = _resolve_bearer_user_id(authorization)
     try:
-        sa_resp = (
-            supabase.table("clinic_users")
-            .select("user_id")
-            .eq("user_id", user_id)
-            .eq("role", "super_admin")
-            .limit(1)
-            .execute()
+        sa_resp = _sb_execute(
+            lambda: (
+supabase.table("clinic_users")
+.select("user_id")
+.eq("user_id", user_id)
+.eq("role", "super_admin")
+.limit(1)
+.execute()
+            )
         )
-        _handle_supabase_error(sa_resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -581,7 +616,9 @@ def _rollback_clinic_onboard(clinic_id: Optional[str], admin_user_id: Optional[s
     """Best-effort undo after a failed provision (DB cascade, then auth user)."""
     if clinic_id:
         try:
-            supabase.table("clinics").delete().eq("id", clinic_id).execute()
+            _sb_execute(
+                lambda: supabase.table("clinics").delete().eq("id", clinic_id).execute()
+            )
         except Exception:
             pass
     if admin_user_id:
@@ -728,33 +765,35 @@ def clinics_onboard(
     slug = body.clinic.slug
 
     try:
-        dup = (
-            supabase.table("clinics")
-            .select("id")
-            .eq("slug", slug)
-            .limit(1)
-            .execute()
+        dup = _sb_execute(
+            lambda: (
+supabase.table("clinics")
+.select("id")
+.eq("slug", slug)
+.limit(1)
+.execute()
+            )
         )
-        _handle_supabase_error(dup)
         if dup.data:
             raise HTTPException(status_code=400, detail="Slug is already in use")
 
-        clinic_ins = (
-            supabase.table("clinics")
-            .insert(
-                {
-                    "name": body.clinic.name.strip(),
-                    "slug": slug,
-                    "brand_name": body.clinic.brand_name.strip(),
-                    "primary_color": body.clinic.primary_color.strip(),
-                    "agent_name": body.clinic.agent_name.strip(),
-                    "phone": body.location.phone.strip(),
-                    "email": body.location.email.strip(),
-                }
+        clinic_ins = _sb_execute(
+            lambda: (
+supabase.table("clinics")
+.insert(
+    {
+        "name": body.clinic.name.strip(),
+        "slug": slug,
+        "brand_name": body.clinic.brand_name.strip(),
+        "primary_color": body.clinic.primary_color.strip(),
+        "agent_name": body.clinic.agent_name.strip(),
+        "phone": body.location.phone.strip(),
+        "email": body.location.email.strip(),
+    }
+)
+.execute()
             )
-            .execute()
         )
-        _handle_supabase_error(clinic_ins)
         if not clinic_ins.data:
             raise HTTPException(status_code=500, detail="Clinic insert returned no row")
         clinic_id = str(clinic_ins.data[0]["id"])
@@ -763,21 +802,22 @@ def clinics_onboard(
             f"{body.location.address_line1.strip()}, {body.location.city.strip()}, "
             f"{body.location.state.strip()} {body.location.zip.strip()}"
         )
-        loc_ins = (
-            supabase.table("locations")
-            .insert(
-                {
-                    "clinic_id": clinic_id,
-                    "name": body.location.name.strip(),
-                    "address": address_one_line,
-                    "phone": body.location.phone.strip(),
-                    "timezone": body.location.timezone.strip(),
-                    "is_active": True,
-                }
+        loc_ins = _sb_execute(
+            lambda: (
+supabase.table("locations")
+.insert(
+    {
+        "clinic_id": clinic_id,
+        "name": body.location.name.strip(),
+        "address": address_one_line,
+        "phone": body.location.phone.strip(),
+        "timezone": body.location.timezone.strip(),
+        "is_active": True,
+    }
+)
+.execute()
             )
-            .execute()
         )
-        _handle_supabase_error(loc_ins)
         lrows = loc_ins.data or []
         if not lrows:
             raise HTTPException(status_code=500, detail="Location insert returned no row")
@@ -799,8 +839,9 @@ def clinics_onboard(
                 clin_payload["bio"] = spec
             if col:
                 clin_payload["color"] = col
-            cin = supabase.table("clinicians").insert(clin_payload).execute()
-            _handle_supabase_error(cin)
+            cin = _sb_execute(
+                lambda: supabase.table("clinicians").insert(clin_payload).execute()
+            )
             if not cin.data:
                 raise HTTPException(
                     status_code=500, detail="Clinician insert returned no row"
@@ -822,8 +863,9 @@ def clinics_onboard(
                     }
                 )
         if rule_rows:
-            ar = supabase.table("availability_rules").insert(rule_rows).execute()
-            _handle_supabase_error(ar)
+            ar = _sb_execute(
+                lambda: supabase.table("availability_rules").insert(rule_rows).execute()
+            )
 
         st_payload = {
             "clinic_id": clinic_id,
@@ -837,26 +879,28 @@ def clinics_onboard(
             "state": body.location.state.strip(),
             "zip": body.location.zip.strip(),
         }
-        st = supabase.table("clinic_settings").insert(st_payload).execute()
-        _handle_supabase_error(st)
+        st = _sb_execute(
+            lambda: supabase.table("clinic_settings").insert(st_payload).execute()
+        )
 
         admin_user_id = _admin_create_user_id(
             body.admin_user.email,
             body.admin_user.password,
         )
 
-        cui = (
-            supabase.table("clinic_users")
-            .insert(
-                {
-                    "user_id": admin_user_id,
-                    "clinic_id": clinic_id,
-                    "role": "clinic_admin",
-                }
+        cui = _sb_execute(
+            lambda: (
+supabase.table("clinic_users")
+.insert(
+    {
+        "user_id": admin_user_id,
+        "clinic_id": clinic_id,
+        "role": "clinic_admin",
+    }
+)
+.execute()
             )
-            .execute()
         )
-        _handle_supabase_error(cui)
         if not cui.data:
             raise HTTPException(
                 status_code=500, detail="clinic_users insert returned no row"
@@ -941,13 +985,14 @@ def _ask_altheon_build_clinic_context(clinic_id: str) -> str:
     today_ymd, month_start, month_end = _eastern_now_parts()
     week_mon, week_sun = _eastern_week_mon_sun_ymd()
 
-    ap_resp = (
-        supabase.table("appointments")
-        .select("start_time")
-        .eq("clinic_id", clinic_id)
-        .execute()
+    ap_resp = _sb_execute(
+        lambda: (
+supabase.table("appointments")
+.select("start_time")
+.eq("clinic_id", clinic_id)
+.execute()
+        )
     )
-    _handle_supabase_error(ap_resp)
     ap_rows = ap_resp.data or []
     ap_today = ap_week = ap_month = 0
     for row in ap_rows:
@@ -963,15 +1008,16 @@ def _ask_altheon_build_clinic_context(clinic_id: str) -> str:
         if month_start <= ymd <= month_end:
             ap_month += 1
 
-    br_resp = (
-        supabase.table("billing_records")
-        .select(
-            "date_of_service,total_billed_cents,total_paid_cents,amount_paid_cents,status"
+    br_resp = _sb_execute(
+        lambda: (
+supabase.table("billing_records")
+.select(
+    "date_of_service,total_billed_cents,total_paid_cents,amount_paid_cents,status"
+)
+.eq("clinic_id", clinic_id)
+.execute()
         )
-        .eq("clinic_id", clinic_id)
-        .execute()
     )
-    _handle_supabase_error(br_resp)
     br_rows = br_resp.data or []
     bill_month_billed = bill_month_paid = 0
     bill_draft = bill_submitted = bill_paid = bill_denied = bill_partial = 0
@@ -1001,48 +1047,52 @@ def _ask_altheon_build_clinic_context(clinic_id: str) -> str:
         else:
             bill_other += 1
 
-    pca_resp = (
-        supabase.table("patient_clinic_access")
-        .select("patient_id", count="exact")
-        .eq("clinic_id", clinic_id)
-        .execute()
+    pca_resp = _sb_execute(
+        lambda: (
+supabase.table("patient_clinic_access")
+.select("patient_id", count="exact")
+.eq("clinic_id", clinic_id)
+.execute()
+        )
     )
-    _handle_supabase_error(pca_resp)
     patient_total = int(getattr(pca_resp, "count", None) or len(pca_resp.data or []))
 
-    pi_resp = (
-        supabase.table("pi_cases")
-        .select("status")
-        .eq("clinic_id", clinic_id)
-        .execute()
+    pi_resp = _sb_execute(
+        lambda: (
+supabase.table("pi_cases")
+.select("status")
+.eq("clinic_id", clinic_id)
+.execute()
+        )
     )
-    _handle_supabase_error(pi_resp)
     pi_rows = pi_resp.data or []
     pi_counts: dict[str, int] = {}
     for row in pi_rows:
         st = (str(row.get("status") or "open")).lower()
         pi_counts[st] = pi_counts.get(st, 0) + 1
 
-    mt_resp = (
-        supabase.table("membership_tiers")
-        .select("id", count="exact")
-        .eq("clinic_id", clinic_id)
-        .eq("is_active", True)
-        .execute()
+    mt_resp = _sb_execute(
+        lambda: (
+supabase.table("membership_tiers")
+.select("id", count="exact")
+.eq("clinic_id", clinic_id)
+.eq("is_active", True)
+.execute()
+        )
     )
-    _handle_supabase_error(mt_resp)
     active_tier_count = int(
         getattr(mt_resp, "count", None) or len(mt_resp.data or [])
     )
 
-    pm_resp = (
-        supabase.table("patient_memberships")
-        .select("id", count="exact")
-        .eq("clinic_id", clinic_id)
-        .eq("status", "active")
-        .execute()
+    pm_resp = _sb_execute(
+        lambda: (
+supabase.table("patient_memberships")
+.select("id", count="exact")
+.eq("clinic_id", clinic_id)
+.eq("status", "active")
+.execute()
+        )
     )
-    _handle_supabase_error(pm_resp)
     active_memberships = int(
         getattr(pm_resp, "count", None) or len(pm_resp.data or [])
     )
@@ -1136,14 +1186,15 @@ def _ask_altheon_call_anthropic(question: str, context: str) -> str:
 
 def _assert_billing_record_draft(record_id: str) -> None:
     try:
-        rec = (
-            supabase.table("billing_records")
-            .select("status")
-            .eq("id", record_id)
-            .limit(1)
-            .execute()
+        rec = _sb_execute(
+            lambda: (
+supabase.table("billing_records")
+.select("status")
+.eq("id", record_id)
+.limit(1)
+.execute()
+            )
         )
-        _handle_supabase_error(rec)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1160,22 +1211,24 @@ def _assert_billing_record_draft(record_id: str) -> None:
 
 
 def _recalculate_billing_record_total(billing_record_id: str) -> None:
-    items = (
-        supabase.table("billing_line_items")
-        .select("total_cents")
-        .eq("billing_record_id", billing_record_id)
-        .execute()
+    items = _sb_execute(
+        lambda: (
+supabase.table("billing_line_items")
+.select("total_cents")
+.eq("billing_record_id", billing_record_id)
+.execute()
+        )
     )
-    _handle_supabase_error(items)
     rows = items.data or []
     total = sum(int(row.get("total_cents") or 0) for row in rows)
-    upd = (
-        supabase.table("billing_records")
-        .update({"total_billed_cents": total, "updated_at": _now_iso()})
-        .eq("id", billing_record_id)
-        .execute()
+    upd = _sb_execute(
+        lambda: (
+supabase.table("billing_records")
+.update({"total_billed_cents": total, "updated_at": _now_iso()})
+.eq("id", billing_record_id)
+.execute()
+        )
     )
-    _handle_supabase_error(upd)
     try:
         billing_payments_router.recalculate_amount_paid_and_status(billing_record_id)
     except HTTPException:
@@ -1237,8 +1290,9 @@ def create_billing_record(body: dict = Body(...)):
     if body.get("notes") is not None:
         row["notes"] = body["notes"]
     try:
-        ins = supabase.table("billing_records").insert(row).execute()
-        _handle_supabase_error(ins)
+        ins = _sb_execute(
+            lambda: supabase.table("billing_records").insert(row).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -1267,8 +1321,9 @@ def list_billing_records(
             q = q.gte("date_of_service", date_from)
         if date_to:
             q = q.lte("date_of_service", date_to)
-        resp = q.order("date_of_service", desc=True).execute()
-        _handle_supabase_error(resp)
+        resp = _sb_execute(
+            lambda: q.order("date_of_service", desc=True).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -1279,14 +1334,15 @@ def list_billing_records(
 @app.get("/billing-records/{record_id}")
 def get_billing_record(record_id: str):
     try:
-        rec = (
-            supabase.table("billing_records")
-            .select("*")
-            .eq("id", record_id)
-            .limit(1)
-            .execute()
+        rec = _sb_execute(
+            lambda: (
+supabase.table("billing_records")
+.select("*")
+.eq("id", record_id)
+.limit(1)
+.execute()
+            )
         )
-        _handle_supabase_error(rec)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1296,13 +1352,14 @@ def get_billing_record(record_id: str):
         raise HTTPException(status_code=404, detail="Billing record not found")
     record = dict(rec_rows[0])
     try:
-        items = (
-            supabase.table("billing_line_items")
-            .select("*")
-            .eq("billing_record_id", record_id)
-            .execute()
+        items = _sb_execute(
+            lambda: (
+supabase.table("billing_line_items")
+.select("*")
+.eq("billing_record_id", record_id)
+.execute()
+            )
         )
-        _handle_supabase_error(items)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1314,14 +1371,15 @@ def get_billing_record(record_id: str):
 @app.get("/billing-records/{record_id}/pdf")
 def get_billing_record_pdf(record_id: str):
     try:
-        rec = (
-            supabase.table("billing_records")
-            .select("*")
-            .eq("id", record_id)
-            .limit(1)
-            .execute()
+        rec = _sb_execute(
+            lambda: (
+supabase.table("billing_records")
+.select("*")
+.eq("id", record_id)
+.limit(1)
+.execute()
+            )
         )
-        _handle_supabase_error(rec)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1332,13 +1390,14 @@ def get_billing_record_pdf(record_id: str):
     record = dict(rec_rows[0])
 
     try:
-        items = (
-            supabase.table("billing_line_items")
-            .select("*")
-            .eq("billing_record_id", record_id)
-            .execute()
+        items = _sb_execute(
+            lambda: (
+supabase.table("billing_line_items")
+.select("*")
+.eq("billing_record_id", record_id)
+.execute()
+            )
         )
-        _handle_supabase_error(items)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1351,17 +1410,18 @@ def get_billing_record_pdf(record_id: str):
         raise HTTPException(status_code=400, detail="Billing record missing patient or clinic")
 
     try:
-        patient_resp = (
-            supabase.table("patients")
-            .select(
-                "id, first_name, last_name, date_of_birth, "
-                "address_line1, address_line2, city, state, zip"
+        patient_resp = _sb_execute(
+            lambda: (
+supabase.table("patients")
+.select(
+    "id, first_name, last_name, date_of_birth, "
+    "address_line1, address_line2, city, state, zip"
+)
+.eq("id", patient_id)
+.limit(1)
+.execute()
             )
-            .eq("id", patient_id)
-            .limit(1)
-            .execute()
         )
-        _handle_supabase_error(patient_resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1372,14 +1432,15 @@ def get_billing_record_pdf(record_id: str):
     patient = patient_rows[0]
 
     try:
-        clinic_resp = (
-            supabase.table("clinics")
-            .select("name, address, phone")
-            .eq("id", clinic_id)
-            .limit(1)
-            .execute()
+        clinic_resp = _sb_execute(
+            lambda: (
+supabase.table("clinics")
+.select("name, address, phone")
+.eq("id", clinic_id)
+.limit(1)
+.execute()
+            )
         )
-        _handle_supabase_error(clinic_resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1391,16 +1452,17 @@ def get_billing_record_pdf(record_id: str):
     pi_case_id = str(record.get("pi_case_id") or "").strip()
     if pi_case_id:
         try:
-            pi_resp = (
-                supabase.table("pi_cases")
-                .select(
-                    "id, firm_name, attorney_name, attorney_phone, attorney_email"
+            pi_resp = _sb_execute(
+                lambda: (
+supabase.table("pi_cases")
+.select(
+    "id, firm_name, attorney_name, attorney_phone, attorney_email"
+)
+.eq("id", pi_case_id)
+.limit(1)
+.execute()
                 )
-                .eq("id", pi_case_id)
-                .limit(1)
-                .execute()
             )
-            _handle_supabase_error(pi_resp)
             pi_rows = pi_resp.data or []
             if pi_rows:
                 pi_case = pi_rows[0]
@@ -1438,13 +1500,14 @@ def patch_billing_record_status(record_id: str, body: dict = Body(...)):
             detail=f"status must be one of: {', '.join(sorted(ALLOWED_BILLING_STATUSES))}",
         )
     try:
-        upd = (
-            supabase.table("billing_records")
-            .update({"status": new_status, "updated_at": _now_iso()})
-            .eq("id", record_id)
-            .execute()
+        upd = _sb_execute(
+            lambda: (
+supabase.table("billing_records")
+.update({"status": new_status, "updated_at": _now_iso()})
+.eq("id", record_id)
+.execute()
+            )
         )
-        _handle_supabase_error(upd)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1458,14 +1521,15 @@ def patch_billing_record_status(record_id: str, body: dict = Body(...)):
 @app.post("/billing-records/{record_id}/line-items")
 def create_billing_line_item(record_id: str, body: dict = Body(...)):
     try:
-        parent = (
-            supabase.table("billing_records")
-            .select("id, clinic_id")
-            .eq("id", record_id)
-            .limit(1)
-            .execute()
+        parent = _sb_execute(
+            lambda: (
+supabase.table("billing_records")
+.select("id, clinic_id")
+.eq("id", record_id)
+.limit(1)
+.execute()
+            )
         )
-        _handle_supabase_error(parent)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1490,8 +1554,9 @@ def create_billing_line_item(record_id: str, body: dict = Body(...)):
     if row["cpt_code"] is None:
         raise HTTPException(status_code=400, detail="cpt_code is required")
     try:
-        ins = supabase.table("billing_line_items").insert(row).execute()
-        _handle_supabase_error(ins)
+        ins = _sb_execute(
+            lambda: supabase.table("billing_line_items").insert(row).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -1518,14 +1583,15 @@ def patch_billing_line_item(item_id: str, body: dict = Body(...)):
             detail="At least one of: units, rate_cents, modifiers, payment_type, description",
         )
     try:
-        existing = (
-            supabase.table("billing_line_items")
-            .select("billing_record_id")
-            .eq("id", item_id)
-            .limit(1)
-            .execute()
+        existing = _sb_execute(
+            lambda: (
+supabase.table("billing_line_items")
+.select("billing_record_id")
+.eq("id", item_id)
+.limit(1)
+.execute()
+            )
         )
-        _handle_supabase_error(existing)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1536,13 +1602,14 @@ def patch_billing_line_item(item_id: str, body: dict = Body(...)):
     record_id = erows[0]["billing_record_id"]
     _assert_billing_record_draft(record_id)
     try:
-        upd = (
-            supabase.table("billing_line_items")
-            .update(data)
-            .eq("id", item_id)
-            .execute()
+        upd = _sb_execute(
+            lambda: (
+supabase.table("billing_line_items")
+.update(data)
+.eq("id", item_id)
+.execute()
+            )
         )
-        _handle_supabase_error(upd)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1562,14 +1629,15 @@ def patch_billing_line_item(item_id: str, body: dict = Body(...)):
 @app.delete("/billing-line-items/{item_id}")
 def delete_billing_line_item(item_id: str):
     try:
-        existing = (
-            supabase.table("billing_line_items")
-            .select("billing_record_id")
-            .eq("id", item_id)
-            .limit(1)
-            .execute()
+        existing = _sb_execute(
+            lambda: (
+supabase.table("billing_line_items")
+.select("billing_record_id")
+.eq("id", item_id)
+.limit(1)
+.execute()
+            )
         )
-        _handle_supabase_error(existing)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1580,8 +1648,9 @@ def delete_billing_line_item(item_id: str):
     record_id = erows[0]["billing_record_id"]
     _assert_billing_record_draft(record_id)
     try:
-        del_resp = supabase.table("billing_line_items").delete().eq("id", item_id).execute()
-        _handle_supabase_error(del_resp)
+        del_resp = _sb_execute(
+            lambda: supabase.table("billing_line_items").delete().eq("id", item_id).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -1621,8 +1690,9 @@ def create_pi_case(body: dict = Body(...)):
         if key in body and body[key] is not None:
             row[key] = body[key]
     try:
-        ins = supabase.table("pi_cases").insert(row).execute()
-        _handle_supabase_error(ins)
+        ins = _sb_execute(
+            lambda: supabase.table("pi_cases").insert(row).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -1645,8 +1715,9 @@ def list_pi_cases(
             q = q.eq("patient_id", patient_id)
         if status:
             q = q.eq("status", status)
-        resp = q.order("created_at", desc=True).execute()
-        _handle_supabase_error(resp)
+        resp = _sb_execute(
+            lambda: q.order("created_at", desc=True).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -1674,8 +1745,9 @@ def patch_pi_case(case_id: str, body: dict = Body(...)):
         )
     data["updated_at"] = _now_iso()
     try:
-        upd = supabase.table("pi_cases").update(data).eq("id", case_id).execute()
-        _handle_supabase_error(upd)
+        upd = _sb_execute(
+            lambda: supabase.table("pi_cases").update(data).eq("id", case_id).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -1693,21 +1765,23 @@ def list_clinics_super_admin(
     """List all clinics with branding and billing_model (super_admin only)."""
     _require_super_admin(authorization)
     try:
-        clinics_resp = (
-            supabase.table("clinics")
-            .select(
-                "id, brand_name, slug, agent_name, primary_color, logo_url, created_at"
+        clinics_resp = _sb_execute(
+            lambda: (
+supabase.table("clinics")
+.select(
+    "id, brand_name, slug, agent_name, primary_color, logo_url, created_at"
+)
+.order("brand_name")
+.execute()
             )
-            .order("brand_name")
-            .execute()
         )
-        _handle_supabase_error(clinics_resp)
-        st_resp = (
-            supabase.table("clinic_settings")
-            .select("clinic_id, billing_model")
-            .execute()
+        st_resp = _sb_execute(
+            lambda: (
+supabase.table("clinic_settings")
+.select("clinic_id, billing_model")
+.execute()
+            )
         )
-        _handle_supabase_error(st_resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1747,14 +1821,15 @@ def patch_clinic_super_admin(
         )
 
     try:
-        cur = (
-            supabase.table("clinics")
-            .select("id")
-            .eq("id", clinic_id)
-            .limit(1)
-            .execute()
+        cur = _sb_execute(
+            lambda: (
+supabase.table("clinics")
+.select("id")
+.eq("id", clinic_id)
+.limit(1)
+.execute()
+            )
         )
-        _handle_supabase_error(cur)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1779,15 +1854,16 @@ def patch_clinic_super_admin(
 
     try:
         if "slug" in clinic_updates:
-            dup = (
-                supabase.table("clinics")
-                .select("id")
-                .eq("slug", clinic_updates["slug"])
-                .neq("id", clinic_id)
-                .limit(1)
-                .execute()
+            dup = _sb_execute(
+                lambda: (
+supabase.table("clinics")
+.select("id")
+.eq("slug", clinic_updates["slug"])
+.neq("id", clinic_id)
+.limit(1)
+.execute()
+                )
             )
-            _handle_supabase_error(dup)
             if dup.data:
                 raise HTTPException(
                     status_code=400,
@@ -1795,40 +1871,44 @@ def patch_clinic_super_admin(
                 )
 
         if clinic_updates:
-            cu = (
-                supabase.table("clinics")
-                .update(clinic_updates)
-                .eq("id", clinic_id)
-                .execute()
+            cu = _sb_execute(
+                lambda: (
+supabase.table("clinics")
+.update(clinic_updates)
+.eq("id", clinic_id)
+.execute()
+                )
             )
-            _handle_supabase_error(cu)
 
         if billing_model is not None:
-            existing = (
-                supabase.table("clinic_settings")
-                .select("clinic_id")
-                .eq("clinic_id", clinic_id)
-                .limit(1)
-                .execute()
+            existing = _sb_execute(
+                lambda: (
+supabase.table("clinic_settings")
+.select("clinic_id")
+.eq("clinic_id", clinic_id)
+.limit(1)
+.execute()
+                )
             )
-            _handle_supabase_error(existing)
             if existing.data:
-                upd_st = (
-                    supabase.table("clinic_settings")
-                    .update({"billing_model": billing_model})
-                    .eq("clinic_id", clinic_id)
-                    .execute()
+                upd_st = _sb_execute(
+                    lambda: (
+supabase.table("clinic_settings")
+.update({"billing_model": billing_model})
+.eq("clinic_id", clinic_id)
+.execute()
+                    )
                 )
-                _handle_supabase_error(upd_st)
             else:
-                clin = (
-                    supabase.table("clinics")
-                    .select("name, phone, email")
-                    .eq("id", clinic_id)
-                    .limit(1)
-                    .execute()
+                clin = _sb_execute(
+                    lambda: (
+supabase.table("clinics")
+.select("name, phone, email")
+.eq("id", clinic_id)
+.limit(1)
+.execute()
+                    )
                 )
-                _handle_supabase_error(clin)
                 rows = clin.data or []
                 row = rows[0] if rows else {}
                 insert_payload = {
@@ -1843,36 +1923,39 @@ def patch_clinic_super_admin(
                     "state": "",
                     "zip": "",
                 }
-                ins_st = (
-                    supabase.table("clinic_settings")
-                    .insert(insert_payload)
-                    .execute()
+                ins_st = _sb_execute(
+                    lambda: (
+supabase.table("clinic_settings")
+.insert(insert_payload)
+.execute()
+                    )
                 )
-                _handle_supabase_error(ins_st)
 
-        cresp = (
-            supabase.table("clinics")
-            .select(
-                "id, brand_name, slug, agent_name, primary_color, logo_url, created_at"
+        cresp = _sb_execute(
+            lambda: (
+supabase.table("clinics")
+.select(
+    "id, brand_name, slug, agent_name, primary_color, logo_url, created_at"
+)
+.eq("id", clinic_id)
+.limit(1)
+.execute()
             )
-            .eq("id", clinic_id)
-            .limit(1)
-            .execute()
         )
-        _handle_supabase_error(cresp)
         crows = cresp.data or []
         if not crows:
             raise HTTPException(status_code=404, detail="Clinic not found")
         crow = crows[0]
 
-        sresp = (
-            supabase.table("clinic_settings")
-            .select("billing_model")
-            .eq("clinic_id", clinic_id)
-            .limit(1)
-            .execute()
+        sresp = _sb_execute(
+            lambda: (
+supabase.table("clinic_settings")
+.select("billing_model")
+.eq("clinic_id", clinic_id)
+.limit(1)
+.execute()
+            )
         )
-        _handle_supabase_error(sresp)
         bm = None
         if sresp.data:
             bm = sresp.data[0].get("billing_model")
@@ -1887,14 +1970,15 @@ def patch_clinic_super_admin(
 @app.get("/clinic-settings/{clinic_id}")
 def get_clinic_settings(clinic_id: str):
     try:
-        resp = (
-            supabase.table("clinic_settings")
-            .select("*")
-            .eq("clinic_id", clinic_id)
-            .limit(1)
-            .execute()
+        resp = _sb_execute(
+            lambda: (
+supabase.table("clinic_settings")
+.select("*")
+.eq("clinic_id", clinic_id)
+.limit(1)
+.execute()
+            )
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1915,13 +1999,14 @@ def patch_clinic_settings(clinic_id: str, body: dict = Body(...)):
         )
     data["updated_at"] = _now_iso()
     try:
-        upd = (
-            supabase.table("clinic_settings")
-            .update(data)
-            .eq("clinic_id", clinic_id)
-            .execute()
+        upd = _sb_execute(
+            lambda: (
+supabase.table("clinic_settings")
+.update(data)
+.eq("clinic_id", clinic_id)
+.execute()
+            )
         )
-        _handle_supabase_error(upd)
     except HTTPException:
         raise
     except Exception as exc:
@@ -1990,11 +2075,12 @@ def voice_agent_status(
     clinic_id: Optional[str] = Query(None, alias="clinic_id"),
 ):
     result = (
-        supabase.table("clinics")
+        _sb_execute(
+            lambda: supabase.table("clinics")
         .select("elevenlabs_agent_id")
         .eq("id", clinic_id)
-        .limit(1)
-        .execute()
+        .limit(1).execute()
+        )
     )
     agent_id = result.data[0].get("elevenlabs_agent_id") if result.data else None
     if not clinic_id or not agent_id:
@@ -2016,11 +2102,12 @@ def voice_agent_conversations(
     page_size: int = Query(20, ge=1, le=50),
 ):
     result = (
-        supabase.table("clinics")
+        _sb_execute(
+            lambda: supabase.table("clinics")
         .select("elevenlabs_agent_id")
         .eq("id", clinic_id)
-        .limit(1)
-        .execute()
+        .limit(1).execute()
+        )
     )
     agent_id = result.data[0].get("elevenlabs_agent_id") if result.data else None
     if not clinic_id or not agent_id:

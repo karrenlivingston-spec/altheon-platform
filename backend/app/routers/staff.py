@@ -36,6 +36,18 @@ def _handle_supabase_error(response: Any) -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
@@ -90,14 +102,13 @@ def list_staff(
 ):
     cid = clinic_id.strip()
     try:
-        resp = (
-            supabase.table("clinic_users")
+        resp = _sb_execute(
+            lambda: supabase.table("clinic_users")
             .select("id, user_id, role, created_at")
             .eq("clinic_id", cid)
             .order("role")
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -162,8 +173,9 @@ def invite_staff(
     )
     print(f"invite_staff insert_row={insert_row}")
     try:
-        ins = supabase.table("staff_invitations").insert(insert_row).execute()
-        _handle_supabase_error(ins)
+        ins = _sb_execute(
+            lambda: supabase.table("staff_invitations").insert(insert_row).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -191,15 +203,14 @@ def remove_staff_member(
         raise HTTPException(status_code=400, detail="Cannot remove yourself")
 
     try:
-        target_resp = (
-            supabase.table("clinic_users")
+        target_resp = _sb_execute(
+            lambda: supabase.table("clinic_users")
             .select("id, role")
             .eq("clinic_id", cid)
             .eq("user_id", target_uid)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(target_resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -219,14 +230,13 @@ def remove_staff_member(
         raise HTTPException(status_code=403, detail="Cannot remove a super_admin")
 
     try:
-        delete_resp = (
-            supabase.table("clinic_users")
+        delete_resp = _sb_execute(
+            lambda: supabase.table("clinic_users")
             .delete()
             .eq("clinic_id", cid)
             .eq("user_id", target_uid)
             .execute()
         )
-        _handle_supabase_error(delete_resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -262,15 +272,14 @@ def update_staff_role(
         )
 
     try:
-        target_resp = (
-            supabase.table("clinic_users")
+        target_resp = _sb_execute(
+            lambda: supabase.table("clinic_users")
             .select("id, role")
             .eq("clinic_id", cid)
             .eq("user_id", target_uid)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(target_resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -290,14 +299,13 @@ def update_staff_role(
         raise HTTPException(status_code=403, detail="Cannot change super_admin role")
 
     try:
-        upd = (
-            supabase.table("clinic_users")
+        upd = _sb_execute(
+            lambda: supabase.table("clinic_users")
             .update({"role": new_role})
             .eq("clinic_id", cid)
             .eq("user_id", target_uid)
             .execute()
         )
-        _handle_supabase_error(upd)
     except HTTPException:
         raise
     except Exception as exc:
@@ -325,8 +333,8 @@ def accept_staff_invite(body: AcceptInviteBody):
 
     try:
         now_iso = _now_iso()
-        invite_resp = (
-            supabase.table("staff_invitations")
+        invite_resp = _sb_execute(
+            lambda: supabase.table("staff_invitations")
             .select("*")
             .eq("token", token)
             .is_("accepted_at", "null")
@@ -334,7 +342,6 @@ def accept_staff_invite(body: AcceptInviteBody):
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(invite_resp)
 
         invite_rows = invite_resp.data or []
         if not invite_rows:
@@ -365,15 +372,14 @@ def accept_staff_invite(body: AcceptInviteBody):
             f"email={email} clinic_id={clinic_id} role={role}"
         )
 
-        loc_resp = (
-            supabase.table("locations")
+        loc_resp = _sb_execute(
+            lambda: supabase.table("locations")
             .select("id")
             .eq("clinic_id", clinic_id)
             .eq("is_active", True)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(loc_resp)
         loc_rows = loc_resp.data or []
         if not loc_rows:
             raise HTTPException(
@@ -420,8 +426,9 @@ def accept_staff_invite(body: AcceptInviteBody):
                 "location_id": location_id,
             }
             print(f"accept_staff_invite clinician_row={clinician_row}")
-            clin_ins = supabase.table("clinicians").insert(clinician_row).execute()
-            _handle_supabase_error(clin_ins)
+            clin_ins = _sb_execute(
+                lambda: supabase.table("clinicians").insert(clinician_row).execute()
+            )
             if not (clin_ins.data or []):
                 raise HTTPException(status_code=500, detail="Failed to create clinician")
 
@@ -433,21 +440,21 @@ def accept_staff_invite(body: AcceptInviteBody):
         if role == "biller":
             clinic_user_row["billing_only"] = billing_only
         print(f"accept_staff_invite clinic_user_row={clinic_user_row}")
-        cu_ins = supabase.table("clinic_users").insert(clinic_user_row).execute()
-        _handle_supabase_error(cu_ins)
+        cu_ins = _sb_execute(
+            lambda: supabase.table("clinic_users").insert(clinic_user_row).execute()
+        )
         if not (cu_ins.data or []):
             raise HTTPException(
                 status_code=500,
                 detail="Failed to create clinic user access",
             )
 
-        upd = (
-            supabase.table("staff_invitations")
+        upd = _sb_execute(
+            lambda: supabase.table("staff_invitations")
             .update({"accepted_at": _now_iso()})
             .eq("token", token)
             .execute()
         )
-        _handle_supabase_error(upd)
 
         print(f"accept_staff_invite success email={email} role={role}")
         return {"success": True, "email": email, "role": role}

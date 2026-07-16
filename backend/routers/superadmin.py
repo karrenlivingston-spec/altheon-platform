@@ -23,6 +23,18 @@ def _handle_supabase_error(response: Any) -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 def require_superadmin_secret(
     x_superadmin_secret: Optional[str] = Header(None, alias="X-Superadmin-Secret"),
 ) -> None:
@@ -37,7 +49,9 @@ router = APIRouter(dependencies=[Depends(require_superadmin_secret)])
 def _rollback(clinic_id: Optional[str], admin_user_id: Optional[str]) -> None:
     if clinic_id:
         try:
-            supabase.table("clinics").delete().eq("id", clinic_id).execute()
+            supabase_execute(
+                lambda: supabase.table("clinics").delete().eq("id", clinic_id).execute()
+            )
         except Exception:
             pass
     if admin_user_id:
@@ -174,14 +188,13 @@ def superadmin_onboard(body: SuperadminOnboardBody):
     treatment_type_ids: list[str] = []
 
     try:
-        dup = (
-            supabase.table("clinics")
+        dup = _sb_execute(
+            lambda: supabase.table("clinics")
             .select("id")
             .eq("slug", slug)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(dup)
         if dup.data:
             raise HTTPException(status_code=400, detail="Slug is already in use")
 
@@ -197,14 +210,15 @@ def superadmin_onboard(body: SuperadminOnboardBody):
         if body.clinic.brand_color and body.clinic.brand_color.strip():
             clinic_row["brand_color"] = body.clinic.brand_color.strip()
 
-        clinic_ins = supabase.table("clinics").insert(clinic_row).execute()
-        _handle_supabase_error(clinic_ins)
+        clinic_ins = _sb_execute(
+            lambda: supabase.table("clinics").insert(clinic_row).execute()
+        )
         if not clinic_ins.data:
             raise HTTPException(status_code=500, detail="Clinic insert returned no row")
         clinic_id = str(clinic_ins.data[0]["id"])
 
-        loc_ins = (
-            supabase.table("locations")
+        loc_ins = _sb_execute(
+            lambda: supabase.table("locations")
             .insert(
                 {
                     "clinic_id": clinic_id,
@@ -217,7 +231,6 @@ def superadmin_onboard(body: SuperadminOnboardBody):
             )
             .execute()
         )
-        _handle_supabase_error(loc_ins)
         lrows = loc_ins.data or []
         if not lrows:
             raise HTTPException(status_code=500, detail="Location insert returned no row")
@@ -237,8 +250,9 @@ def superadmin_onboard(body: SuperadminOnboardBody):
                 clin_payload["phone"] = c.phone.strip()
             if c.bio and c.bio.strip():
                 clin_payload["bio"] = c.bio.strip()
-            cin = supabase.table("clinicians").insert(clin_payload).execute()
-            _handle_supabase_error(cin)
+            cin = _sb_execute(
+                lambda: supabase.table("clinicians").insert(clin_payload).execute()
+            )
             if not cin.data:
                 raise HTTPException(
                     status_code=500, detail="Clinician insert returned no row"
@@ -258,8 +272,9 @@ def superadmin_onboard(body: SuperadminOnboardBody):
             }
             if tt.description and tt.description.strip():
                 tt_row["description"] = tt.description.strip()
-            tins = supabase.table("treatment_types").insert(tt_row).execute()
-            _handle_supabase_error(tins)
+            tins = _sb_execute(
+                lambda: supabase.table("treatment_types").insert(tt_row).execute()
+            )
             if not tins.data:
                 raise HTTPException(
                     status_code=500, detail="Treatment type insert returned no row"
@@ -284,8 +299,8 @@ def superadmin_onboard(body: SuperadminOnboardBody):
                     detail=f"Unknown clinician email: {clin_email}",
                 )
             keywords = [k.strip() for k in rule.condition_keywords if k and k.strip()]
-            rr = (
-                supabase.table("provider_routing_rules")
+            rr = _sb_execute(
+                lambda: supabase.table("provider_routing_rules")
                 .insert(
                     {
                         "clinic_id": clinic_id,
@@ -297,7 +312,6 @@ def superadmin_onboard(body: SuperadminOnboardBody):
                 )
                 .execute()
             )
-            _handle_supabase_error(rr)
 
         admin_user_id = _admin_create_user_id(
             body.admin_email,
@@ -305,8 +319,8 @@ def superadmin_onboard(body: SuperadminOnboardBody):
             clinic_id,
         )
 
-        cui = (
-            supabase.table("clinic_users")
+        cui = _sb_execute(
+            lambda: supabase.table("clinic_users")
             .insert(
                 {
                     "user_id": admin_user_id,
@@ -316,7 +330,6 @@ def superadmin_onboard(body: SuperadminOnboardBody):
             )
             .execute()
         )
-        _handle_supabase_error(cui)
         if not cui.data:
             raise HTTPException(
                 status_code=500, detail="clinic_users insert returned no row"
