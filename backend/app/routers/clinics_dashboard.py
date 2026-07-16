@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Header, HTTPException, Query
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 
@@ -28,20 +29,31 @@ def _handle_supabase_error(response: Any) -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 def _require_super_admin(authorization: Optional[str]) -> None:
     from routers.fee_schedule import _resolve_bearer_user_id
 
     user_id = _resolve_bearer_user_id(authorization)
     try:
-        sa_resp = (
-            supabase.table("clinic_users")
+        sa_resp = _sb_execute(
+            lambda: supabase.table("clinic_users")
             .select("user_id")
             .eq("user_id", user_id)
             .eq("role", "super_admin")
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(sa_resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -130,8 +142,8 @@ def _clinic_address(row: dict[str, Any]) -> str:
 
 def _record_ids_for_clinic(clinic_id: str) -> list[str]:
     try:
-        res = (
-            supabase.table("billing_records")
+        res = supabase_execute(
+            lambda: supabase.table("billing_records")
             .select("id")
             .eq("clinic_id", clinic_id)
             .execute()
@@ -171,8 +183,8 @@ def _sum_billing_payments(
         return 0.0, daily
 
     try:
-        res = (
-            supabase.table("billing_payments")
+        res = supabase_execute(
+            lambda: supabase.table("billing_payments")
             .select("amount_cents, payment_date, billing_record_id, created_at")
             .gte("payment_date", start.isoformat())
             .lte("payment_date", end.isoformat())
@@ -213,8 +225,8 @@ def _clinic_live_stats(clinic_id: str) -> dict[str, Any]:
 
     stats = _empty_clinic_stats()
     try:
-        p_resp = (
-            supabase.table("patients")
+        p_resp = supabase_execute(
+            lambda: supabase.table("patients")
             .select("id", count="exact")
             .eq("clinic_id", clinic_id)
             .limit(1)
@@ -227,8 +239,8 @@ def _clinic_live_stats(clinic_id: str) -> dict[str, Any]:
         print(f"[clinics_dashboard] patient_count error {clinic_id}: {e}")
 
     try:
-        a_resp = (
-            supabase.table("appointments")
+        a_resp = supabase_execute(
+            lambda: supabase.table("appointments")
             .select("id, status, start_time")
             .eq("clinic_id", clinic_id)
             .gte("start_time", month_start_iso)
@@ -251,8 +263,8 @@ def _clinic_live_stats(clinic_id: str) -> dict[str, Any]:
     billed_cents = 0
     paid_cents = 0
     try:
-        br_resp = (
-            supabase.table("billing_records")
+        br_resp = supabase_execute(
+            lambda: supabase.table("billing_records")
             .select("id, total_billed_cents, amount_paid_cents, date_of_service")
             .eq("clinic_id", clinic_id)
             .execute()
@@ -295,8 +307,8 @@ def _clinic_live_stats(clinic_id: str) -> dict[str, Any]:
     stats["collections_trend"] = trend
 
     try:
-        v_resp = (
-            supabase.table("voice_interaction_logs")
+        v_resp = supabase_execute(
+            lambda: supabase.table("voice_interaction_logs")
             .select("success_flag")
             .eq("clinic_id", clinic_id)
             .gte("created_at", month_start_iso)
@@ -331,7 +343,9 @@ def _aggregate_dashboard_stats() -> dict[str, Any]:
     inactive_clinics = 0
     all_clinic_ids: list[str] = []
     try:
-        c_resp = supabase.table("clinics").select("*").execute()
+        c_resp = supabase_execute(
+            lambda: supabase.table("clinics").select("*").execute()
+        )
         clinics = [c for c in (c_resp.data or []) if isinstance(c, dict)]
         total_clinics = len(clinics)
         for c in clinics:
@@ -349,7 +363,9 @@ def _aggregate_dashboard_stats() -> dict[str, Any]:
     total_patients = 0
     patients_last_month = 0
     try:
-        p_resp = supabase.table("patients").select("id, created_at").execute()
+        p_resp = supabase_execute(
+            lambda: supabase.table("patients").select("id, created_at").execute()
+        )
         for p in p_resp.data or []:
             if not isinstance(p, dict):
                 continue
@@ -372,8 +388,8 @@ def _aggregate_dashboard_stats() -> dict[str, Any]:
     appointments_mtd = 0
     appointments_last_month = 0
     try:
-        a_resp = (
-            supabase.table("appointments")
+        a_resp = supabase_execute(
+            lambda: supabase.table("appointments")
             .select("id, start_time")
             .execute()
         )
@@ -487,10 +503,12 @@ def get_clinic_cards(
 ):
     _require_super_admin(authorization)
     try:
-        resp = supabase.table("clinics").select("*").execute()
+        resp = supabase_execute(
+            lambda: supabase.table("clinics").select("*").execute()
+        )
         clinics = resp.data or []
-        st_resp = (
-            supabase.table("clinic_settings")
+        st_resp = supabase_execute(
+            lambda: supabase.table("clinic_settings")
             .select("clinic_id, billing_model")
             .execute()
         )
