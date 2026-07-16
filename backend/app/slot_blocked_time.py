@@ -9,6 +9,7 @@ from typing import Any, Optional
 import pytz
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 
 def _parse_block_date(value: Any) -> Optional[date]:
@@ -60,8 +61,8 @@ def blocked_windows_for_clinician_date(
 
     date_iso = target_date.isoformat()
     try:
-        resp = (
-            supabase.table("blocked_time")
+        resp = supabase_execute(
+            lambda: supabase.table("blocked_time")
             .select("start_time,end_time,start_time_of_day,end_time_of_day")
             .eq("clinician_id", cid)
             .lte("start_time", date_iso)

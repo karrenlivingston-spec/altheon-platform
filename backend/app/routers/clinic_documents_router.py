@@ -11,6 +11,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, File, Form, Header, HTTPException, Query, UploadFile
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.dependencies.permissions import (
     ADMIN_ROLES,
     CLINICAL_ROLES,
@@ -30,6 +31,18 @@ def _handle_supabase_error(response: Any) -> None:
     if error:
         detail = getattr(error, "message", None) or str(error)
         raise HTTPException(status_code=500, detail=detail)
+
+
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _now_iso() -> str:
@@ -71,15 +84,14 @@ def _signed_file_url(path: str, expires_in: int = 3600) -> str:
 
 def _resolve_clinic_user_pk(user_id: str, clinic_id: str) -> Optional[str]:
     try:
-        resp = (
-            supabase.table("clinic_users")
+        resp = _sb_execute(
+            lambda: supabase.table("clinic_users")
             .select("id")
             .eq("user_id", user_id)
             .eq("clinic_id", clinic_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -107,15 +119,14 @@ def _shape_document_row(row: dict[str, Any]) -> dict[str, Any]:
 
 def _get_document_or_404(doc_id: str, clinic_id: str) -> dict[str, Any]:
     try:
-        resp = (
-            supabase.table("clinic_reference_documents")
+        resp = _sb_execute(
+            lambda: supabase.table("clinic_reference_documents")
             .select("*")
             .eq("id", doc_id)
             .eq("clinic_id", clinic_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -175,8 +186,8 @@ async def upload_clinic_document(
     category_val = (category or "").strip() or None
 
     try:
-        ins = (
-            supabase.table("clinic_reference_documents")
+        ins = _sb_execute(
+            lambda: supabase.table("clinic_reference_documents")
             .insert(
                 {
                     "id": doc_id,
@@ -192,7 +203,6 @@ async def upload_clinic_document(
             )
             .execute()
         )
-        _handle_supabase_error(ins)
     except HTTPException:
         try:
             supabase.storage.from_(_BUCKET).remove([path])
@@ -230,8 +240,8 @@ def list_clinic_documents(
     cid = auth.clinic_id
 
     try:
-        resp = (
-            supabase.table("clinic_reference_documents")
+        resp = _sb_execute(
+            lambda: supabase.table("clinic_reference_documents")
             .select(
                 "id, clinic_id, title, category, storage_path, "
                 "uploaded_by, visibility, created_at, updated_at"
@@ -240,7 +250,6 @@ def list_clinic_documents(
             .order("created_at", desc=True)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -304,14 +313,13 @@ def delete_clinic_document(
             traceback.print_exc()
 
     try:
-        dele = (
-            supabase.table("clinic_reference_documents")
+        dele = _sb_execute(
+            lambda: supabase.table("clinic_reference_documents")
             .delete()
             .eq("id", did)
             .eq("clinic_id", cid)
             .execute()
         )
-        _handle_supabase_error(dele)
     except HTTPException:
         raise
     except Exception as exc:

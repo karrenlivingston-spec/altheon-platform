@@ -9,6 +9,7 @@ from typing import Any, Optional
 from fastapi import APIRouter
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.sms import send_sms
 
 router = APIRouter(prefix="/appointment-reminders", tags=["Appointment Reminders"])
@@ -60,8 +61,8 @@ def _appointments_in_hours_window(hours_lo: float, hours_hi: float) -> list[dict
     window_start = now_utc + timedelta(hours=hours_lo)
     window_end = now_utc + timedelta(hours=hours_hi)
     try:
-        resp = (
-            supabase.table("appointments")
+        resp = supabase_execute(
+            lambda: supabase.table("appointments")
             .select(
                 "id, patient_id, clinician_id, clinic_id, start_time, status, "
                 "patients(first_name, phone), clinics(name, brand_name)"
@@ -85,8 +86,8 @@ def _reminder_already_sent(appointment_id: str, message_type: str) -> bool:
     if not aid:
         return False
     try:
-        resp = (
-            supabase.table("sms_logs")
+        resp = supabase_execute(
+            lambda: supabase.table("sms_logs")
             .select("id")
             .eq("appointment_id", aid)
             .eq("message_type", message_type)

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from routers.fee_schedule import _resolve_bearer_user_id
 
 router = APIRouter()
@@ -23,21 +24,32 @@ def _handle_supabase_error(response: Any) -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
 def _assert_user_has_clinic_access(user_id: str, clinic_id: str) -> None:
     try:
-        access = (
-            supabase.table("clinic_users")
+        access = _sb_execute(
+            lambda: supabase.table("clinic_users")
             .select("user_id")
             .eq("user_id", user_id)
             .eq("clinic_id", clinic_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(access)
     except HTTPException:
         raise
     except Exception as exc:
@@ -48,15 +60,14 @@ def _assert_user_has_clinic_access(user_id: str, clinic_id: str) -> None:
 
 def _resolve_clinic_user_id(user_id: str, clinic_id: str) -> Optional[str]:
     try:
-        resp = (
-            supabase.table("clinic_users")
+        resp = _sb_execute(
+            lambda: supabase.table("clinic_users")
             .select("id")
             .eq("user_id", user_id)
             .eq("clinic_id", clinic_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(resp)
         rows = resp.data or []
         if not rows:
             return None
@@ -75,14 +86,13 @@ def _fetch_appointment(appointment_id: str) -> dict[str, Any]:
     if not aid:
         raise HTTPException(status_code=400, detail="appointment_id is required")
     try:
-        resp = (
-            supabase.table("appointments")
+        resp = _sb_execute(
+            lambda: supabase.table("appointments")
             .select("id, clinic_id, patient_id")
             .eq("id", aid)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -96,14 +106,13 @@ def _fetch_appointment(appointment_id: str) -> dict[str, Any]:
 
 def _fetch_measurement_by_appointment(appointment_id: str) -> Optional[dict[str, Any]]:
     try:
-        resp = (
-            supabase.table("measurements")
+        resp = _sb_execute(
+            lambda: supabase.table("measurements")
             .select("*")
             .eq("appointment_id", appointment_id.strip())
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -197,21 +206,21 @@ def upsert_appointment_measurements(
     existing = _fetch_measurement_by_appointment(appointment_id)
     try:
         if existing:
-            upd = (
-                supabase.table("measurements")
+            upd = _sb_execute(
+                lambda: supabase.table("measurements")
                 .update(payload)
                 .eq("id", existing["id"])
                 .execute()
             )
-            _handle_supabase_error(upd)
             rows = upd.data or []
             if not rows:
                 raise HTTPException(status_code=500, detail="Failed to update measurements")
             return rows[0]
 
         payload["created_at"] = _now_iso()
-        ins = supabase.table("measurements").insert(payload).execute()
-        _handle_supabase_error(ins)
+        ins = _sb_execute(
+            lambda: supabase.table("measurements").insert(payload).execute()
+        )
         rows = ins.data or []
         if not rows:
             raise HTTPException(status_code=500, detail="Failed to create measurements")

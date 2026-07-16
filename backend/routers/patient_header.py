@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, HTTPException
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from routers.fee_schedule import ClinicUserDep
 
 router = APIRouter()
@@ -22,6 +23,18 @@ def _handle_supabase_error(response: Any) -> None:
     if error:
         detail = getattr(error, "message", None) or str(error)
         raise HTTPException(status_code=500, detail=detail)
+
+
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _int_cents(value: Any) -> int:
@@ -116,15 +129,14 @@ def patient_header_stats(patient_id: str, clinic: ClinicUserDep):
         if not pid:
             raise HTTPException(status_code=400, detail="Invalid patient_id")
 
-        patient_resp = (
-            supabase.table("patients")
+        patient_resp = _sb_execute(
+            lambda: supabase.table("patients")
             .select("*")
             .eq("id", pid)
             .eq("clinic_id", cid)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(patient_resp)
         patients = patient_resp.data or []
         if not patients:
             raise HTTPException(status_code=404, detail="Patient not found")
@@ -132,8 +144,8 @@ def patient_header_stats(patient_id: str, clinic: ClinicUserDep):
 
         now_utc = datetime.now(timezone.utc)
 
-        appt_resp = (
-            supabase.table("appointments")
+        appt_resp = _sb_execute(
+            lambda: supabase.table("appointments")
             .select(
                 "id, start_time, status, treatment_type_id, "
                 "treatment_types(name), clinicians(first_name, last_name)"
@@ -143,11 +155,10 @@ def patient_header_stats(patient_id: str, clinic: ClinicUserDep):
             .order("start_time", desc=True)
             .execute()
         )
-        _handle_supabase_error(appt_resp)
         appointments = appt_resp.data or []
 
-        billing_resp = (
-            supabase.table("billing_records")
+        billing_resp = _sb_execute(
+            lambda: supabase.table("billing_records")
             .select(
                 "id, total_billed_cents, amount_paid_cents, amount_remaining_cents, "
                 "status, insurance_carrier, notes, claim_number"
@@ -156,7 +167,6 @@ def patient_header_stats(patient_id: str, clinic: ClinicUserDep):
             .eq("patient_id", pid)
             .execute()
         )
-        _handle_supabase_error(billing_resp)
         billing_rows = billing_resp.data or []
 
         balance_due_cents = sum(
@@ -201,8 +211,8 @@ def patient_header_stats(patient_id: str, clinic: ClinicUserDep):
 
         outcome_score: Optional[str] = None
         try:
-            om_resp = (
-                supabase.table("outcome_measure_results")
+            om_resp = _sb_execute(
+                lambda: supabase.table("outcome_measure_results")
                 .select("score, percentage, completed_at")
                 .eq("patient_id", pid)
                 .eq("clinic_id", cid)
@@ -210,7 +220,6 @@ def patient_header_stats(patient_id: str, clinic: ClinicUserDep):
                 .limit(1)
                 .execute()
             )
-            _handle_supabase_error(om_resp)
             if om_resp.data:
                 row = om_resp.data[0]
                 pct = row.get("percentage")
@@ -261,8 +270,8 @@ def patient_header_stats(patient_id: str, clinic: ClinicUserDep):
 
         activities: list[dict[str, Any]] = []
         try:
-            notes_resp = (
-                supabase.table("clinical_notes")
+            notes_resp = _sb_execute(
+                lambda: supabase.table("clinical_notes")
                 .select("id, signed_at, status")
                 .eq("clinic_id", cid)
                 .eq("patient_id", pid)
@@ -271,7 +280,6 @@ def patient_header_stats(patient_id: str, clinic: ClinicUserDep):
                 .limit(5)
                 .execute()
             )
-            _handle_supabase_error(notes_resp)
             for n in notes_resp.data or []:
                 ts = n.get("signed_at")
                 if not ts:
@@ -291,15 +299,14 @@ def patient_header_stats(patient_id: str, clinic: ClinicUserDep):
         record_ids = [str(r.get("id") or "") for r in billing_rows if r.get("id")]
         if record_ids:
             try:
-                pay_resp = (
-                    supabase.table("billing_payments")
+                pay_resp = _sb_execute(
+                    lambda: supabase.table("billing_payments")
                     .select("amount_cents, payment_date, billing_record_id")
                     .in_("billing_record_id", record_ids)
                     .order("payment_date", desc=True)
                     .limit(5)
                     .execute()
                 )
-                _handle_supabase_error(pay_resp)
                 for p in pay_resp.data or []:
                     activities.append(
                         {
@@ -314,8 +321,8 @@ def patient_header_stats(patient_id: str, clinic: ClinicUserDep):
                 traceback.print_exc()
 
         try:
-            intake_resp = (
-                supabase.table("intake_forms")
+            intake_resp = _sb_execute(
+                lambda: supabase.table("intake_forms")
                 .select("id, completed_at")
                 .eq("clinic_id", cid)
                 .eq("patient_id", pid)
@@ -323,7 +330,6 @@ def patient_header_stats(patient_id: str, clinic: ClinicUserDep):
                 .limit(3)
                 .execute()
             )
-            _handle_supabase_error(intake_resp)
             for f in intake_resp.data or []:
                 ts = f.get("completed_at")
                 if not ts:
