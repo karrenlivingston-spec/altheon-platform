@@ -11,6 +11,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.sms import send_sms
 from routers.fee_schedule import _resolve_bearer_user_id
 
@@ -34,17 +35,28 @@ def _handle_supabase_error(response: Any) -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 def _assert_user_has_clinic_access(user_id: str, clinic_id: str) -> None:
     try:
-        access = (
-            supabase.table("clinic_users")
+        access = _sb_execute(
+            lambda: supabase.table("clinic_users")
             .select("user_id")
             .eq("user_id", user_id)
             .eq("clinic_id", clinic_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(access)
     except HTTPException:
         raise
     except Exception as exc:
@@ -83,14 +95,13 @@ def _fetch_token_row(token: str) -> Optional[dict[str, Any]]:
     if not t:
         return None
     try:
-        resp = (
-            supabase.table("outcome_measure_tokens")
+        resp = _sb_execute(
+            lambda: supabase.table("outcome_measure_tokens")
             .select("id, token, patient_id, clinic_id, form_type, completed")
             .eq("token", t)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -107,15 +118,14 @@ def _is_completed(row: dict[str, Any]) -> bool:
 
 def _assert_patient_in_clinic(patient_id: str, clinic_id: str) -> None:
     try:
-        resp = (
-            supabase.table("patient_clinic_access")
+        resp = _sb_execute(
+            lambda: supabase.table("patient_clinic_access")
             .select("id")
             .eq("patient_id", patient_id)
             .eq("clinic_id", clinic_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception as exc:
@@ -250,14 +260,13 @@ def send_outcome_measure(
         _assert_user_has_clinic_access(user_id, clinic_id)
         _assert_patient_in_clinic(patient_id, clinic_id)
 
-        pt_resp = (
-            supabase.table("patients")
+        pt_resp = _sb_execute(
+            lambda: supabase.table("patients")
             .select("first_name, phone")
             .eq("id", patient_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(pt_resp)
         pt_row = (pt_resp.data or [None])[0]
         if not isinstance(pt_row, dict):
             raise HTTPException(status_code=404, detail="Patient not found")
@@ -267,8 +276,8 @@ def send_outcome_measure(
             raise HTTPException(status_code=400, detail="Patient has no phone number on file")
 
         token = secrets.token_urlsafe(32)
-        ins = (
-            supabase.table("outcome_measure_tokens")
+        ins = _sb_execute(
+            lambda: supabase.table("outcome_measure_tokens")
             .insert(
                 {
                     "token": token,
@@ -280,7 +289,6 @@ def send_outcome_measure(
             )
             .execute()
         )
-        _handle_supabase_error(ins)
         if not ins.data:
             raise HTTPException(status_code=500, detail="Failed to create outcome measure token")
 
@@ -339,8 +347,8 @@ def list_patient_outcome_measures(
         _assert_user_has_clinic_access(user_id, cid)
         _assert_patient_in_clinic(pid, cid)
 
-        resp = (
-            supabase.table("outcome_measure_results")
+        resp = _sb_execute(
+            lambda: supabase.table("outcome_measure_results")
             .select(
                 "id, patient_id, clinic_id, form_type, score, percentage, "
                 "interpretation, answers, completed_at"
@@ -350,7 +358,6 @@ def list_patient_outcome_measures(
             .order("completed_at", desc=True)
             .execute()
         )
-        _handle_supabase_error(resp)
         return {"results": resp.data or []}
     except HTTPException:
         raise
@@ -376,14 +383,13 @@ def get_outcome_measure_form(token: str):
         if not patient_id:
             raise HTTPException(status_code=500, detail="Invalid token row")
 
-        pt_resp = (
-            supabase.table("patients")
+        pt_resp = _sb_execute(
+            lambda: supabase.table("patients")
             .select("first_name")
             .eq("id", patient_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(pt_resp)
         pt_row = (pt_resp.data or [None])[0]
         if not isinstance(pt_row, dict):
             raise HTTPException(status_code=404, detail="Patient not found")
@@ -420,8 +426,8 @@ def submit_outcome_measure(token: str, body: SubmitOutcomeMeasureBody):
             raise HTTPException(status_code=500, detail="Invalid token row")
 
         completed_at = datetime.now(timezone.utc).isoformat()
-        ins = (
-            supabase.table("outcome_measure_results")
+        ins = _sb_execute(
+            lambda: supabase.table("outcome_measure_results")
             .insert(
                 {
                     "patient_id": patient_id,
@@ -436,17 +442,15 @@ def submit_outcome_measure(token: str, body: SubmitOutcomeMeasureBody):
             )
             .execute()
         )
-        _handle_supabase_error(ins)
         if not ins.data:
             raise HTTPException(status_code=500, detail="Failed to save outcome measure result")
 
-        upd = (
-            supabase.table("outcome_measure_tokens")
+        upd = _sb_execute(
+            lambda: supabase.table("outcome_measure_tokens")
             .update({"completed": True})
             .eq("id", token_id)
             .execute()
         )
-        _handle_supabase_error(upd)
 
         result_row = ins.data[0]
         return {

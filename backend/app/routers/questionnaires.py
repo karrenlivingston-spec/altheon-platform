@@ -11,6 +11,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.dependencies.permissions import ALL_ROLES, enforce_clinic_role_from_auth_header
 from app.sms import send_sms
 
@@ -30,6 +31,18 @@ def _handle_supabase_error(response: Any) -> None:
     if error:
         detail = getattr(error, "message", None) or str(error)
         raise HTTPException(status_code=500, detail=detail)
+
+
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _questionnaire_for_body_region(body_region: str) -> Optional[str]:
@@ -78,8 +91,8 @@ def _to_e164_us(phone: str) -> str:
 
 def _clinic_display_name(clinic_id: str) -> str:
     try:
-        resp = (
-            supabase.table("clinics")
+        resp = supabase_execute(
+            lambda: supabase.table("clinics")
             .select("name, brand_name")
             .eq("id", clinic_id.strip())
             .limit(1)
@@ -103,14 +116,13 @@ def _token_row(token: str) -> Optional[dict[str, Any]]:
     if not t:
         return None
     try:
-        resp = (
-            supabase.table("questionnaire_tokens")
+        resp = _sb_execute(
+            lambda: supabase.table("questionnaire_tokens")
             .select("*")
             .eq("token", t)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(resp)
         rows = resp.data or []
         return rows[0] if rows else None
     except HTTPException:
@@ -122,8 +134,8 @@ def _token_row(token: str) -> Optional[dict[str, Any]]:
 
 def _unused_token_exists(clinical_note_id: str, questionnaire_type: str) -> bool:
     try:
-        resp = (
-            supabase.table("questionnaire_tokens")
+        resp = _sb_execute(
+            lambda: supabase.table("questionnaire_tokens")
             .select("id")
             .eq("clinical_note_id", clinical_note_id.strip())
             .eq("questionnaire_type", questionnaire_type.strip())
@@ -131,7 +143,6 @@ def _unused_token_exists(clinical_note_id: str, questionnaire_type: str) -> bool
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(resp)
         return bool(resp.data)
     except Exception:
         logger.exception(
@@ -206,14 +217,13 @@ def maybe_send_questionnaire_sms_for_note(note: dict[str, Any]) -> None:
         if _unused_token_exists(note_id, questionnaire_type):
             return
 
-        pt_resp = (
-            supabase.table("patients")
+        pt_resp = _sb_execute(
+            lambda: supabase.table("patients")
             .select("first_name, phone")
             .eq("id", patient_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(pt_resp)
         pt_rows = pt_resp.data or []
         if not pt_rows:
             return
@@ -225,8 +235,8 @@ def maybe_send_questionnaire_sms_for_note(note: dict[str, Any]) -> None:
         first_name = str(patient.get("first_name") or "").strip() or "there"
         token = secrets.token_hex(32)
 
-        ins = (
-            supabase.table("questionnaire_tokens")
+        ins = _sb_execute(
+            lambda: supabase.table("questionnaire_tokens")
             .insert(
                 {
                     "token": token,
@@ -240,7 +250,6 @@ def maybe_send_questionnaire_sms_for_note(note: dict[str, Any]) -> None:
             )
             .execute()
         )
-        _handle_supabase_error(ins)
 
         url = (
             f"{_QUESTIONNAIRE_BASE_URL}/questionnaires/{questionnaire_type}.html"
@@ -288,14 +297,13 @@ def get_questionnaire_token_info(token: str = Query(default="")):
 
         first_name = ""
         if patient_id:
-            pt = (
-                supabase.table("patients")
+            pt = _sb_execute(
+                lambda: supabase.table("patients")
                 .select("first_name")
                 .eq("id", patient_id)
                 .limit(1)
                 .execute()
             )
-            _handle_supabase_error(pt)
             pt_rows = pt.data or []
             if pt_rows:
                 first_name = str(pt_rows[0].get("first_name") or "").strip()
@@ -327,8 +335,8 @@ def get_questionnaire_results(
         aid = appointment_id.strip()
         enforce_clinic_role_from_auth_header(authorization, cid, *ALL_ROLES)
 
-        resp = (
-            supabase.table("questionnaire_responses")
+        resp = _sb_execute(
+            lambda: supabase.table("questionnaire_responses")
             .select(
                 "questionnaire_type, body_region, total_score, "
                 "score_percentage, responses, submitted_at"
@@ -338,7 +346,6 @@ def get_questionnaire_results(
             .order("submitted_at", desc=True)
             .execute()
         )
-        _handle_supabase_error(resp)
         rows = resp.data or []
         out: list[dict[str, Any]] = []
         for row in rows:
@@ -387,14 +394,13 @@ def submit_questionnaire(body: QuestionnaireSubmitBody):
 
         body_region = ""
         if note_id:
-            note_resp = (
-                supabase.table("clinical_notes")
+            note_resp = _sb_execute(
+                lambda: supabase.table("clinical_notes")
                 .select("body_region")
                 .eq("id", note_id)
                 .limit(1)
                 .execute()
             )
-            _handle_supabase_error(note_resp)
             note_rows = note_resp.data or []
             if note_rows:
                 body_region = str(note_rows[0].get("body_region") or "").strip()
@@ -406,8 +412,8 @@ def submit_questionnaire(body: QuestionnaireSubmitBody):
             submitted_type, body.responses
         )
 
-        ins = (
-            supabase.table("questionnaire_responses")
+        ins = _sb_execute(
+            lambda: supabase.table("questionnaire_responses")
             .insert(
                 {
                     "patient_id": patient_id,
@@ -423,15 +429,13 @@ def submit_questionnaire(body: QuestionnaireSubmitBody):
             )
             .execute()
         )
-        _handle_supabase_error(ins)
 
-        upd = (
-            supabase.table("questionnaire_tokens")
+        upd = _sb_execute(
+            lambda: supabase.table("questionnaire_tokens")
             .update({"used": True})
             .eq("id", row["id"])
             .execute()
         )
-        _handle_supabase_error(upd)
 
         return {"success": True}
     except Exception:

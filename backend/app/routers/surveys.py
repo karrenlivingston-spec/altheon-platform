@@ -17,6 +17,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Request, Response
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.sms import send_sms
 
 router = APIRouter()
@@ -57,8 +58,8 @@ def _find_patient_by_twilio_from(from_number: str) -> Optional[dict[str, Any]]:
 
     for phone_try in candidates:
         try:
-            resp = (
-                supabase.table("patients")
+            resp = supabase_execute(
+                lambda: supabase.table("patients")
                 .select("id, first_name, phone")
                 .eq("phone", phone_try)
                 .limit(1)
@@ -70,8 +71,8 @@ def _find_patient_by_twilio_from(from_number: str) -> Optional[dict[str, Any]]:
             return dict(resp.data[0])
 
     try:
-        resp = (
-            supabase.table("patients")
+        resp = supabase_execute(
+            lambda: supabase.table("patients")
             .select("id, first_name, phone")
             .ilike("phone", f"%{last10}%")
             .limit(25)
@@ -95,8 +96,8 @@ def _clinic_id_for_survey(survey: dict[str, Any]) -> str:
     if not appt_id:
         return ""
     try:
-        resp = (
-            supabase.table("appointments")
+        resp = supabase_execute(
+            lambda: supabase.table("appointments")
             .select("clinic_id")
             .eq("id", appt_id)
             .limit(1)
@@ -111,8 +112,8 @@ def _clinic_id_for_survey(survey: dict[str, Any]) -> str:
 
 def _latest_open_survey(patient_id: str) -> Optional[dict[str, Any]]:
     try:
-        resp = (
-            supabase.table("survey_responses")
+        resp = supabase_execute(
+            lambda: supabase.table("survey_responses")
             .select("*")
             .eq("patient_id", patient_id)
             .eq("completed", False)
@@ -250,7 +251,12 @@ async def sms_webhook(request: Request) -> Response:
     patch: dict[str, Any] = {col: score, "updated_at": now_iso}
 
     try:
-        supabase.table("survey_responses").update(patch).eq("id", survey_id).execute()
+        supabase_execute(
+            lambda: supabase.table("survey_responses")
+            .update(patch)
+            .eq("id", survey_id)
+            .execute()
+        )
     except Exception:
         logger.exception("survey update failed id=%s col=%s", survey_id, col)
         return Response(
@@ -311,13 +317,18 @@ async def sms_webhook(request: Request) -> Response:
             f"See you at your next visit! — STTPDN"
         )
         try:
-            supabase.table("survey_responses").update(
-                {
-                    "completed": True,
-                    "avg_score": avg,
-                    "updated_at": datetime.now(timezone.utc).isoformat(),
-                }
-            ).eq("id", survey_id).execute()
+            supabase_execute(
+                lambda: supabase.table("survey_responses")
+                .update(
+                    {
+                        "completed": True,
+                        "avg_score": avg,
+                        "updated_at": datetime.now(timezone.utc).isoformat(),
+                    }
+                )
+                .eq("id", survey_id)
+                .execute()
+            )
         except Exception:
             logger.exception("survey complete update failed id=%s", survey_id)
         if clinic_id:
@@ -345,8 +356,8 @@ def send_survey_sms_batch() -> dict[str, Any]:
     sent = 0
 
     try:
-        appt_resp = (
-            supabase.table("appointments")
+        appt_resp = supabase_execute(
+            lambda: supabase.table("appointments")
             .select("id, patient_id, clinic_id, start_time")
             .eq("status", "completed")
             .gte("start_time", start_iso)
@@ -366,8 +377,8 @@ def send_survey_sms_batch() -> dict[str, Any]:
             continue
 
         try:
-            existing = (
-                supabase.table("survey_responses")
+            existing = supabase_execute(
+                lambda: supabase.table("survey_responses")
                 .select("id")
                 .eq("appointment_id", appt_id)
                 .limit(1)
@@ -380,8 +391,8 @@ def send_survey_sms_batch() -> dict[str, Any]:
             continue
 
         try:
-            pt = (
-                supabase.table("patients")
+            pt = supabase_execute(
+                lambda: supabase.table("patients")
                 .select("first_name, phone")
                 .eq("id", patient_id)
                 .limit(1)
@@ -397,8 +408,8 @@ def send_survey_sms_batch() -> dict[str, Any]:
         fn = (prow.get("first_name") or "there").strip() or "there"
 
         try:
-            ins = (
-                supabase.table("survey_responses")
+            ins = supabase_execute(
+                lambda: supabase.table("survey_responses")
                 .insert(
                     {
                         "patient_id": patient_id,
