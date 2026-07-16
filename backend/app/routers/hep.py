@@ -13,6 +13,7 @@ from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.dependencies.permissions import CLINICAL_ROLES, enforce_clinic_role_from_auth_header
 from app.sms import send_sms
 
@@ -34,6 +35,18 @@ def _handle_supabase_error(response: Any) -> None:
     if error:
         detail = getattr(error, "message", None) or str(error)
         raise HTTPException(status_code=500, detail=detail)
+
+
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _to_e164_us(phone: str) -> str:
@@ -99,8 +112,8 @@ def create_hep(
         )
         clinic_id = auth.clinic_id
 
-        result = (
-            supabase.table("hep_programs")
+        result = _sb_execute(
+            lambda: supabase.table("hep_programs")
             .insert(
                 {
                     "clinic_id": clinic_id,
@@ -112,7 +125,6 @@ def create_hep(
             )
             .execute()
         )
-        _handle_supabase_error(result)
 
         if not result.data:
             raise HTTPException(status_code=500, detail="Failed to create HEP")
@@ -122,15 +134,14 @@ def create_hep(
         hep_url = f"{FRONTEND_URL}/hep/{token}"
 
         if payload.send_sms:
-            patient = (
-                supabase.table("patients")
+            patient = _sb_execute(
+                lambda: supabase.table("patients")
                 .select("first_name, phone")
                 .eq("id", payload.patient_id)
                 .eq("clinic_id", clinic_id)
                 .limit(1)
                 .execute()
             )
-            _handle_supabase_error(patient)
             pt_row = (patient.data or [None])[0]
             if isinstance(pt_row, dict) and pt_row.get("phone"):
                 first_name = (pt_row.get("first_name") or "").strip() or "there"
@@ -148,13 +159,12 @@ def create_hep(
                 )
 
                 sent_at = datetime.now(timezone.utc).isoformat()
-                upd = (
-                    supabase.table("hep_programs")
+                upd = _sb_execute(
+                    lambda: supabase.table("hep_programs")
                     .update({"sent_at": sent_at})
                     .eq("id", hep["id"])
                     .execute()
                 )
-                _handle_supabase_error(upd)
                 hep["sent_at"] = sent_at
 
         hep["url"] = hep_url
@@ -176,15 +186,14 @@ def list_hep(
     try:
         enforce_clinic_role_from_auth_header(authorization, clinic_id, *CLINICAL_ROLES)
 
-        result = (
-            supabase.table("hep_programs")
+        result = _sb_execute(
+            lambda: supabase.table("hep_programs")
             .select("*")
             .eq("patient_id", patient_id)
             .eq("clinic_id", clinic_id)
             .order("created_at", desc=True)
             .execute()
         )
-        _handle_supabase_error(result)
         programs = result.data or []
 
         for program in programs:
@@ -223,8 +232,7 @@ def get_exercise_library(
         if body_region and body_region.strip():
             query = query.eq("body_region", body_region.strip())
 
-        result = query.execute()
-        _handle_supabase_error(result)
+        result = _sb_execute(lambda: query.execute())
         exercises = result.data or []
 
         if search and search.strip():
@@ -272,15 +280,14 @@ def ai_suggest_exercises(
         if not api_key:
             raise HTTPException(status_code=503, detail="ANTHROPIC_API_KEY is not configured")
 
-        library_result = (
-            supabase.table("exercise_library")
+        library_result = _sb_execute(
+            lambda: supabase.table("exercise_library")
             .select(LIBRARY_SELECT)
             .eq("is_active", True)
             .order("category")
             .order("name")
             .execute()
         )
-        _handle_supabase_error(library_result)
         library = library_result.data or []
 
         library_for_prompt = [
@@ -374,8 +381,8 @@ Only recommend exercises that are clinically appropriate. Do not recommend exerc
 def get_hep_public(token: str):
     """Public endpoint — no auth required. Used by the patient-facing page."""
     try:
-        result = (
-            supabase.table("hep_programs")
+        result = _sb_execute(
+            lambda: supabase.table("hep_programs")
             .select(
                 "id, title, exercises, created_at, clinician_id, clinic_id, "
                 "clinics(name, brand_name)"
@@ -384,7 +391,6 @@ def get_hep_public(token: str):
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(result)
 
         if not result.data:
             raise HTTPException(status_code=404, detail="Program not found")

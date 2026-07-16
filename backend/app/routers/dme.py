@@ -29,6 +29,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 
 router = APIRouter()
 
@@ -40,6 +41,18 @@ def _handle_supabase_error(response: Any) -> None:
     if error:
         detail = getattr(error, "message", None) or str(error)
         raise HTTPException(status_code=500, detail=detail)
+
+
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _now_iso() -> str:
@@ -104,8 +117,7 @@ def create_dme_record(body: CreateDmeBody):
         )
     row = _row_for_insert(body)
     try:
-        ins = supabase.table("dme_records").insert(row).execute()
-        _handle_supabase_error(ins)
+        ins = _sb_execute(lambda: supabase.table("dme_records").insert(row).execute())
     except HTTPException:
         raise
     except Exception as exc:
@@ -128,8 +140,7 @@ def list_dme_records(
         q = supabase.table("dme_records").select("*").eq("clinic_id", cid)
         if patient_id is not None and patient_id.strip():
             q = q.eq("patient_id", patient_id.strip())
-        resp = q.order("date_issued", desc=True).execute()
-        _handle_supabase_error(resp)
+        resp = _sb_execute(lambda: q.order("date_issued", desc=True).execute())
     except HTTPException:
         raise
     except Exception as exc:
@@ -177,8 +188,9 @@ def patch_dme_record(record_id: str, body: PatchDmeBody):
         raise HTTPException(status_code=400, detail="No valid fields to update")
     data["updated_at"] = _now_iso()
     try:
-        upd = supabase.table("dme_records").update(data).eq("id", record_id).execute()
-        _handle_supabase_error(upd)
+        upd = _sb_execute(
+            lambda: supabase.table("dme_records").update(data).eq("id", record_id).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -195,8 +207,8 @@ def post_dme_signature(record_id: str, body: SignatureDmeBody):
     if not signature_data:
         raise HTTPException(status_code=400, detail="signature_data is required")
     try:
-        upd = (
-            supabase.table("dme_records")
+        upd = _sb_execute(
+            lambda: supabase.table("dme_records")
             .update(
                 {
                     "signature_data": signature_data,
@@ -206,7 +218,6 @@ def post_dme_signature(record_id: str, body: SignatureDmeBody):
             .eq("id", record_id)
             .execute()
         )
-        _handle_supabase_error(upd)
     except HTTPException:
         raise
     except Exception as exc:
@@ -223,8 +234,8 @@ def post_dme_clinician_signature(record_id: str, body: SignatureDmeBody):
     if not signature_data:
         raise HTTPException(status_code=400, detail="signature_data is required")
     try:
-        upd = (
-            supabase.table("dme_records")
+        upd = _sb_execute(
+            lambda: supabase.table("dme_records")
             .update(
                 {
                     "clinician_signature_data": signature_data,
@@ -234,7 +245,6 @@ def post_dme_clinician_signature(record_id: str, body: SignatureDmeBody):
             .eq("id", record_id)
             .execute()
         )
-        _handle_supabase_error(upd)
     except HTTPException:
         raise
     except Exception as exc:
@@ -248,14 +258,13 @@ def post_dme_clinician_signature(record_id: str, body: SignatureDmeBody):
 @router.delete("/dme/{record_id}")
 def delete_dme_record(record_id: str):
     try:
-        existing = (
-            supabase.table("dme_records")
+        existing = _sb_execute(
+            lambda: supabase.table("dme_records")
             .select("id")
             .eq("id", record_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(existing)
     except HTTPException:
         raise
     except Exception as exc:
@@ -263,8 +272,9 @@ def delete_dme_record(record_id: str):
     if not (existing.data or []):
         raise HTTPException(status_code=404, detail="DME record not found")
     try:
-        del_resp = supabase.table("dme_records").delete().eq("id", record_id).execute()
-        _handle_supabase_error(del_resp)
+        del_resp = _sb_execute(
+            lambda: supabase.table("dme_records").delete().eq("id", record_id).execute()
+        )
     except HTTPException:
         raise
     except Exception as exc:
