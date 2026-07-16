@@ -12,6 +12,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from routers.fee_schedule import _assert_user_has_clinic_access, _resolve_bearer_user_id
 
 router = APIRouter()
@@ -54,6 +55,18 @@ def _handle_supabase_error(response: Any) -> None:
     if error:
         detail = getattr(error, "message", None) or str(error)
         raise HTTPException(status_code=500, detail=detail)
+
+
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 def _extract_json_array(text: str) -> list[Any]:
@@ -109,14 +122,13 @@ def detect_cpt_codes(
         note_id = request.note_id.strip()
         _assert_user_has_clinic_access(user_id, clinic_id)
 
-        note_resp = (
-            supabase.table("clinical_notes")
+        note_resp = _sb_execute(
+            lambda: supabase.table("clinical_notes")
             .select("id, clinic_id, subjective, objective, assessment, plan")
             .eq("id", note_id)
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(note_resp)
         note_rows = note_resp.data or []
         if not note_rows:
             raise HTTPException(status_code=404, detail="Note not found")
@@ -135,14 +147,13 @@ def detect_cpt_codes(
                 detail="Note has no SOAP content to analyze",
             )
 
-        fee_resp = (
-            supabase.table("clinic_fee_schedules")
+        fee_resp = _sb_execute(
+            lambda: supabase.table("clinic_fee_schedules")
             .select("cpt_code, charge, modifiers")
             .eq("clinic_id", clinic_id)
             .eq("is_active", True)
             .execute()
         )
-        _handle_supabase_error(fee_resp)
         fee_schedule = fee_resp.data or []
         if not fee_schedule:
             # No fee schedule — detect codes from SOAP content only, without charge data
@@ -217,13 +228,12 @@ def detect_cpt_codes(
                 item["units"] = 1
             filtered.append(item)
 
-        upd = (
-            supabase.table("clinical_notes")
+        upd = _sb_execute(
+            lambda: supabase.table("clinical_notes")
             .update({"cpt_codes_detected": filtered})
             .eq("id", note_id)
             .execute()
         )
-        _handle_supabase_error(upd)
 
         return {"success": True, "cpt_codes": filtered}
 

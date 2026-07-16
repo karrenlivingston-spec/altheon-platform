@@ -20,6 +20,7 @@ import requests
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.dependencies.permissions import (
     CLINICAL_ROLES,
     enforce_clinic_role_from_auth_header,
@@ -154,8 +155,8 @@ def _fetch_clinical_note(note_id: str) -> Optional[dict[str, Any]]:
     if not note_id:
         return None
     try:
-        resp = (
-            supabase.table("clinical_notes")
+        resp = supabase_execute(
+            lambda: supabase.table("clinical_notes")
             .select("id,status,subjective,objective,assessment,plan")
             .eq("id", note_id)
             .limit(1)
@@ -355,8 +356,8 @@ def _match_special_tests(
     if not extracted:
         return []
     try:
-        resp = (
-            supabase.table("orthopedic_special_tests")
+        resp = supabase_execute(
+            lambda: supabase.table("orthopedic_special_tests")
             .select("id,test_name")
             .execute()
         )
@@ -405,9 +406,11 @@ def _upsert_note_special_tests(
         for m in matched
     ]
     try:
-        supabase.table("note_special_test_results").upsert(
-            rows, on_conflict="note_id,test_id"
-        ).execute()
+        supabase_execute(
+            lambda: supabase.table("note_special_test_results")
+            .upsert(rows, on_conflict="note_id,test_id")
+            .execute()
+        )
     except Exception:
         logger.exception(
             "auto-save of special test results failed note_id=%s", note_id

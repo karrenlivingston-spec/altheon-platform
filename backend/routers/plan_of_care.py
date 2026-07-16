@@ -16,6 +16,7 @@ from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from app.dependencies.permissions import CLINICAL_ROLES, enforce_clinic_role_from_auth_header
 from routers.fee_schedule import ClinicUserDep
 
@@ -43,12 +44,23 @@ def _handle_supabase_error(response: Any) -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 def _one(table: str, **eq_filters: Any) -> Optional[dict[str, Any]]:
     q = supabase.table(table).select("*")
     for k, v in eq_filters.items():
         q = q.eq(k, v)
-    resp = q.limit(1).execute()
-    _handle_supabase_error(resp)
+    resp = _sb_execute(lambda: q.limit(1).execute())
     rows = resp.data or []
     return rows[0] if rows else None
 

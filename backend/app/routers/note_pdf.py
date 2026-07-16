@@ -9,6 +9,7 @@ import fitz  # PyMuPDF
 from fastapi import APIRouter, HTTPException, Response
 
 from app.db import supabase
+from app.retry_utils import supabase_execute
 from routers.fee_schedule import ClinicUserDep
 
 router = APIRouter()
@@ -57,6 +58,18 @@ def _handle_supabase_error(response: Any) -> None:
         raise HTTPException(status_code=500, detail=detail)
 
 
+def _sb_execute(fn):
+    """Run Supabase query with transient-failure retry (Render-safe)."""
+    try:
+        resp = supabase_execute(fn)
+        _handle_supabase_error(resp)
+        return resp
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
 def _q(table: str, **eq_filters: Any):
     q = supabase.table(table).select("*")
     for k, v in eq_filters.items():
@@ -66,8 +79,7 @@ def _q(table: str, **eq_filters: Any):
 
 def _one(table: str, **eq_filters: Any) -> Optional[dict[str, Any]]:
     try:
-        resp = _q(table, **eq_filters).limit(1).execute()
-        _handle_supabase_error(resp)
+        resp = _sb_execute(lambda: _q(table, **eq_filters).limit(1).execute())
     except HTTPException:
         raise
     except Exception as exc:
@@ -394,8 +406,7 @@ def _fetch_measurements(appointment_id: Optional[str]) -> list[dict[str, Any]]:
     if not aid:
         return []
     try:
-        resp = _q("measurements", appointment_id=aid).execute()
-        _handle_supabase_error(resp)
+        resp = _sb_execute(lambda: _q("measurements", appointment_id=aid).execute())
     except HTTPException:
         raise
     except Exception:
@@ -405,8 +416,8 @@ def _fetch_measurements(appointment_id: Optional[str]) -> list[dict[str, Any]]:
 
 def _previous_note(note: dict[str, Any]) -> Optional[dict[str, Any]]:
     try:
-        resp = (
-            supabase.table("clinical_notes")
+        resp = _sb_execute(
+            lambda: supabase.table("clinical_notes")
             .select("*")
             .eq("patient_id", note["patient_id"])
             .eq("clinic_id", note["clinic_id"])
@@ -416,7 +427,6 @@ def _previous_note(note: dict[str, Any]) -> Optional[dict[str, Any]]:
             .limit(1)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception:
@@ -428,8 +438,8 @@ def _previous_note(note: dict[str, Any]) -> Optional[dict[str, Any]]:
 def _outcome_results(patient_id: str, clinic_id: str) -> dict[str, list[dict[str, Any]]]:
     """form_type → results newest-first (max 2 per form)."""
     try:
-        resp = (
-            supabase.table("outcome_measure_results")
+        resp = _sb_execute(
+            lambda: supabase.table("outcome_measure_results")
             .select("form_type,score,percentage,completed_at")
             .eq("patient_id", patient_id)
             .eq("clinic_id", clinic_id)
@@ -437,7 +447,6 @@ def _outcome_results(patient_id: str, clinic_id: str) -> dict[str, list[dict[str
             .limit(40)
             .execute()
         )
-        _handle_supabase_error(resp)
     except HTTPException:
         raise
     except Exception:
@@ -459,8 +468,8 @@ def _soc_and_visits(
     """Returns (original_eval_date, soc_date, visits_from_soc)."""
     original_eval = "—"
     try:
-        ev = (
-            supabase.table("clinical_notes")
+        ev = supabase_execute(
+            lambda: supabase.table("clinical_notes")
             .select("created_at")
             .eq("patient_id", patient_id)
             .eq("clinic_id", clinic_id)
@@ -478,8 +487,8 @@ def _soc_and_visits(
     soc_date = "—"
     visits = "—"
     try:
-        appts = (
-            supabase.table("appointments")
+        appts = supabase_execute(
+            lambda: supabase.table("appointments")
             .select("id,start_time,status")
             .eq("patient_id", patient_id)
             .eq("clinic_id", clinic_id)
