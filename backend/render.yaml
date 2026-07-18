@@ -31,6 +31,14 @@
 #   Schedule: */20 * * * *
 #   (Every 20 minutes UTC — all clinics; set INTAKE_SECRET on this cron job, same value as web service.)
 
+# --- Cron job: ERA remittance polling fallback ---
+#
+#   Service:  era-remittance-poll
+#   Command:  curl -f -X POST -H "X-Intake-Secret: $INTAKE_SECRET" "https://altheon-platform.onrender.com/api/era/poll?clinic_id=$ERA_DEFAULT_CLINIC_ID"
+#   Schedule: */30 * * * *
+#   Set on this cron job directly (not inherited from web service):
+#     INTAKE_SECRET, ERA_DEFAULT_CLINIC_ID, STEDI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
+
 services:
   - type: cron
     name: altheon-appointment-reminders-cron
@@ -40,3 +48,18 @@ services:
     name: reconcile-system-tasks
     schedule: "*/20 * * * *"
     startCommand: curl -f -X POST -H "X-Intake-Secret: $INTAKE_SECRET" https://altheon-platform.onrender.com/tasks/reconcile-system-tasks
+  - type: cron
+    name: era-remittance-poll
+    schedule: "*/30 * * * *"
+    startCommand: curl -f -X POST -H "X-Intake-Secret: $INTAKE_SECRET" "https://altheon-platform.onrender.com/api/era/poll?clinic_id=$ERA_DEFAULT_CLINIC_ID"
+    envVars:
+      - key: INTAKE_SECRET
+        sync: false
+      - key: ERA_DEFAULT_CLINIC_ID
+        sync: false
+      - key: STEDI_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false

@@ -1,0 +1,65 @@
+{
+  "transactions": [
+    {
+      "controlNumber": "000000001",
+      "payer": {
+        "name": "STEDI TEST PAYER",
+        "payerIdentificationNumber": "STEDITEST"
+      },
+      "financialInformation": {
+        "totalActualProviderPaymentAmount": "150.00",
+        "paymentMethodCode": "ACH"
+      },
+      "detailInfo": [
+        {
+          "paymentInfo": [
+            {
+              "claimPaymentInfo": {
+                "patientControlNumber": "MATCH-PCN-001",
+                "claimPaymentAmount": "120.00",
+                "totalClaimChargeAmount": "150.00",
+                "payerClaimControlNumber": "PAYER-CLM-001"
+              },
+              "claimAdjustments": [
+                {
+                  "adjustmentGroupCode": "CO",
+                  "adjustmentReasonCode": "45",
+                  "adjustmentAmount": "30.00"
+                }
+              ],
+              "subscriber": {
+                "memberId": "MEMBER12345",
+                "firstName": "JANE",
+                "lastName": "DOE"
+              },
+              "serviceLines": [
+                {
+                  "serviceDate": "20260520",
+                  "servicePaymentInformation": {
+                    "lineItemChargeAmount": "150.00",
+                    "lineItemProviderPaymentAmount": "120.00"
+                  }
+                }
+              ]
+            },
+            {
+              "claimPaymentInfo": {
+                "patientControlNumber": "UNMATCHED-999",
+                "claimPaymentAmount": "50.00",
+                "totalClaimChargeAmount": "50.00"
+              },
+              "subscriber": {
+                "memberId": "UNKNOWN999"
+              },
+              "serviceLines": [
+                {
+                  "serviceDate": "20260101"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

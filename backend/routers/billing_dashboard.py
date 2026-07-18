@@ -425,35 +425,52 @@ def billing_dashboard(
                 status_counts["draft"] += 1
 
         recent_payments: list[dict[str, Any]] = []
-        record_by_id = {str(r.get("id") or ""): r for r in all_records if r.get("id")}
         try:
-            pay_resp = _sb_execute(
-                lambda: supabase.table("billing_payments")
+            billing_recs_resp = _sb_execute(
+                lambda: supabase.table("billing_records")
                 .select(
-                    "amount_cents, payment_date, payment_method, note, billing_record_id"
+                    "id, insurance_carrier, patient_id, "
+                    "patients(first_name, last_name)"
                 )
-                .order("payment_date", desc=True)
-                .limit(50)
+                .eq("clinic_id", cid)
                 .execute()
             )
-            for p in pay_resp.data or []:
-                rid = str(p.get("billing_record_id") or "")
-                rec = record_by_id.get(rid)
-                if not rec:
-                    continue
-                carrier = str(rec.get("insurance_carrier") or "").strip() or "Payer"
-                recent_payments.append(
-                    {
-                        "amount_cents": _int_cents(p.get("amount_cents")),
-                        "payment_date": str(p.get("payment_date") or ""),
-                        "payment_method": str(p.get("payment_method") or "").strip() or None,
-                        "note": str(p.get("note") or "").strip() or None,
-                        "carrier": carrier,
-                        "patient_name": _patient_name(rec),
-                    }
+            record_by_id = {
+                str(r.get("id") or ""): r
+                for r in (billing_recs_resp.data or [])
+                if isinstance(r, dict) and r.get("id")
+            }
+            record_ids = list(record_by_id.keys())
+            if record_ids:
+                pay_resp = _sb_execute(
+                    lambda: supabase.table("billing_payments")
+                    .select(
+                        "amount_cents, payment_date, payment_method, note, billing_record_id"
+                    )
+                    .in_("billing_record_id", record_ids)
+                    .order("payment_date", desc=True)
+                    .limit(50)
+                    .execute()
                 )
-                if len(recent_payments) >= 5:
-                    break
+                for p in pay_resp.data or []:
+                    rid = str(p.get("billing_record_id") or "")
+                    rec = record_by_id.get(rid)
+                    if not rec:
+                        continue
+                    carrier = str(rec.get("insurance_carrier") or "").strip() or "Payer"
+                    recent_payments.append(
+                        {
+                            "amount_cents": _int_cents(p.get("amount_cents")),
+                            "payment_date": str(p.get("payment_date") or ""),
+                            "payment_method": str(p.get("payment_method") or "").strip()
+                            or None,
+                            "note": str(p.get("note") or "").strip() or None,
+                            "carrier": carrier,
+                            "patient_name": _patient_name(rec),
+                        }
+                    )
+                    if len(recent_payments) >= 5:
+                        break
         except Exception:
             traceback.print_exc()
 

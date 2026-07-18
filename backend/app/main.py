@@ -72,6 +72,7 @@ from routers.fee_schedule import router as fee_schedule_router
 from routers.diagnostic_router import router as diagnostic_router
 from routers.benefits_ledger import router as benefits_ledger_router
 from routers.billing_dashboard import router as billing_dashboard_router
+from routers.era_router import router as era_router
 from routers.dashboard import router as dashboard_router
 from routers.patient_header import router as patient_header_router
 from routers.plan_of_care import router as plan_of_care_router
@@ -196,6 +197,7 @@ app.include_router(
 app.include_router(
     billing_dashboard_router, prefix="/api", tags=["Billing Dashboard"]
 )
+app.include_router(era_router, prefix="/api", tags=["ERA"])
 app.include_router(
     patient_header_router, prefix="/api", tags=["Patient Header"]
 )
