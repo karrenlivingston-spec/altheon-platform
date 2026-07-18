@@ -159,6 +159,9 @@ app.include_router(
     tags=["billing-payments"],
 )
 app.include_router(billing_claims_router.router, prefix="/billing", tags=["billing"])
+app.include_router(
+    billing_claims_router.billing_cron_router, prefix="/billing", tags=["billing"]
+)
 app.include_router(legal_router)
 app.include_router(surveys.router)
 app.include_router(intake_router.router, prefix="", tags=["intake"])

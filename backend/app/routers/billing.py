@@ -6,6 +6,8 @@ import base64
 import json
 import logging
 import os
+import secrets
+import traceback
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Optional
@@ -41,6 +43,8 @@ from app.sms import send_sms
 from routers.fee_schedule import ClinicUserDep
 
 router = APIRouter(dependencies=[Depends(require_role(*BILLING_READ_ROLES))])
+# Cron-only routes (INTAKE_SECRET auth, no JWT) — registered separately in main.py.
+billing_cron_router = APIRouter()
 
 MEDICARE_CAP_DOLLARS = 2480.0
 logger = logging.getLogger(__name__)
@@ -902,6 +906,288 @@ def _claim_status_from_stedi_response(data: dict[str, Any]) -> str:
     return "submitted"
 
 
+# ---------------------------------------------------------------------------
+# insurance_claims.status vs insurance_claims.claim_status
+#
+# These columns serve different purposes — do not write payment outcomes to
+# status or workflow states to claim_status.
+#
+#   status        — pre-payment WORKFLOW (submitted, pending, resubmitted,
+#                   rejected, accepted, draft). Updated by 276/277 when the
+#                   payer has not yet confirmed payment.
+#
+#   claim_status  — payment OUTCOME (ERA canonical vocabulary: paid,
+#                   partially_paid, denied). Updated by ERA (835) and by
+#                   276/277 when the response confirms payment/denial/partial.
+# ---------------------------------------------------------------------------
+
+def _default_clinic_id_for_poll() -> str:
+    return (
+        os.getenv("ERA_DEFAULT_CLINIC_ID") or os.getenv("DEFAULT_CLINIC_ID") or ""
+    ).strip()
+
+
+def _verify_intake_secret(x_intake_secret: Optional[str]) -> None:
+    expected = (os.environ.get("INTAKE_SECRET") or "").strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="INTAKE_SECRET is not configured")
+    provided = (x_intake_secret or "").strip()
+    if not provided or not secrets.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="Invalid intake secret")
+
+
+def _extract_stedi_277_detail(data: dict[str, Any]) -> tuple[str, str]:
+    """Read category fields from a 277 JSON body (parser unchanged)."""
+    claims = data.get("claims")
+    if not isinstance(claims, list) or not claims:
+        return "", ""
+    claim_status = claims[0].get("claimStatus") if isinstance(claims[0], dict) else {}
+    if not isinstance(claim_status, dict):
+        return "", ""
+    category_code = str(claim_status.get("statusCategoryCode") or "").strip()
+    category_text = str(
+        claim_status.get("statusCategoryCodeValue")
+        or claim_status.get("statusCodeValue")
+        or ""
+    ).strip()
+    return category_code, category_text
+
+
+def _normalize_payment_status_bucket(
+    status_bucket: str,
+    category_text: str,
+) -> str:
+    """Map parser bucket + payer text to reconciliation bucket (post-parser only)."""
+    bucket = str(status_bucket or "submitted").strip().lower()
+    text = str(category_text or "").lower()
+    if bucket in ("paid", "denied"):
+        return bucket
+    if "partial" in text or "partially" in text:
+        return "partial"
+    return bucket
+
+
+def _reconcile_claim_fields_from_status_bucket(status_bucket: str) -> dict[str, Any]:
+    """Return insurance_claims patch fields for a 276/277 status bucket."""
+    bucket = str(status_bucket or "submitted").strip().lower()
+    patch: dict[str, Any] = {}
+    if bucket == "paid":
+        patch["claim_status"] = "paid"
+    elif bucket == "denied":
+        patch["claim_status"] = "denied"
+    elif bucket in ("partial", "partially_paid"):
+        patch["claim_status"] = "partially_paid"
+    elif bucket in ("pending", "resubmitted", "submitted", "rejected", "accepted"):
+        patch["status"] = bucket
+    else:
+        patch["status"] = "submitted"
+    return patch
+
+
+def _claim_status_check_eligibility_error(claim: dict[str, Any]) -> Optional[str]:
+    """Return an error when required 276 demographics are missing."""
+    status = str(claim.get("status") or "").strip().lower()
+    if status == "draft":
+        return "Claim is still in draft"
+    if not str(claim.get("payer_id") or "").strip():
+        return "Claim is missing payer_id"
+    if not str(claim.get("member_id") or "").strip():
+        return "Claim is missing member_id"
+    if _parse_date_only(claim.get("first_treatment_date")) is None:
+        return "Claim is missing date of service"
+    return None
+
+
+def _post_stedi_claim_status(payload: dict[str, Any], api_key: str) -> dict[str, Any]:
+    """POST to Stedi claimstatus/v2 (276/277). Uses existing payload builder upstream."""
+    headers = _stedi_headers(api_key)
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            response = client.post(STEDI_STATUS_URL, headers=headers, json=payload)
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if response.status_code >= 400:
+        raise HTTPException(status_code=502, detail=_stedi_error_detail(response))
+    try:
+        data = response.json()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502, detail="Invalid JSON response from Stedi"
+        ) from exc
+    if not isinstance(data, dict):
+        raise HTTPException(status_code=502, detail="Unexpected Stedi response format")
+    return data
+
+
+def _insert_claim_status_check(
+    *,
+    claim_id: str,
+    clinic_id: str,
+    status_bucket: str,
+    category_code: str,
+    category_text: str,
+    raw_response: dict[str, Any],
+    source: str,
+    checked_at: str,
+) -> Optional[dict[str, Any]]:
+    row = {
+        "claim_id": claim_id,
+        "clinic_id": clinic_id,
+        "checked_at": checked_at,
+        "status_bucket": status_bucket,
+        "category_code": category_code or None,
+        "category_text": category_text or None,
+        "raw_response": raw_response,
+        "source": source,
+    }
+    try:
+        resp = supabase_execute(
+            lambda: supabase.table("claim_status_checks").insert(row).execute()
+        )
+        _handle_supabase_error(resp)
+        rows = resp.data or []
+        return rows[0] if rows else None
+    except Exception:
+        logger.exception("claim_status_checks insert failed claim_id=%s", claim_id)
+        return None
+
+
+def _run_claim_status_check(
+    claim: dict[str, Any],
+    *,
+    source: str,
+    api_key: str,
+) -> dict[str, Any]:
+    """One 276/277 check: Stedi call, reconcile columns, persist history row."""
+    claim_id = str(claim.get("id") or "")
+    clinic_id = str(claim.get("clinic_id") or "")
+    result: dict[str, Any] = {
+        "claim_id": claim_id,
+        "ok": False,
+        "status_bucket": None,
+        "claim_status": None,
+        "status": None,
+        "check_id": None,
+        "error": None,
+    }
+    if not claim_id or not clinic_id:
+        result["error"] = "Invalid claim record"
+        return result
+
+    eligibility_err = _claim_status_check_eligibility_error(claim)
+    if eligibility_err:
+        result["error"] = eligibility_err
+        return result
+
+    patient = _fetch_patient_for_claim(claim.get("patient_id"))
+    try:
+        payload = _build_stedi_claim_status_payload(claim, patient)
+    except HTTPException as exc:
+        result["error"] = str(exc.detail)
+        return result
+
+    try:
+        data = _post_stedi_claim_status(payload, api_key)
+    except HTTPException as exc:
+        result["error"] = str(exc.detail)
+        return result
+
+    parser_bucket = _claim_status_from_stedi_response(data)
+    category_code, category_text = _extract_stedi_277_detail(data)
+    status_bucket = _normalize_payment_status_bucket(parser_bucket, category_text)
+    now = _now_iso()
+    patch = _reconcile_claim_fields_from_status_bucket(status_bucket)
+    patch["updated_at"] = now
+
+    try:
+        upd = supabase_execute(
+            lambda: (
+                supabase.table("insurance_claims")
+                .update(patch)
+                .eq("id", claim_id)
+                .execute()
+            )
+        )
+        _handle_supabase_error(upd)
+    except HTTPException as exc:
+        result["error"] = str(exc.detail)
+        return result
+    except Exception as exc:
+        logger.exception("claim status reconcile failed claim_id=%s", claim_id)
+        result["error"] = str(exc)
+        return result
+
+    check_row = _insert_claim_status_check(
+        claim_id=claim_id,
+        clinic_id=clinic_id,
+        status_bucket=status_bucket,
+        category_code=category_code,
+        category_text=category_text,
+        raw_response=data,
+        source=source,
+        checked_at=now,
+    )
+    try:
+        _insert_audit_log(claim_id, "status_checked", payer_response=data)
+    except Exception:
+        logger.exception("status_checked audit log claim_id=%s", claim_id)
+
+    updated = (upd.data or [{}])[0]
+    result["ok"] = True
+    result["status_bucket"] = status_bucket
+    result["claim_status"] = updated.get("claim_status") or patch.get("claim_status")
+    result["status"] = updated.get("status") or patch.get("status") or claim.get("status")
+    result["check_id"] = check_row.get("id") if check_row else None
+    return result
+
+
+def poll_claim_status_checks(clinic_id: Optional[str] = None) -> dict[str, Any]:
+    """Batch 276/277 checks for submitted/pending claims in one clinic."""
+    cid = (clinic_id or _default_clinic_id_for_poll()).strip()
+    summary: dict[str, Any] = {
+        "clinic_id": cid or None,
+        "checked": 0,
+        "succeeded": 0,
+        "failed": 0,
+        "results": [],
+    }
+    if not cid:
+        summary["error"] = "clinic_id is required (query or ERA_DEFAULT_CLINIC_ID)"
+        return summary
+
+    api_key = _stedi_api_key()
+    if not api_key:
+        summary["error"] = "Stedi API key not configured"
+        return summary
+
+    try:
+        resp = supabase_execute(
+            lambda: (
+                supabase.table("insurance_claims")
+                .select("*")
+                .eq("clinic_id", cid)
+                .in_("status", ["submitted", "pending"])
+                .execute()
+            )
+        )
+        _handle_supabase_error(resp)
+        claims = [r for r in (resp.data or []) if isinstance(r, dict)]
+    except Exception as exc:
+        traceback.print_exc()
+        summary["error"] = str(exc)[:4000]
+        return summary
+
+    for claim in claims:
+        outcome = _run_claim_status_check(claim, source="poll", api_key=api_key)
+        summary["results"].append(outcome)
+        summary["checked"] += 1
+        if outcome.get("ok"):
+            summary["succeeded"] += 1
+        else:
+            summary["failed"] += 1
+    return summary
+
+
 def _fetch_patient_for_claim(patient_id: Any) -> Optional[dict[str, Any]]:
     if not patient_id:
         return None
@@ -1478,6 +1764,38 @@ def resubmit_claim(
     }
 
 
+@billing_cron_router.post("/claims/status/poll")
+def poll_claim_statuses(
+    clinic_id: Optional[str] = Query(None),
+    x_intake_secret: Optional[str] = Header(default=None, alias="X-Intake-Secret"),
+):
+    """Cron batch — 276/277 status checks for submitted/pending claims."""
+    try:
+        _verify_intake_secret(x_intake_secret)
+    except HTTPException as exc:
+        return {
+            "clinic_id": clinic_id,
+            "checked": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "results": [],
+            "error": str(exc.detail),
+        }
+
+    try:
+        return poll_claim_status_checks(clinic_id=clinic_id)
+    except Exception as exc:
+        traceback.print_exc()
+        return {
+            "clinic_id": clinic_id,
+            "checked": 0,
+            "succeeded": 0,
+            "failed": 0,
+            "results": [],
+            "error": str(exc)[:4000],
+        }
+
+
 @router.get("/claims/{claim_id}/status")
 async def check_claim_status(
     claim_id: str,
@@ -1489,74 +1807,64 @@ async def check_claim_status(
 
     claim = _fetch_claim(claim_id)
     _require_billing_read_access(authorization, claim.get("clinic_id"))
-    reference_number = str(claim.get("reference_number") or "").strip()
-    if not reference_number:
-        raise HTTPException(
-            status_code=400,
-            detail="Claim has not been submitted yet",
-        )
 
-    patient = _fetch_patient_for_claim(claim.get("patient_id"))
-    payload = _build_stedi_claim_status_payload(claim, patient)
-    headers = _stedi_headers(api_key)
-    try:
-        async with httpx.AsyncClient(timeout=60.0) as client:
-            response = await client.post(
-                STEDI_STATUS_URL,
-                headers=headers,
-                json=payload,
-            )
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    eligibility_err = _claim_status_check_eligibility_error(claim)
+    if eligibility_err:
+        raise HTTPException(status_code=400, detail=eligibility_err)
 
-    if response.status_code >= 400:
-        raise HTTPException(status_code=502, detail=_stedi_error_detail(response))
+    outcome = _run_claim_status_check(claim, source="manual", api_key=api_key)
+    if not outcome.get("ok"):
+        detail = str(outcome.get("error") or "Claim status check failed")
+        if "missing" in detail.lower() or "draft" in detail.lower():
+            raise HTTPException(status_code=400, detail=detail)
+        raise HTTPException(status_code=502, detail=detail)
 
     try:
-        data = response.json()
-    except Exception as exc:
-        raise HTTPException(
-            status_code=502,
-            detail="Invalid JSON response from Stedi",
-        ) from exc
+        refreshed = _fetch_claim(claim_id)
+    except HTTPException:
+        refreshed = claim
+    out = _shape_claim(refreshed)
+    out["status_bucket"] = outcome.get("status_bucket")
+    out["check_id"] = outcome.get("check_id")
+    return out
 
-    if not isinstance(data, dict):
-        raise HTTPException(status_code=502, detail="Unexpected Stedi response format")
 
-    new_status = _claim_status_from_stedi_response(data)
-    now = _now_iso()
+@router.get("/claims/{claim_id}/status-history")
+def claim_status_history(
+    claim_id: str,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    limit: int = Query(50, ge=1, le=200),
+):
+    """Return claim_status_checks rows for a claim, most recent first."""
     try:
-        upd = supabase_execute(
+        claim = _fetch_claim(claim_id)
+        _require_billing_read_access(authorization, claim.get("clinic_id"))
+        resp = supabase_execute(
             lambda: (
-                supabase.table("insurance_claims")
-                .update({"status": new_status, "updated_at": now})
-                .eq("id", claim_id)
+                supabase.table("claim_status_checks")
+                .select(
+                    "id, claim_id, clinic_id, checked_at, status_bucket, "
+                    "category_code, category_text, raw_response, source"
+                )
+                .eq("claim_id", claim_id)
+                .order("checked_at", desc=True)
+                .limit(limit)
                 .execute()
             )
         )
-        _handle_supabase_error(upd)
+        _handle_supabase_error(resp)
+        items = [r for r in (resp.data or []) if isinstance(r, dict)]
+        return {"items": items, "count": len(items), "claim_id": claim_id}
     except HTTPException:
         raise
     except Exception as exc:
-        logger.exception("check_claim_status update failed claim_id=%s", claim_id)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    try:
-        _insert_audit_log(
-            claim_id,
-            "status_checked",
-            payer_response=data,
-        )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("status_checked audit log claim_id=%s", claim_id)
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
-
-    rows = upd.data or []
-    out = _shape_claim(rows[0] if rows else {**claim, "status": new_status})
-    out["payer_status_response"] = data
-    return out
+        traceback.print_exc()
+        return {
+            "items": [],
+            "count": 0,
+            "claim_id": claim_id,
+            "error": str(exc)[:4000],
+        }
 
 
 @router.get("/claims/{claim_id}/cms1500-pdf")

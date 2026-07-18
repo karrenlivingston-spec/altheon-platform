@@ -39,6 +39,14 @@
 #   Set on this cron job directly (not inherited from web service):
 #     INTAKE_SECRET, ERA_DEFAULT_CLINIC_ID, STEDI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 
+# --- Cron job: proactive claim status polling (276/277) ---
+#
+#   Service:  claim-status-poll
+#   Command:  curl -f -X POST -H "X-Intake-Secret: $INTAKE_SECRET" "https://altheon-platform.onrender.com/billing/claims/status/poll?clinic_id=$ERA_DEFAULT_CLINIC_ID"
+#   Schedule: 0 */4 * * *
+#   (Every 4 hours UTC — set on cron job directly: INTAKE_SECRET, ERA_DEFAULT_CLINIC_ID,
+#    STEDI_API_KEY, SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY)
+
 services:
   - type: cron
     name: altheon-appointment-reminders-cron
@@ -52,6 +60,21 @@ services:
     name: era-remittance-poll
     schedule: "*/30 * * * *"
     startCommand: curl -f -X POST -H "X-Intake-Secret: $INTAKE_SECRET" "https://altheon-platform.onrender.com/api/era/poll?clinic_id=$ERA_DEFAULT_CLINIC_ID"
+    envVars:
+      - key: INTAKE_SECRET
+        sync: false
+      - key: ERA_DEFAULT_CLINIC_ID
+        sync: false
+      - key: STEDI_API_KEY
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false
+  - type: cron
+    name: claim-status-poll
+    schedule: "0 */4 * * *"
+    startCommand: curl -f -X POST -H "X-Intake-Secret: $INTAKE_SECRET" "https://altheon-platform.onrender.com/billing/claims/status/poll?clinic_id=$ERA_DEFAULT_CLINIC_ID"
     envVars:
       - key: INTAKE_SECRET
         sync: false
